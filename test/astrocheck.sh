@@ -24,6 +24,13 @@ trap 'rm -rf "$TMP"' EXIT
 mkdir "$TMP/cache"
 export XDG_CACHE_HOME="$TMP/cache"
 cp -R "$ROOT/test/astrofix" "$TMP/fix"
+# THE UNTERMINATED FENCE IS BUILT HERE, NOT COMMITTED. Extracting it DISCLOSES (guardrail 3), and the
+# disclosure writes a degrade trace to stderr on a plain build — so a committed copy would put that line
+# on every COLD `ripwire .` of this repository and into every other gate's view of test/. w3fixlegendcheck
+# asserts the stderr of --uses/--callers/--impact and went red on exactly that in CI, where the cache is
+# cold; a warm local cache hides it, because a cache hit never re-parses and so never re-discloses.
+# blindspotcheck.sh keeps its own fixtures out of the tree for the same reason.
+printf -- '---\nconst neverClosed = 1;\n<p>unterminated fence</p>\n' > "$TMP/fix/unterminated.astro"
 
 "$BIN" "$TMP/fix" --no-cache > "$TMP/map.xml"
 
