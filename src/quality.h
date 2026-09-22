@@ -1989,7 +1989,8 @@ inline std::string cacheRootKeyHex( const std::string& root )
 // not include this header; it relies on ingest.cpp including quality.h (line 13) before ingest_cache.h, and a reorder
 // that broke that fails the build on the undeclared name rather than passing.
 constexpr std::uint32_t kIngestCacheVersionMirror   = 24;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 119;  // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 120;  // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 120 = 2026-09-21 (#67): .astro frontmatter extraction
                                                           // 119 = 2026-09-20 (T13/fix3): queries/java + queries/kotlin
                                                           //    tags.scm import captures moved @reference.call ->
                                                           //    @reference.import (RefRole::Import) — an import is a

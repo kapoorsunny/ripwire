@@ -250,7 +250,12 @@ constexpr std::uint32_t kCacheVersion = 24;           // 24: RawRef gains `viaAr
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 119;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 120;          // bump on any grammar/.scm/extraction change
+                                                      // 120 = 2026-09-21 (#67, test/astrocheck.sh): .astro joins
+                                                      //       kLangTable on the TypeScript grammar, parsed through
+                                                      //       ONE included range over its `---` frontmatter. Cached
+                                                      //       .astro records from any earlier build do not exist, but
+                                                      //       every .ts record predates the range plumbing.
                                                       // 119 = 2026-09-20 (T13/fix3): queries/java/tags.scm
                                                       //   and queries/kotlin/tags.scm's import captures were
                                                       //   @reference.call — an import is a dependency edge,

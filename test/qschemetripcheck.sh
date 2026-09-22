@@ -34,6 +34,14 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-09-21, ASTRO (#67, feat/astro on main 15a20855): RE-DERIVED with UPDATE_GOLDEN=1. ONE manifest
+#   input moves: ingest_cache.h's kParserVer 119 -> 120, mirrored in quality.h's kIngestParserVerMirror in
+#   the same commit (static_assert). The bump is mandatory because `.astro` joins kLangTable and its parse
+#   is restricted to the `---` frontmatter by ts_parser_set_included_ranges — an extraction-shape change,
+#   so a cache record written by any earlier build must not be served for one. NO kQSnapCacheScheme bump:
+#   what a cached Snapshot MEANS is unchanged, only which bytes of an .astro file produce symbols.
+#   RE-DERIVE THIS ON THE TREE YOU MERGE ONTO — 120 is the next free value on 15a20855, and in-flight
+#   language lanes claim versions too.
 # 2026-09-20, TRAIN 13 (integration/train-13 on main ae6e3e7a: lane/t13-contrib-finish a7281dea,
 #   lane/t13-honesty-fixes 0cf97744): RE-DERIVED ON THE FINAL MERGED TREE with UPDATE_GOLDEN=1.
 #   TWO manifest inputs move, both from the honesty lane:

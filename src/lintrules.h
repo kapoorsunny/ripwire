@@ -149,6 +149,7 @@ inline constexpr LintExtRow kLintExtRows[] = {
     { ".go", Lang::Go },
     { ".rs", Lang::Rust },
     { ".ts", Lang::TypeScript }, { ".tsx", Lang::TypeScript }, { ".mts", Lang::TypeScript }, { ".cts", Lang::TypeScript },
+    { ".astro", Lang::TypeScript },
     { ".swift", Lang::Swift },
     { ".m", Lang::ObjC }, { ".mm", Lang::ObjC },
     { ".js", Lang::JavaScript }, { ".jsx", Lang::JavaScript }, { ".mjs", Lang::JavaScript }, { ".cjs", Lang::JavaScript },

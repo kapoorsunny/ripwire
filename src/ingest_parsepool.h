@@ -585,6 +585,14 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                     continue;
                 }
 
+                // .astro: restrict the parse to the `---` frontmatter. The guard lifts the restriction on
+                // EVERY exit from this scope, including the queued-tags `continue` below — pg.p is reused.
+                IncludedRangeGuard rangeGuard;
+                if( !restrictAstroToFrontmatter( pg.p, *le, bytes, rangeGuard ) )
+                {
+                    continue;   // no frontmatter: a template-only component carries no TypeScript
+                }
+
                 TreeGuard tree( parseTree( pg.p, bytes ) );
                 if( tree.get() == nullptr )
                 {

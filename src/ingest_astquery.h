@@ -1099,6 +1099,14 @@ std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, con
                     {
                         continue;
                     }
+                    // .astro: the SAME frontmatter restriction the ingest parse applies. Without it this pass
+                    // would read the template the symbol index cannot see, and --lint/--match would report
+                    // positions no other verb can corroborate.
+                    IncludedRangeGuard rangeGuard;
+                    if( !restrictAstroToFrontmatter( pg.p, *le, bytes, rangeGuard ) )
+                    {
+                        continue;
+                    }
                     TSTree* tree = nullptr;
                     {
                     PROFILE_SCOPE_DESCRIBE( "astQuery/worker: tree-sitter parse" );
@@ -1842,6 +1850,12 @@ SpanTierBatch spanTiersOfFiles( std::span<const std::string> diskPaths, bool use
                 }
                 const TSLanguage* g = le->grammar();
                 if( g == nullptr || !ts_parser_set_language( pg.p, g ) || !grammarAbiOk( g ) )
+                {
+                    continue;
+                }
+                // .astro: the SAME frontmatter restriction, so a span tier cannot disagree with the index.
+                IncludedRangeGuard rangeGuard;
+                if( !restrictAstroToFrontmatter( pg.p, *le, bytes, rangeGuard ) )
                 {
                     continue;
                 }
