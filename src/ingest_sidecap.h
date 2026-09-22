@@ -1232,8 +1232,13 @@ inline bool astroIsFenceLine( std::string_view src, std::size_t lineStart, std::
         && astroFenceTailIsBlank( src, lineStart + 3, lineEnd );
 }
 
-/// Byte range of an .astro file's frontmatter, with absolute points. False when there is none to parse.
-inline bool astroFrontmatterRange( std::string_view src, TSRange& out ) noexcept
+// A template-only .astro and a MALFORMED one are different answers and must not share one `false`.
+// `None` is ordinary Astro and says nothing; `Unterminated` is a file whose frontmatter we can see the
+// start of and cannot extract, which is a silent zero unless it is disclosed (guardrail: honesty in output).
+enum class AstroFrontmatter : std::uint8_t { Ok, None, Unterminated };
+
+/// Byte range of an .astro file's frontmatter, with absolute points.
+inline AstroFrontmatter astroFrontmatterRange( std::string_view src, TSRange& out ) noexcept
 {
     std::size_t pos = 0;
     if( src.size() >= 3 && src.compare( 0, 3, "\xEF\xBB\xBF" ) == 0 )   // UTF-8 BOM, then the fence
@@ -1245,7 +1250,7 @@ inline bool astroFrontmatterRange( std::string_view src, TSRange& out ) noexcept
     const std::size_t openEnd = src.find( '\n', pos );
     if( openEnd == std::string_view::npos || !astroIsFenceLine( src, pos, openEnd ) )
     {
-        return false;
+        return AstroFrontmatter::None;
     }
 
     const std::size_t contentStart = openEnd + 1;
@@ -1258,13 +1263,13 @@ inline bool astroFrontmatterRange( std::string_view src, TSRange& out ) noexcept
         {
             if( lineStart <= contentStart )
             {
-                return false;   // empty frontmatter — a zero-length range is nothing to parse
+                return AstroFrontmatter::None;   // empty frontmatter — a zero-length range is nothing to parse
             }
             out.start_byte  = static_cast<std::uint32_t>( contentStart );
             out.end_byte    = static_cast<std::uint32_t>( lineStart );
             out.start_point = TSPoint{ 1u, 0u };
             out.end_point   = TSPoint{ row, 0u };
-            return true;
+            return AstroFrontmatter::Ok;
         }
         if( nl == std::string_view::npos )
         {
@@ -1273,7 +1278,7 @@ inline bool astroFrontmatterRange( std::string_view src, TSRange& out ) noexcept
         lineStart = nl + 1;
         ++row;
     }
-    return false;   // unterminated fence: refused, never guessed
+    return AstroFrontmatter::Unterminated;   // refused, never guessed — and disclosed by the caller
 }
 
 // ts_parser_set_included_ranges is LEXER state. It survives ts_parser_parse_string, `ts_parser_reset`
@@ -1303,20 +1308,21 @@ struct IncludedRangeGuard
     }
 };
 
-/// Restrict `parser` to this file's frontmatter when it is an .astro. False = nothing to parse.
-inline bool restrictAstroToFrontmatter( TSParser* parser, const LangEntry& le, std::string_view src, IncludedRangeGuard& guard ) noexcept
+/// Restrict `parser` to this file's frontmatter when it is an .astro. `Ok` = parse; anything else = skip,
+/// and the caller must DISCLOSE an `Unterminated` rather than drop it quietly.
+inline AstroFrontmatter restrictAstroToFrontmatter( TSParser* parser, const LangEntry& le, std::string_view src, IncludedRangeGuard& guard ) noexcept
 {
     if( le.ext != kAstroExt )
     {
-        return true;
+        return AstroFrontmatter::Ok;
     }
     TSRange range{};
-    if( !astroFrontmatterRange( src, range ) )
+    const AstroFrontmatter status = astroFrontmatterRange( src, range );
+    if( status == AstroFrontmatter::Ok )
     {
-        return false;
+        guard.set( parser, range );
     }
-    guard.set( parser, range );
-    return true;
+    return status;
 }
 
 // ── THE MEMBER-MACRO RE-PARSE (src/macroreparse.h; gate test/macroreparsecheck.sh) ──────────────────────────────────

@@ -588,9 +588,20 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 // .astro: restrict the parse to the `---` frontmatter. The guard lifts the restriction on
                 // EVERY exit from this scope, including the queued-tags `continue` below — pg.p is reused.
                 IncludedRangeGuard rangeGuard;
-                if( !restrictAstroToFrontmatter( pg.p, *le, bytes, rangeGuard ) )
+                const AstroFrontmatter astro = restrictAstroToFrontmatter( pg.p, *le, bytes, rangeGuard );
+                if( astro != AstroFrontmatter::Ok )
                 {
-                    continue;   // no frontmatter: a template-only component carries no TypeScript
+                    // A template-only .astro is ordinary and says nothing. An UNTERMINATED fence is a file whose
+                    // frontmatter we can see the start of and cannot extract — a silent zero unless disclosed, so
+                    // it rides the existing extract-partial channel and lands in --skipped rather than vanishing.
+                    if( astro == AstroFrontmatter::Unterminated )
+                    {
+                        ExtractShortfall astroShort;
+                        DISCLOSE( astroShort, ExtractShortfall::DisclosureWhy::AstroFrontmatterUnterminated,
+                                  "ingest: an .astro opened a `---` fence and never closed it — frontmatter not extracted (--skipped why=extract-partial)" );
+                        notePartialExtract( scan, fileId, astroShort, bytes.size() );
+                    }
+                    continue;
                 }
 
                 TreeGuard tree( parseTree( pg.p, bytes ) );

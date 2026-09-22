@@ -307,8 +307,12 @@ WHAT IT CANNOT SEE, and every item is a real loss, not a rounding:
 - **Most recovered callers are `<file-scope>`.** Astro frontmatter is module-level code, so its top-level
   calls are owned by the module-scope node issue #60 mints, not by a named function.
 - **A `---` inside a template literal or a comment in the frontmatter ends the block early.** The scan is
-  lexical. A file whose frontmatter is refused outright (no fence, or an unterminated one) contributes no
-  symbols rather than a guess; `test/astrocheck.sh` pins both shapes.
+  lexical, and it contributes no symbols rather than a guess. The two refusals are NOT the same answer: a
+  file with no fence at all is an ordinary template-only component and is silent, while a file that opens
+  `---` and never closes it is frontmatter we can see the start of and cannot extract — that one is
+  disclosed through `ExtractShortfall` and appears as `<f why="extract-partial"/>` under `--skipped`,
+  because a silent zero there is exactly what the honesty guardrail refuses. `test/astrocheck.sh` pins
+  both shapes, including that the ordinary ones stay undisclosed.
 - No Astro grammar is vendored. `virchau13/tree-sitter-astro` at the revision the ecosystem pins
   (`213f6e69`, 2025-04-19) lexes the whole frontmatter as ONE opaque external token and ships no `tags.scm`,
   so it yields no definitions; `PRRPCHT/tree-sitter-astro-next` has the same design and no adoption.

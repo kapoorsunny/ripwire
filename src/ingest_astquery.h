@@ -1103,7 +1103,7 @@ std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, con
                     // would read the template the symbol index cannot see, and --lint/--match would report
                     // positions no other verb can corroborate.
                     IncludedRangeGuard rangeGuard;
-                    if( !restrictAstroToFrontmatter( pg.p, *le, bytes, rangeGuard ) )
+                    if( restrictAstroToFrontmatter( pg.p, *le, bytes, rangeGuard ) != AstroFrontmatter::Ok )
                     {
                         continue;
                     }
@@ -1855,7 +1855,7 @@ SpanTierBatch spanTiersOfFiles( std::span<const std::string> diskPaths, bool use
                 }
                 // .astro: the SAME frontmatter restriction, so a span tier cannot disagree with the index.
                 IncludedRangeGuard rangeGuard;
-                if( !restrictAstroToFrontmatter( pg.p, *le, bytes, rangeGuard ) )
+                if( restrictAstroToFrontmatter( pg.p, *le, bytes, rangeGuard ) != AstroFrontmatter::Ok )
                 {
                     continue;
                 }

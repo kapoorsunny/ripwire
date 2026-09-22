@@ -86,17 +86,64 @@ assert decoy.get('count') == '0', ('the decoy won an edge', decoy.attrib)
 print('  PASS an .astro frontmatter call reaches a .ts service (--uses and --callers), on absolute lines, and the decoy wins nothing')
 PY
 
+# (6b) CRLF LINES. A CRLF frontmatter is where an off-by-one in the row count would surface first, so the
+# CRLF file's call site is pinned by LINE and not merely by "it resolved".
+"$BIN" "$TMP/fix" --no-cache --uses=astroTwice > "$TMP/crlfuses.xml"
+python3 - "$TMP/crlfuses.xml" <<'CRLFPY'
+import sys, xml.etree.ElementTree as ET
+sites = {(u.get('p'), u.get('in_id')) for u in ET.parse(sys.argv[1]).getroot().iter('u')}
+assert ('crlf.astro:3', '<file-scope>') in sites, ('CRLF frontmatter reported the wrong line', sorted(sites))
+print('  PASS a CRLF frontmatter call reports its absolute line (crlf.astro:3)')
+CRLFPY
+
+# (6c) AN UNTERMINATED FENCE IS DISCLOSED, NOT DROPPED. A template-only .astro is ordinary Astro and says
+# nothing; a file that opens `---` and never closes it has frontmatter we can see the start of and cannot
+# extract, and a silent zero there is what guardrail 3 refuses. It rides extract-partial into --skipped.
+"$BIN" "$TMP/fix" --no-cache --skipped > "$TMP/skipped.xml"
+python3 - "$TMP/skipped.xml" <<'SKIPPY'
+import sys, xml.etree.ElementTree as ET
+doc = ET.parse(sys.argv[1]).getroot()
+# --skipped is emitted inside a <ctx> wrapper; find the element that owns the counters.
+root = doc if doc.tag == 'skipped' else doc.find('.//skipped')
+assert root is not None, 'no <skipped> element in the document'
+rows = {(f.get('p'), f.get('why')) for f in root.iter('f')}
+assert ('unterminated.astro', 'extract-partial') in rows, ('an unterminated .astro fence was dropped with no disclosure', sorted(rows))
+assert int(root.get('extract_partial') or 0) >= 1, root.attrib
+# ...and the ORDINARY shapes must NOT be disclosed, or the signal means nothing.
+for quiet in ('templateonly.astro', 'page.astro', 'leak.astro', 'crlf.astro'):
+    assert not [q for (q, w) in rows if q == quiet], f'{quiet} was disclosed as a shortfall; only the unterminated fence should be'
+print('  PASS an unterminated `---` fence is disclosed as extract-partial, and ordinary .astro files are not')
+SKIPPY
+
 # (7) THE RESET. Interleave .astro files with .ts files whose marker sits at the END: a leaked included
 # range would truncate the .ts lex and the marker would vanish. Built here, not committed — 80 files would
 # join every other gate's view of test/.
+#
+# THE FILE SIZES ARE LOAD-BEARING, and this arm was VACUOUS without them. The cold parse pool hands
+# work out LONGEST-FILE-FIRST (ingest_parsepool.h's parseOrder stable_sort, fileByteSize[a] > [b]), so
+# if the .ts files are the larger ones EVERY .ts is drawn before the first .astro and no worker ever
+# performs the .astro -> .ts transition this arm exists to test. Proven: with the range reset deleted,
+# the earlier small-.astro fixture still reported 40/40. Each .astro is therefore padded — in its
+# TEMPLATE, which keeps the included range tiny while the FILE is large — to sort ahead of every .ts.
 mkdir -p "$TMP/reset"
 for i in $(seq -w 1 40); do
-    printf -- '---\nconst a%s = 1;\n---\n<p>t</p>\n' "$i" > "$TMP/reset/p$i.astro"
+    { printf -- '---\nconst a%s = 1;\n---\n' "$i"
+      for j in $(seq 1 120); do printf '<p>template padding line %s, outside the frontmatter range</p>\n' "$j"; done
+    } > "$TMP/reset/p$i.astro"
     { printf '// padding: a leaked range would truncate this file before its marker\n'
       for j in $(seq 1 60); do printf '// filler line %s\n' "$j"; done
       printf 'export function tailMarker%s(): number { return 1; }\n' "$i"
     } > "$TMP/reset/m$i.ts"
 done
+# the premise the arm depends on: every .astro really is larger than every .ts, so the size-descending
+# work order really does put an .astro before a .ts inside one worker.
+_minAstro=$( for f in "$TMP"/reset/*.astro; do wc -c < "$f"; done | sort -n | head -1 )
+_maxTs=$(    for f in "$TMP"/reset/*.ts;    do wc -c < "$f"; done | sort -n | tail -1 )
+if [ "$_minAstro" -le "$_maxTs" ]; then
+    printf '  FAIL  reset fixture premise broken: smallest .astro (%s B) is not larger than largest .ts (%s B),\n' "$_minAstro" "$_maxTs"
+    printf '        so the longest-file-first work order never draws a .ts after an .astro and the arm is vacuous\n'
+    exit 1
+fi
 "$BIN" "$TMP/reset" --no-cache > "$TMP/reset.xml"
 python3 - "$TMP/reset.xml" <<'PY'
 import sys, xml.etree.ElementTree as ET

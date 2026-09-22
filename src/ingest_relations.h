@@ -2158,6 +2158,7 @@ struct ExtractShortfall
         TagsQueryUnavailable,     // the grammar's tags query was not prewarmed: no definition was extracted
         ElixirScopeTooDeep,       // an Elixir module/alias chain past the resolver's depth bound: scope or name lost
         ImportNestingTooDeep,     // imports nested past kMaxImportContainerDepth containers: the deeper ones not captured
+        AstroFrontmatterUnterminated,   // an .astro opened a `---` fence and never closed it: its frontmatter is not extracted
     };
     bool isShort = false;
     void disclose( DisclosureWhy ) noexcept   // every reason records the same fact
