@@ -29,6 +29,7 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
   status only. A bare repository, or a cwd inside a work tree's own `.git` directory, prints `false`
   with status 0 there, so the primer could still run in a population it was never meant to reach (the
   same shape CodeRabbit flagged and 1cd00d4d fixed in the two route hooks). It now reads the answer.
+- CONTRIBUTING.md's Windows-matrix note named a stale gate count (647); the live count is 648.
 
 ## [0.6.3] — 2026-09-25
 
