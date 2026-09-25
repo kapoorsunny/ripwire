@@ -1633,6 +1633,13 @@ inline ContentIdIndex contentIdsBySym( const IngestResult& ing, const Graph& g, 
 // TMPDIR/XDG_CACHE_HOME tiers too UNLESS the value they hold is itself "/tmp"-shaped (a plausible real case:
 // Git Bash sets TMPDIR=/tmp) — rebasing unconditionally, regardless of which tier produced the string, is
 // what makes that case correct too, rather than special-casing only the hardcoded third tier.
+//
+// #334, THE WINDOWS LAST RUNG, RULED AND KEPT: the third tier's "/tmp" rebases to GetTempPathW, whose documented order
+// is TMP, TEMP, USERPROFILE, then the Windows directory. So with TMPDIR, TEMP and TMP all unset the cache lands in the
+// profile root (%USERPROFILE%\ripwire-<uid>), not %LOCALAPPDATA%. That is kept: it is what every Win32 program calls
+// "temp" in that environment, it is per-user, --doctor's cache-dir row discloses it, and a Windows-only
+// %LOCALAPPDATA%\ripwire rung would break this ladder's one-shape-everywhere rule for an environment Windows itself
+// never produces (it sets TEMP and TMP per user). README's Windows section says where the cache goes.
 inline std::string cacheDirLadder()
 {
     std::string d;

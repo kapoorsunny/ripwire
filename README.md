@@ -912,7 +912,8 @@ export PATH="$HOME/.local/bin:$PATH"      # not on PATH by default on macOS or m
 It is built with clang-cl against the static C runtime, so it needs no Visual C++ Redistributable, and like the Linux
 x64 binary it needs an x86-64-v3 (AVX2) CPU. CI unzips and exercises it on every train, including a byte-for-byte
 comparison of its output with Linux's, but no maintainer runs Windows, so treat it as a preview until Windows users
-report back. The exe is not code-signed, so SmartScreen may warn on first run. In PowerShell:
+report back. The exe is not code-signed. `Expand-Archive` does not pass the download's Mark-of-the-Web on to the
+files it extracts, so SmartScreen does not prompt for an exe unpacked this way; no prompt is not a verdict. In PowerShell:
 
 ```powershell
 $v = "0.6.3"; $a = "ripwire-$v-windows-x64"; $u = "https://github.com/redhat-et/ripwire/releases/download/v$v"
@@ -925,11 +926,17 @@ $env:Path = "$bin;$env:Path"   # this window too; new windows read the user Path
 ripwire --version
 ```
 
+- **The hash check** passes because `-eq` ignores case: `Get-FileHash` prints upper-case hex and the `.sha256` file
+  is lower-case. For a case-sensitive compare, use `.Hash.ToLower() -ceq`.
+- **Comparing two outputs in Git Bash:** use `cmp`. There `fc` is a shell builtin (it replays history) and compares
+  nothing; the Windows tool is `fc.exe`, run as `MSYS_NO_PATHCONV=1 fc.exe /b a b` so `/b` is not rewritten as a path.
 - **Git for Windows** is needed for the git-history features (churn, `--situ`, the `git` row of `--doctor`) and for
   the skills installer. The map itself runs without it.
-- **`ripwire . --doctor`**: every row should read `ok="1"` except `binary-path`, which Windows marks
-  `degraded="1"` and may report as failing even when `ripwire` is on `Path` (its PATH lookup is a known gap).
-  The cache lives in `%LOCALAPPDATA%\Temp\ripwire-<uid>`.
+- **`ripwire . --doctor`**: every row should read `ok="1"`. `binary-path` stays marked `degraded="1"` on Windows
+  (it asks Git Bash's `which`). When it fails, `which=` names the `ripwire` that `Path` finds first, and
+  `which_version=` is what that one prints for `--version`. The cache lives in `%LOCALAPPDATA%\Temp\ripwire-<uid>`
+  (your `TEMP`). With `TMPDIR`, `TEMP` and `TMP` all unset, Windows' own temp-directory rule falls back to your profile
+  folder, so the cache is `%USERPROFILE%\ripwire-<uid>`; the `cache-dir` row names the directory either way.
 - **Agent skills** (Claude Code, Codex): from Git Bash, in the unzipped folder, `bash skills/install.sh` (Claude Code)
   or `bash skills/install.sh --codex`. Or copy them by hand in PowerShell:
   `New-Item -ItemType Directory -Force "$HOME\.claude\skills" | Out-Null; Copy-Item -Recurse -Force "$bin\skills\ripwire-*" "$HOME\.claude\skills\"`
@@ -2644,11 +2651,12 @@ a RHEL 9 userland, both build flavours, and the fallback-emitter build — so th
 on every commit, not only when you check it. To re-check it on your own tree:
 
 ```bash
-ripwire . > a
-ripwire . > b
-diff -q a b              # two runs, byte-identical
-ripwire . --no-cache > c
-diff -q a c              # and the warm run equals the cold one
+t=$(mktemp -d)           # outside the tree: an output written inside it is crawled by the next run
+ripwire . > "$t/a"
+ripwire . > "$t/b"
+diff -q "$t/a" "$t/b"    # two runs, byte-identical
+ripwire . --no-cache > "$t/c"
+diff -q "$t/a" "$t/c"    # and the warm run equals the cold one
 ```
 
 Neither diff may report a difference.

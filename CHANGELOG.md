@@ -126,6 +126,44 @@ not resolved (that is part 2); they are now counted. A tree without one is byte-
   `--deps` rows and the config files agrees: mlflow exactly, Chainlit within 1, and Streamlit within the
   48 rows `--deps` does not print (it lists at most 40 per file).
 
+### Fixed — Windows findings from the 0.6.3 preview test (#334, reported by @elsRobin)
+
+- `skills/install.sh` no longer reports empty directories as installed skills. On Windows without symlink
+  privilege, Git Bash's `ln -sfn` exits 0 and leaves an empty directory; the installer printed `installed`
+  for each one, wrote all of them to the manifest and announced them as active. It now checks each link by
+  its result (a symlink whose `SKILL.md` reads back). When the link did not take, it copies the skill and
+  prints `copied`. When the copy fails too, it prints `FAILED`, leaves the skill out of the count and the
+  manifest, and exits 1. The prune step recognises its own copies (a marker file, an empty leftover
+  directory, or a name its last manifest listed) and leaves any other `ripwire-*` directory alone; before,
+  a user's own `ripwire-*` directory made the installer stop with `rm: … is a directory`.
+- A cache blob written by a different ripwire build is now refused with both numbers on the line:
+  `format-version — not used; … rewrites it (blob format 24, this binary 25: another ripwire build wrote
+  it; …)`. The
+  per-tree cache path does not depend on the build, so two builds that alternate on one tree (0.6.2 and
+  0.6.3 in the report) each refuse and rewrite the other's cache and re-parse on every run. One build run
+  twice in a row reuses its own cache, on Windows as elsewhere. The Windows CI job now checks that
+  directly: the second run's `RIPWIRE_CACHE_STATS` line must show every file reused and none re-parsed.
+- `--doctor`'s `binary-path` row, when a different `ripwire` comes first on PATH, now names that
+  binary's build: `which_version=` is the line it prints for `--version`. Its `STALE:` hint goes by the
+  release numbers the two binaries state, where it used to go by mtime. A 0.6.2 copied onto PATH after
+  0.6.3 was installed had the newer mtime, so the hint called the running 0.6.3 stale and said to run the
+  0.6.2. On Windows, Git Bash's `which` prints the name without `.exe`; the row now also tries the `.exe`
+  name before it reports `on_path="0"`, so it compares the two files there too. It still marks
+  `degraded="1"` on Windows.
+- The determinism check in AGENTS.md, CLAUDE.md, CONTRIBUTING, README, `--help`, the skills and the docs
+  now writes its two outputs outside the crawled tree:
+  `t=$(mktemp -d); ripwire . >"$t/a"; ripwire . >"$t/b"; diff -q "$t/a" "$t/b"`. Written inside it, the
+  second run crawled the first run's output as a new unindexed text file, and the map header's top-6
+  `unindexed=` list could change between the two runs. The engine was deterministic; the recipe was not.
+  The top-6 cut itself is well-defined (count descending, then extension name) and is unchanged.
+- The Windows cache location with `TMPDIR`, `TEMP` and `TMP` all unset is now documented and kept as it
+  is. Windows' own temp-directory rule then falls back to the profile folder, so the cache is
+  `%USERPROFILE%\ripwire-<uid>`. That is per-user, and `--doctor`'s `cache-dir` row names it.
+- README's Windows section adds three notes. The hash check passes because `-eq` ignores case; use
+  `.Hash.ToLower() -ceq` for a case-sensitive compare. `Expand-Archive` does not pass Mark-of-the-Web on
+  to the files it extracts, so no SmartScreen prompt is not a verdict on the exe. In Git Bash, `fc` is a
+  shell builtin, so compare outputs with `cmp`, or with `MSYS_NO_PATHCONV=1 fc.exe /b`.
+
 ## [0.6.3] — 2026-09-25
 
 ### Fixed — silent cuts in the report verbs and the MCP twins now say what they dropped

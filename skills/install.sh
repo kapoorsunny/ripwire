@@ -307,6 +307,29 @@ case "$mode" in
 esac
 mkdir -p "$dst"
 
+# ── WHAT COUNTS AS OURS, AND WHY A LINK IS VERIFIED (issue #334, 2026-09-25). On Windows without symlink
+#    privilege (Developer Mode off), Git Bash's `ln -sfn DIR DEST` EXITS 0 and leaves an EMPTY DIRECTORY, even
+#    under MSYS=winsymlinks:nativestrict. This installer used to trust that exit status: it printed `installed`
+#    sixteen times, wrote all sixteen names to the manifest and announced "16 ripwire skills active" over sixteen
+#    empty directories. So a link is now checked by its RESULT (a symlink whose SKILL.md reads back); when it
+#    did not take, the skill is COPIED (`cp -R`) and reported as `copied`; when the copy fails too, it is
+#    reported as `FAILED`, left out of the count and the manifest, and the run exits 1.
+#    A copy is a real directory, so the prune below must recognise it as ours without ever touching a user's
+#    own skill that happens to share the ripwire- prefix. A real directory is ours when it carries the copy
+#    marker, when it is EMPTY (the failed link an older installer left behind), or when the manifest this
+#    installer wrote last time lists it (a deep copy Git Bash made on its own). Anything else is left alone.
+#    test/skillinstallcheck.sh section (F) drives all of it with an `ln` that behaves like that Git Bash.
+copyMarker=".ripwire-installed-copy"
+prevManifest="$dst/.ripwire-manifest-v1"
+in_prev_manifest() { [ -f "$prevManifest" ] && grep -qx "skill=$1" "$prevManifest"; }
+dir_is_ours()
+{
+    [ -f "$1/$copyMarker" ] || [ -z "$( ls -A "$1" 2>/dev/null )" ] || in_prev_manifest "$( basename "$1" )"
+}
+# a real directory this installer did not create — the one shape it must never remove
+foreign_dir() { [ -d "$1" ] && [ ! -L "$1" ] && ! dir_is_ours "$1"; }
+remove_ours() { if [ -d "$1" ] && [ ! -L "$1" ]; then rm -rf "$1"; else rm -f "$1"; fi; }
+
 # PRUNE first: remove any installed ripwire-* skill that this repo no longer ships (deleted or renamed) —
 # otherwise a dangling symlink (e.g. a skill removed in a consolidation) lingers forever and an agent
 # routing to it hits an error and learns to distrust the whole family. `-L` also catches BROKEN symlinks
@@ -324,6 +347,7 @@ pruned=0
 for existing in "$dst"/ripwire-*; do
     [ -e "$existing" ] || [ -L "$existing" ] || continue      # skip the literal glob when nothing matches
     name="$( basename "$existing" )"
+    why=""
     if [ ! -d "$src/$name" ]; then
         # Hermes-native skills live at skills/hermes/<name>, not skills/<name>: a linked one is still
         # shipped, so it is kept — unless it stopped being wanted (contributor-only without
@@ -331,17 +355,59 @@ for existing in "$dst"/ripwire-*; do
         if [ "$mode" = "hermes" ] && [ -d "$src/hermes/$name" ] && wanted_skill "$src/hermes/$name"; then
             continue
         fi
-        rm -f "$existing"
-        echo "pruned stale $name (no longer shipped)"
-        pruned=$(( pruned + 1 ))
+        why="stale $name (no longer shipped)"
     elif ! wanted_skill "$src/$name"; then
-        rm -f "$existing"
-        echo "pruned $name (contributor-only; pass --contributor to activate it)"
-        pruned=$(( pruned + 1 ))
+        why="$name (contributor-only; pass --contributor to activate it)"
     fi
+    [ -n "$why" ] || continue
+    if foreign_dir "$existing"; then
+        # Before #334 this was `rm -f` on a directory, which failed and aborted the whole install under set -e.
+        echo "kept $name (a directory this installer did not create; remove it yourself if it is stale)"
+        continue
+    fi
+    remove_ours "$existing"
+    echo "pruned $why"
+    pruned=$(( pruned + 1 ))
 done
 
+# install_skill SRC NAME [NOTE] — link SRC into $dst/NAME, verify the link by its result, fall back to a
+# copy, and say which of the three happened. Returns 1 only when the skill is not usable at all.
 count=0
+copied=0
+failed=0
+installedNames=""
+install_skill()
+{
+    target="$dst/$2"
+    if foreign_dir "$target"; then
+        # `ln -sfn` onto a real directory links INSIDE it and reports success; refuse instead of guessing.
+        echo "FAILED $2: $target is a directory this installer did not create; move it aside and re-run" >&2
+        failed=$(( failed + 1 ))
+        return 1
+    fi
+    if [ -e "$target" ] || [ -L "$target" ]; then
+        remove_ours "$target"
+    fi
+    if ln -sfn "$1" "$target" 2>/dev/null && [ -L "$target" ] && [ -f "$target/SKILL.md" ]; then
+        echo "installed $2 -> $target${3:-}"
+    else
+        [ -e "$target" ] || [ -L "$target" ] && remove_ours "$target"
+        if cp -R "${1%/}" "$target" 2>/dev/null && cmp -s "$1/SKILL.md" "$target/SKILL.md" \
+           && : >"$target/$copyMarker" 2>/dev/null; then
+            echo "copied $2 -> $target${3:-} (a symlink did not take here, e.g. Windows without Developer Mode; re-run after updating ripwire to refresh the copy)"
+            copied=$(( copied + 1 ))
+        else
+            [ -e "$target" ] || [ -L "$target" ] && remove_ours "$target"
+            echo "FAILED $2: neither a symlink nor a copy produced a readable $target/SKILL.md" >&2
+            failed=$(( failed + 1 ))
+            return 1
+        fi
+    fi
+    count=$(( count + 1 ))
+    installedNames="$installedNames$2
+"
+}
+
 skipped=0
 for d in "$src"/ripwire-*/; do
     name="$( basename "$d" )"
@@ -350,9 +416,7 @@ for d in "$src"/ripwire-*/; do
         skipped=$(( skipped + 1 ))
         continue
     fi
-    ln -sfn "$d" "$dst/$name"
-    echo "installed $name -> $dst/$name"
-    count=$(( count + 1 ))
+    install_skill "$d" "$name" || true
 done
 
 # Hermes loads the flat Agent-Skills-standard set AND Hermes-native skills (skills/hermes/ripwire-*, e.g.
@@ -375,33 +439,26 @@ if [ "$mode" = "hermes" ]; then
             skipped=$(( skipped + 1 ))
             continue
         fi
-        ln -sfn "$nd" "$dst/$nname"
-        echo "installed $nname -> $dst/$nname (Hermes-native skill)"
-        count=$(( count + 1 ))
+        install_skill "$nd" "$nname" " (Hermes-native skill)" || true
     done
 fi
 
-# The active skill directory is an agent-facing API surface, not a bag of best-effort links. Record the
-# exact shipped set only after every link succeeds so `ripwire --doctor --agent=codex` can distinguish a
-# complete install from a stale/missing/extra skill without trusting the checkout it came from.
+# The active skill directory is an agent-facing API surface, not a bag of best-effort links. The manifest
+# records exactly the skills that were VERIFIED usable above (linked or copied), so `ripwire --doctor
+# --agent=codex` can distinguish a complete install from a stale/missing/extra skill without trusting the
+# checkout it came from. A skill that FAILED is not in it: listing it is the #334 lie in another file.
 manifestTmp="$( mktemp "$dst/.ripwire-manifest-v1.tmp.XXXXXX" )"
 {
     echo 'version=1'
-    for d in "$src"/ripwire-*/; do
-        wanted_skill "$d" && echo "skill=$( basename "$d" )"
-    done
-    if [ "$mode" = "hermes" ]; then
-        for nd in "$src"/hermes/ripwire-*/; do        # same name scope as the install loop above
-            [ -d "$nd" ] || continue
-            [ -f "$nd/SKILL.md" ] || continue
-            nname="$( basename "$nd" )"
-            [ -d "$src/$nname" ] && continue
-            wanted_skill "$nd" && echo "skill=$nname"
-        done
-    fi
+    printf '%s' "$installedNames" | while IFS= read -r n; do echo "skill=$n"; done
 } >"$manifestTmp"
 mv "$manifestTmp" "$dst/.ripwire-manifest-v1"
-echo "done. $count ripwire skills active in every session (${pruned} pruned, ${skipped} contributor-only skipped) — every ripwire-* installed above."
+if [ "$failed" -gt 0 ]; then
+    # Not `exit 1` here: a requested --hook is still registered below, and the status is set at the very end.
+    echo "skills/install.sh: $failed ripwire skill(s) FAILED to install into $dst (listed above); $count usable, ${copied} of them copied." >&2
+else
+    echo "done. $count ripwire skills active in every session (${copied} copied, ${pruned} pruned, ${skipped} contributor-only skipped) — every ripwire-* installed above."
+fi
 
 if [ "$wantHook" -eq 1 ]; then
     case "$mode" in
@@ -412,3 +469,6 @@ if [ "$wantHook" -eq 1 ]; then
         path) echo "skills/install.sh: --hook needs --claude or --codex, not an explicit skill path" >&2; exit 2 ;;
     esac
 fi
+
+# A skill that FAILED above makes the whole run fail, after everything else it was asked to do (#334).
+[ "$failed" -eq 0 ] || exit 1

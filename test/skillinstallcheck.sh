@@ -291,4 +291,83 @@ OC_HOOK_STATUS=$?
     && ok "(E) the refused run contained its skill links to the temp HOME" \
     || no "(E) the refused run linked nowhere visible — HOME= containment may be broken"
 
+# ── (F) a host where `ln -s` "succeeds" without linking (issue #334) ─────────────────────────────────────────
+# Git Bash on Windows without symlink privilege: `ln -sfn DIR DEST` exits 0 and leaves an EMPTY directory. The
+# installer used to trust that status and announce sixteen empty directories as active skills. The shim below is
+# that `ln`, put first on PATH; the installer must verify the result, copy instead, and say so. A second shim makes
+# `cp` fail too, and then the run must fail rather than count or declare the skill.
+F="$TMP/nolink"; mkdir -p "$F/shim" "$F/shim-nocp"
+cat >"$F/shim/ln" <<'LNSHIM'
+#!/bin/sh
+# Git Bash without SeCreateSymbolicLinkPrivilege (#334): exit 0, and a directory "link" is an EMPTY directory.
+for last in "$@"; do :; done
+[ -e "$last" ] || [ -L "$last" ] || mkdir -p "$last"
+exit 0
+LNSHIM
+printf '#!/bin/sh\nexit 1\n' >"$F/shim-nocp/cp"
+cp "$F/shim/ln" "$F/shim-nocp/ln"
+chmod +x "$F/shim/ln" "$F/shim-nocp/ln" "$F/shim-nocp/cp"
+FD="$F/skills"
+PATH="$F/shim:$PATH" bash "$SK/install.sh" "$FD" >"$F/out1" 2>&1
+F_RC=$?
+usable=0; for s in "$FD"/ripwire-*/SKILL.md; do [ -f "$s" ] && usable=$(( usable + 1 )); done
+nCopied="$( grep -c '^copied ripwire-' "$F/out1" )"
+nInstalled="$( grep -c '^installed ripwire-' "$F/out1" )"
+{ [ "$F_RC" -eq 0 ] && [ "$usable" -eq "$shipped" ]; } \
+    && ok "(F) with an ln that exits 0 but links nothing, every one of the $shipped skills still lands with a readable SKILL.md" \
+    || no "(F) with a no-op ln: rc=$F_RC, $usable of $shipped skills have a readable SKILL.md (the #334 empty-directory install)"
+{ [ "$nCopied" -eq "$shipped" ] && [ "$nInstalled" -eq 0 ] && grep -q "($shipped copied," "$F/out1"; } \
+    && ok "(F) each such skill is reported as copied, never as installed/linked, and the summary counts the copies" \
+    || no "(F) the report does not say what happened: copied=$nCopied installed=$nInstalled; $( tail -1 "$F/out1" )"
+declaredF="$( grep -c '^skill=' "$FD/.ripwire-manifest-v1" 2>/dev/null )"
+[ "$declaredF" = "$usable" ] \
+    && ok "(F) the manifest declares exactly the $usable usable copies" \
+    || no "(F) the manifest declares $declaredF skills over $usable usable ones"
+PATH="$F/shim:$PATH" bash "$SK/install.sh" "$FD" >"$F/out2" 2>&1
+F_RC2=$?
+nested="$( find "$FD" -mindepth 2 -maxdepth 2 -name 'ripwire-*' | wc -l | tr -d ' ' )"
+{ [ "$F_RC2" -eq 0 ] && [ "$nested" -eq 0 ] && [ "$( grep -c '^copied ripwire-' "$F/out2" )" -eq "$shipped" ]; } \
+    && ok "(F) a re-run on the same host refreshes the copies in place (no nested ripwire-*/ripwire-* directory)" \
+    || no "(F) a re-run over the copies: rc=$F_RC2, nested=$nested, $( tail -1 "$F/out2" )"
+bash "$SK/install.sh" "$FD" >"$F/out3" 2>&1
+links=0; for l in "$FD"/ripwire-*; do [ -L "$l" ] && [ -f "$l/SKILL.md" ] && links=$(( links + 1 )); done
+[ "$links" -eq "$shipped" ] \
+    && ok "(F) once symlinks work, a re-run replaces every copy with a live link (the copies were recognised as ours)" \
+    || no "(F) after symlinks started working, $links of $shipped skills are live links"
+# 0.6.3's leftovers: empty directories and a manifest that lists them. The re-run must replace them, not link inside them.
+E="$F/leftover"; mkdir -p "$E"
+PATH="$F/shim:$PATH" bash "$SK/install.sh" "$E" >/dev/null 2>&1
+for c in "$E"/ripwire-*/; do rm -rf "$c"; mkdir "$c"; done
+bash "$SK/install.sh" "$E" >"$F/out4" 2>&1
+links=0; for l in "$E"/ripwire-*; do [ -L "$l" ] && [ -f "$l/SKILL.md" ] && links=$(( links + 1 )); done
+[ "$links" -eq "$shipped" ] \
+    && ok "(F) the empty directories an earlier installer left behind are replaced by live links" \
+    || no "(F) over empty leftover directories only $links of $shipped skills became live links"
+# The user's own ripwire-mine (not shipped, not ours) survives, and the install completes around it; a stale copy of ours is pruned.
+U="$F/user"; mkdir -p "$U/ripwire-mine" "$U/ripwire-retired"
+printf 'mine\n' >"$U/ripwire-mine/SKILL.md"
+printf 'old\n' >"$U/ripwire-retired/SKILL.md"; : >"$U/ripwire-retired/.ripwire-installed-copy"
+bash "$SK/install.sh" "$U" >"$F/out5" 2>&1
+U_RC=$?
+{ [ "$U_RC" -eq 0 ] && [ "$( cat "$U/ripwire-mine/SKILL.md" 2>/dev/null )" = "mine" ] && [ -L "$U/ripwire-router" ]; } \
+    && ok "(F) a user's own ripwire-mine directory survives, and the install completes around it" \
+    || no "(F) with a user's own ripwire-mine present: rc=$U_RC, mine=$( cat "$U/ripwire-mine/SKILL.md" 2>/dev/null ), $( grep -m1 -i 'rm:\|FAILED' "$F/out5" )"
+[ ! -e "$U/ripwire-retired" ] \
+    && ok "(F) a copy this installer made of a skill no longer shipped is pruned like a stale link" \
+    || no "(F) a stale copy carrying the installer's marker was not pruned"
+grep -qx 'skill=ripwire-mine' "$U/.ripwire-manifest-v1" \
+    && no "(F) the manifest claims the user's own ripwire-mine" \
+    || ok "(F) the manifest does not claim the user's own ripwire-mine"
+# Both link and copy fail: a failure, not a success — excluded from the count and the manifest, exit non-zero.
+X="$F/nocopy"
+PATH="$F/shim-nocp:$PATH" bash "$SK/install.sh" "$X" >"$F/out6" 2>&1
+X_RC=$?
+leftX=0; for c in "$X"/ripwire-*; do [ -e "$c" ] && leftX=$(( leftX + 1 )); done
+{ [ "$X_RC" -ne 0 ] && [ "$( grep -c '^FAILED ripwire-' "$F/out6" )" -eq "$shipped" ] && ! grep -q 'skills active' "$F/out6"; } \
+    && ok "(F) when neither a link nor a copy works, every skill is reported FAILED and the run exits $X_RC" \
+    || no "(F) link and copy both failing: rc=$X_RC, $( grep -c '^FAILED' "$F/out6" ) FAILED lines, $( tail -1 "$F/out6" )"
+{ [ "$leftX" -eq 0 ] && ! grep -q '^skill=' "$X/.ripwire-manifest-v1" 2>/dev/null; } \
+    && ok "(F) a failed skill leaves no directory behind and is not declared in the manifest" \
+    || no "(F) after total failure: $leftX ripwire-* entries remain; manifest: $( grep -c '^skill=' "$X/.ripwire-manifest-v1" 2>/dev/null )"
+
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }
