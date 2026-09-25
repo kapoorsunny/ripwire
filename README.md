@@ -943,7 +943,8 @@ export PATH="$HOME/.local/bin:$PATH"      # not on PATH by default on macOS or m
 It is built with clang-cl against the static C runtime, so it needs no Visual C++ Redistributable, and like the Linux
 x64 binary it needs an x86-64-v3 (AVX2) CPU. CI unzips and exercises it on every train, including a byte-for-byte
 comparison of its output with Linux's, but no maintainer runs Windows, so treat it as a preview until Windows users
-report back. The exe is not code-signed, so SmartScreen may warn on first run. In PowerShell:
+report back. The exe is not code-signed. `Expand-Archive` does not pass the download's Mark-of-the-Web on to the
+files it extracts, so SmartScreen does not prompt for an exe unpacked this way; no prompt is not a verdict. In PowerShell:
 
 ```powershell
 $v = "0.6.3"; $a = "ripwire-$v-windows-x64"; $u = "https://github.com/redhat-et/ripwire/releases/download/v$v"
@@ -956,6 +957,10 @@ $env:Path = "$bin;$env:Path"   # this window too; new windows read the user Path
 ripwire --version
 ```
 
+- **The hash check** passes because `-eq` ignores case: `Get-FileHash` prints upper-case hex and the `.sha256` file
+  is lower-case. For a case-sensitive compare, use `.Hash.ToLower() -ceq`.
+- **Comparing two outputs in Git Bash:** use `cmp`. There `fc` is a shell builtin (it replays history) and compares
+  nothing; the Windows tool is `fc.exe`, run as `MSYS_NO_PATHCONV=1 fc.exe /b a b` so `/b` is not rewritten as a path.
 - **Git for Windows** is needed for the git-history features (churn, `--situ`, the `git` row of `--doctor`) and for
   the skills installer. The map itself runs without it.
 - **`ripwire . --doctor`**: every row should read `ok="1"`. `binary-path` stays marked `degraded="1"` on Windows

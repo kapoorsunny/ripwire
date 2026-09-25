@@ -48,6 +48,10 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 - The Windows cache location with `TMPDIR`, `TEMP` and `TMP` all unset is now documented and kept as it
   is. Windows' own temp-directory rule then falls back to the profile folder, so the cache is
   `%USERPROFILE%\ripwire-<uid>`. That is per-user, and `--doctor`'s `cache-dir` row names it.
+- README's Windows section adds three notes. The hash check passes because `-eq` ignores case; use
+  `.Hash.ToLower() -ceq` for a case-sensitive compare. `Expand-Archive` does not pass Mark-of-the-Web on
+  to the files it extracts, so no SmartScreen prompt is not a verdict on the exe. In Git Bash, `fc` is a
+  shell builtin, so compare outputs with `cmp`, or with `MSYS_NO_PATHCONV=1 fc.exe /b`.
 
 ## [0.6.3] — 2026-09-25
 
