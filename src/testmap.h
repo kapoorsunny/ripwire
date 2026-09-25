@@ -776,6 +776,11 @@ private:
     // own F5 rule) does the test file's OWN node:test import/require get a say. That ordering is what makes
     // the precedence gate arm hold without any special-casing here: a manifest naming vitest/jest/node --test
     // already returns below, before jsrunner::hasNodeTestImport is ever consulted.
+    //
+    // rv-nodetest-runner-60 fix round: jsrunner::nodeTestVerb now also needs the test file's OWN bytes (F1
+    // extension refusal, F2 relative-import resolvability) in addition to `engines.node` (F3) — a run=
+    // that fails is worse than an honest run_unknown="1" — so `source` is read on BOTH paths that can reach
+    // it, not only the import-fallback path below.
     const char* resolveJsVerb( std::uint32_t runnerFile, const std::string& disk ) const
     {
         const std::string_view relPath = rootRelPath( *ing_, runnerFile );
@@ -789,7 +794,8 @@ private:
         {
             // #60: node's own runner needs a Node-version decision (see jsrunner.h's own banner) whether it
             // was named by scripts.test or (below) inferred from the test file's own import — one spelling.
-            return jsrunner::nodeTestVerb( relPath, manifest );
+            const std::string source = docparse::detail::readWholeFile( disk ).value_or( "" );
+            return jsrunner::nodeTestVerb( relPath, manifest, source, disk );
         }
         if( const char* verb = jsrunner::verbFor( fw ); verb != nullptr )
         {
@@ -804,7 +810,7 @@ private:
         {
             return nullptr;   // no package.json evidence, and the file's own bytes name no runner either
         }
-        return jsrunner::nodeTestVerb( relPath, manifest );
+        return jsrunner::nodeTestVerb( relPath, manifest, source, disk );
     }
 
     /// Validate a candidate script and format its disk path as one shell argument.

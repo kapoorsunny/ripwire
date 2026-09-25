@@ -35,28 +35,48 @@ repro, and to @alex-michaud for the non-test `--callers` arm that helped confirm
   still wins exactly as #323/#331 already decided — including an authoritative-but-unrecognized script
   (mocha, say), which is a decided "no" and is never overridden by the weaker, file-local import evidence.
   The import fallback applies ONLY to today's `run_unknown="1"` case.
-- **`.ts`/`.mts`/`.cts`/`.tsx` get a Node-version-aware command, not a blind guess.** Node's own `--test`
-  runner strips TypeScript types without a flag only from Node 23.6 onward (earlier Nodes need
-  `--experimental-strip-types`, which 23.6+ still accepts as a no-op). This tool cannot see which Node will
-  run the emitted command, so it reads `engines.node` from the nearest manifest (if any) and derives the
-  bare form ONLY when that range proves every satisfying Node is >= 23.6; otherwise — including when there
-  is no manifest at all — it emits the flagged, conservative form. This applies to BOTH the new import-
-  evidence path and the existing `scripts.test: "node --test"` path (previously spelled `node --test <file>`
-  unconditionally for a `.ts` file, with no version awareness at all). `.js`/`.jsx`/`.mjs`/`.cjs` never need
-  the flag and always get the bare form.
+- **`.ts`/`.mts`/`.cts` get a Node-version-aware command, never a command proven to fail.** Node's own
+  `--test` runner needs `--experimental-strip-types` to strip TypeScript types at all from Node 22.6
+  onward; below that the flag itself is a fatal "bad option" and there is no way to run a `.ts` file with
+  plain `node`. Stripping is ON BY DEFAULT (the flag becomes a harmless no-op) from two separate floors —
+  Node 22.18 and Node 23.6 — because the backport into the 22.x line shipped before 23.6 did. This tool
+  cannot see which Node will run the emitted command, so it reads `engines.node` from the nearest manifest
+  (if any): the bare form when that range proves every satisfying Node has stripping on by default; the
+  flagged form when it proves >= 22.6 but not provably default-on, or when there is no manifest at all (an
+  honest, stated assumption of Node >= 22.6, never a guess at an unseen runtime); and `run_unknown="1"`
+  when the range admits ANY Node below 22.6 — a plain `>=18`/`^20`, or a compound range such as
+  `>=24 || ^20` (the LOWEST admitted alternative decides it, not the highest) — or cannot be read with
+  confidence at all. This applies to BOTH the new import-evidence path and the existing
+  `scripts.test: "node --test"` path (previously spelled `node --test <file>` unconditionally for a `.ts`
+  file, with no version awareness at all). `.js`/`.mjs`/`.cjs` never need the flag and always get the bare
+  form, unless `engines.node` admits a Node below 18 (`node:test` itself does not exist there).
+- **`.tsx` and `.jsx` are never derived, on purpose.** Node's type stripping does not cover `.tsx` at all
+  (`ERR_UNKNOWN_FILE_EXTENSION`), and plain `node` cannot load a `.jsx` file either, on any Node version, with
+  or without any flag — both stay `run_unknown="1"`, the same as before this evidence source existed.
+- **A `.ts`/`.mts`/`.cts` command is derived only when the test file's own relative imports can actually
+  load.** Node's module resolver, under type stripping, never probes an extension and never maps a `.js`
+  specifier onto a `.ts` source — both are exactly how tsc-, tsx- and bundler-run TS code imports its own
+  siblings. So the command is derived only when every relative (`./`/`../`) static `import`/`export … from`
+  specifier or `require(...)` argument in the test file's own bytes names a file that exists on disk at
+  EXACTLY that path; an extensionless specifier, or one whose exact spelling does not exist, stays the
+  honest `run_unknown="1"` instead of a command the file's own bytes already prove would fail.
 - New fixtures, `test/testgatenodetestimportfix/` through `test/testgatenodetestimportprecedencefix/`
   (`test/testgatecheck.sh` arms x1-x6): the exact repro, a `.js` variant, `require("node:test")`, a negative
   control (`"node:test"` only in a comment/string — parsed, not matched), and a precedence control
-  (`scripts.test: "vitest run"` still wins over a `node:test` import in the same file).
+  (`scripts.test: "vitest run"` still wins over a `node:test` import in the same file). Five more,
+  `test/testgatenodetesttsxfix/` through `test/testgatenodetestenginescompoundfix/` (arms y1-y6, fix round):
+  red-first controls for the three refusal shapes above — `.tsx`, `.jsx`, an extensionless relative import,
+  and two `engines.node` shapes (`>=18`, and the compound `>=24 || ^20`) that admit a pre-22.6 Node.
 
 ### Documented — TS/JS test runners this still cannot derive (`run_unknown="1"` stays honest, not a bug)
 
-Narrowed from the 0.6.3 list: the third gap below (node's test runner against a `.ts` file on an unknown
-Node version) is now derived, honestly flagged — see the fix above. Still not derived, and correctly
-`run_unknown="1"`: node's own test runner invoked through `tsx` (a common way to run it against `.ts`
-files, when neither `package.json` nor the test file's own bytes name `node:test` directly) and `bun`'s
-test runner. See #323's own discussion for a user-declared runner template, which would be the way to name
-either of these explicitly once implemented.
+Narrowed from the 0.6.3 list: the fourth gap below (node's test runner against a `.ts` file on an unknown
+Node version) is now derived, honestly bounded — see the fix above, including the cases it deliberately
+still refuses (`.tsx`/`.jsx`, an unresolvable relative import, a declared floor below Node 22.6). Still not
+derived, and correctly `run_unknown="1"`: node's own test runner invoked through `tsx` (a common way to run
+it against `.ts` files, when neither `package.json` nor the test file's own bytes name `node:test`
+directly) and `bun`'s test runner. See #323's own discussion for a user-declared runner template, which
+would be the way to name either of these explicitly once implemented.
 
 ---
 
