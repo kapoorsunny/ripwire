@@ -13,7 +13,7 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ---
 
-## [Unreleased]
+## [0.6.4] — 2026-09-25
 
 ### Added — Astro (`.astro`) frontmatter is indexed on the TypeScript grammar (#320, #67)
 
