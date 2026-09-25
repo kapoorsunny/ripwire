@@ -25,6 +25,10 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
   producer already funnels through) now polices the ceiling itself and discloses `next_dropped="1"`
   instead of saying nothing; the attribute itself still never exceeds 120 bytes, so nothing that
   already parses `next=` breaks.
+- `hooks/ripwire-nudge.sh`'s SessionStart primer read `git rev-parse --is-inside-work-tree` by exit
+  status only. A bare repository, or a cwd inside a work tree's own `.git` directory, prints `false`
+  with status 0 there, so the primer could still run in a population it was never meant to reach (the
+  same shape CodeRabbit flagged and 1cd00d4d fixed in the two route hooks). It now reads the answer.
 
 ## [0.6.3] — 2026-09-25
 
