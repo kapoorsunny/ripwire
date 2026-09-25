@@ -807,6 +807,15 @@ TEST_CASE( "shell: only an absolute, non-WSL bash is acceptable" )
     CHECK( !isAcceptableShell( "C:bash.exe" ) );                                                   // drive-relative
 }
 
+TEST_CASE( "doctor PATH remedy: PowerShell's assignment, native separators, never a POSIX export line (#334)" )
+{
+    const std::string h = powerShellPathPrependHint( "C:/Program Files/ripwire tools/ripwire-0.6.4-windows-x64" );
+    CHECK( h.starts_with( "$env:Path = \"C:\\Program Files\\ripwire tools\\ripwire-0.6.4-windows-x64;$env:Path\"" ) );
+    CHECK( h.find( "export PATH" ) == std::string::npos );
+    CHECK( h.find( '/' ) == std::string::npos );
+    CHECK( powerShellPathPrependHint( "//server/share/bin" ).starts_with( "$env:Path = \"\\\\server\\share\\bin;$env:Path\"" ) );   // UNC
+}
+
 TEST_CASE( "executables: extension detection and PATHEXT membership" )
 {
     CHECK( hasExtension( "tool.exe" ) );

@@ -21,6 +21,7 @@
 //      the st_mode a stat reports.
 //   6. Time, wait-status and socket-timeout conversions, and the socket-descriptor range.
 //   7. The shell choice: which bash may run a command (never a WSL launcher, never a relative PATH entry).
+//   8. The PATH remedy --doctor prints when no ripwire is on PATH, in PowerShell's spelling.
 //
 // Nothing here reads errno, the environment or the file system; every input is a parameter. Every function is noexcept
 // (owner directive 2026-09-16: RAII and return values, no exception handling): the ones that build a std::string can
@@ -1129,6 +1130,18 @@ constexpr bool extensionInList( std::string_view path, std::string_view pathext 
         }
     }
     return false;
+}
+
+// ── 8. The PATH remedy, in PowerShell's spelling ──────────────────────────────────────────────────────────────────
+// --doctor's binary-path row says how to put this binary's directory on PATH when no ripwire resolves from it. The POSIX
+// remedy is a shell `export PATH=` line; both Windows testers on #334 read that line in PowerShell, where it does
+// nothing. Here it is PowerShell's own assignment, with the directory in native '\' separators (a program path is '/'-
+// separated), for this window, and the pointer to the user Path that new windows read (README's Windows install sets it).
+inline std::string powerShellPathPrependHint( std::string_view programDir ) noexcept
+{
+    std::string dir( programDir );
+    std::replace( dir.begin(), dir.end(), '/', '\\' );
+    return "$env:Path = \"" + dir + ";$env:Path\" in PowerShell (this window; add the directory to your user Path for new ones)";
 }
 
 }   // namespace rw::oswin

@@ -159,7 +159,10 @@ not resolved (that is part 2); they are now counted. A tree without one is byte-
   0.6.3 was installed had the newer mtime, so the hint called the running 0.6.3 stale and said to run the
   0.6.2. On Windows, Git Bash's `which` prints the name without `.exe`; the row now also tries the `.exe`
   name before it reports `on_path="0"`, so it compares the two files there too. It still marks
-  `degraded="1"` on Windows.
+  `degraded="1"` on Windows. When no `ripwire` is on PATH, its hint on Windows is PowerShell's
+  `$env:Path = "<dir>;$env:Path"` with native separators, where it used to print a POSIX `export PATH=`
+  line that does nothing in PowerShell (reported by @lennix1337 and @antoniojosedev). Other platforms
+  print the same line as before.
 - The determinism check in AGENTS.md, CLAUDE.md, CONTRIBUTING, README, `--help`, the skills and the docs
   now writes its two outputs outside the crawled tree:
   `t=$(mktemp -d); ripwire . >"$t/a"; ripwire . >"$t/b"; diff -q "$t/a" "$t/b"`. Written inside it, the
