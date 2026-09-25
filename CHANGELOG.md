@@ -25,6 +25,13 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
   manifest, and exits 1. The prune step recognises its own copies (a marker file, an empty leftover
   directory, or a name its last manifest listed) and leaves any other `ripwire-*` directory alone; before,
   a user's own `ripwire-*` directory made the installer stop with `rm: … is a directory`.
+- A cache blob written by a different ripwire build is now refused with both numbers on the line:
+  `format-version — not used; … rewrites it (blob format 24, this binary 25: another ripwire build wrote
+  it; …)`. The
+  per-tree cache path does not depend on the build, so two builds that alternate on one tree (0.6.2 and
+  0.6.3 in the report) each refuse and rewrite the other's cache and re-parse on every run. One build run
+  twice in a row reuses its own cache, on Windows as elsewhere. The Windows CI job now checks that
+  directly: the second run's `RIPWIRE_CACHE_STATS` line must show every file reused and none re-parsed.
 
 ## [0.6.3] — 2026-09-25
 
