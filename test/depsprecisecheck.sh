@@ -273,8 +273,10 @@ IJ="$( "$BIN" "$TA" --impact=packages/app/src/b.ts:b --json --no-cache 2>/dev/nu
 IC="$( "$BIN" "$TA" --impact=packages/app/src/b.ts:b --format=columnar --no-cache 2>/dev/null )"
 printf '%s' "$IX" | grep -q 'importers="0" shown_importers="0" importers_capped="0" imports_unresolved="3"' \
     && ok "#220 (H) --impact XML: importers=\"0\" … imports_unresolved=\"3\"" || no "#220 (H) --impact XML lacks imports_unresolved=\"3\""
-printf '%s' "$IJ" | grep -q '"imports_unresolved":3' && ok "#220 (H) --impact json: \"imports_unresolved\":3" || no "#220 (H) --impact json lacks the key"
-printf '%s' "$IC" | grep -q 'imports_unresolved="3"' && ok "#220 (H) --impact columnar: imports_unresolved=\"3\"" || no "#220 (H) --impact columnar lacks it"
+printf '%s' "$IJ" | grep -q '"imports_unresolved":3' \
+    && ok "#220 (H) --impact json: \"imports_unresolved\":3" || no "#220 (H) --impact json lacks the key"
+printf '%s' "$IC" | grep -q 'imports_unresolved="3"' \
+    && ok "#220 (H) --impact columnar: imports_unresolved=\"3\"" || no "#220 (H) --impact columnar lacks it"
 MCP220="$( printf '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{}}\n{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"impact","arguments":{"path":"%s","symbol":"packages/app/src/b.ts:b"}}}\n' "$TA" \
             | perl -e 'alarm 60; exec @ARGV' "$BIN" --mcp 2>/dev/null | tail -1 )"
 printf '%s' "$MCP220" | grep -q 'imports_unresolved=\\"3\\"' \

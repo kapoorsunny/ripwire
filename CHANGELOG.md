@@ -31,7 +31,7 @@ Quickstart. They now live in a new `## Release notes` section near the end, just
 naming the current version and pointing at that section and at CHANGELOG.md. The old `## What's new`
 section (a stale, differently-worded duplicate of the 0.6.0 blurb) is removed.
 
-### Fixed
+### Fixed — `next=` is never dropped silently, and the nudge hook reads rev-parse's answer
 - `next=` is no longer silently dropped past its old 120-byte ceiling. `--for`'s page/widen
   follow-up (`forPageInvocation`/`forWidenNext`), `--flip`'s cut-listing follow-up, and the
   churn-decay map's `--in=DIR` scoped/stub follow-ups (including the task-router's `--for`-shaped
@@ -45,7 +45,7 @@ section (a stale, differently-worded duplicate of the 0.6.0 blurb) is removed.
   status only. A bare repository, or a cwd inside a work tree's own `.git` directory, prints `false`
   with status 0 there, so the primer could still run in a population it was never meant to reach (the
   same shape CodeRabbit flagged and 1cd00d4d fixed in the two route hooks). It now reads the answer.
-- CONTRIBUTING.md's Windows-matrix note named a stale gate count (647); the live count is 648.
+- CONTRIBUTING.md's Windows-matrix note named a stale gate count (647); the live count is 649.
 
 ### Fixed — `--test-gate` derives `node --test` from a bare `node:test` import, with no `package.json` at all
 
@@ -71,8 +71,9 @@ repro, and to @alex-michaud for the non-test `--callers` arm that helped confirm
   `--test` runner needs `--experimental-strip-types` to strip TypeScript types at all from Node 22.6
   onward; below that the flag itself is a fatal "bad option" and there is no way to run a `.ts` file with
   plain `node`. Stripping is ON BY DEFAULT (the flag becomes a harmless no-op) from two separate floors —
-  Node 22.18 and Node 23.6 — because the backport into the 22.x line shipped before 23.6 did. This tool
-  cannot see which Node will run the emitted command, so it reads `engines.node` from the nearest manifest
+  Node 22.18 and Node 23.6 — because 23.6 turned it on first and the 22.x line got it later, by backport, so
+  a bare 23.0–23.5 does not have it. This tool cannot see which
+  Node will run the emitted command, so it reads `engines.node` from the nearest manifest
   (if any): the bare form when that range proves every satisfying Node has stripping on by default; the
   flagged form when it proves >= 22.6 but not provably default-on, or when there is no manifest at all (an
   honest, stated assumption of Node >= 22.6, never a guess at an unseen runtime); and `run_unknown="1"`

@@ -1429,7 +1429,8 @@ from the import above — a `run=` command is spelled only when it will actually
 - **The command is additionally Node-version-aware, from `engines.node`.** `--experimental-strip-types`
   itself exists from Node 22.6 only (an older Node refuses to start at all with it); stripping is ON BY
   DEFAULT — the flag becomes a harmless no-op — from Node 22.18 and separately from Node 23.6 (two floors,
-  not one continuous range, since the 22.x backport shipped before 23.6 did). This tool cannot see which
+  not one continuous range: 23.6 turned it on first, the 22.x line got it later by backport, and a bare
+  23.0–23.5 does not have it). This tool cannot see which
   Node will run the emitted command, so it reads `engines.node` from the nearest manifest: the bare
   `node --test <file>` when that range proves every satisfying Node has stripping on by default; the
   flagged `node --experimental-strip-types --test <file>` when it proves >= 22.6 but not provably
@@ -1945,9 +1946,9 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>648 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
+<summary><b>649 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
 
-`test/regression.sh` names **648 gate scripts** and is the authoritative list; <!-- gatecount -->
+`test/regression.sh` names **649 gate scripts** and is the authoritative list; <!-- gatecount -->
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
@@ -2297,7 +2298,7 @@ same renderer. One computation has one output shape.
 
 | Item | Requirement |
 | --- | --- |
-| Operating system | macOS (arm64 or x86-64) or Linux (arm64 or x86-64). Native Windows x64 **builds** with both clang-cl and MSVC `cl.exe` — CI builds both on `windows-latest` every full matrix and smoke-tests each binary (`--version`, `ctest`, a real crawl, the two-run byte-identical contract, well-formed XML); the 648-gate suite does not run there, and ASan is compiled but never executed, so treat it as a build, not a validated platform. From 0.6.3 a prebuilt `windows-x64` zip ships as a **preview** ([Windows](#windows)): CI unzips it and compares its output with Linux's byte for byte, but no maintainer runs Windows, so WSL2 remains the fully supported way to run it on a Windows machine. |
+| Operating system | macOS (arm64 or x86-64) or Linux (arm64 or x86-64). Native Windows x64 **builds** with both clang-cl and MSVC `cl.exe` — CI builds both on `windows-latest` every full matrix and smoke-tests each binary (`--version`, `ctest`, a real crawl, the two-run byte-identical contract, well-formed XML); the 649-gate suite does not run there, and ASan is compiled but never executed, so treat it as a build, not a validated platform. From 0.6.3 a prebuilt `windows-x64` zip ships as a **preview** ([Windows](#windows)): CI unzips it and compares its output with Linux's byte for byte, but no maintainer runs Windows, so WSL2 remains the fully supported way to run it on a Windows machine. |
 | Prebuilt Linux floor | RHEL 8 or later (glibc 2.28) |
 | Prebuilt macOS floor | macOS 14 or later, Apple silicon. 0.6.1 is the last release with an Intel macOS binary; on an Intel Mac, pin `RIPWIRE_VERSION=v0.6.1` or build from source. |
 | x86-64 floor | x86-64-v3 (Intel Haswell, 2013, or later), for a prebuilt binary and a source build alike |
@@ -2691,7 +2692,7 @@ python3 test/pargates.py . ./build/ripwire -j 6
 A new gate script must be added to `test/regression.sh` in the same change. The gate
 `test/manifestcheck.sh` enforces this rule.
 
-Another gate derives the cap inventory. The tool has 224 compile-time caps and 7 ranking parameters.
+Another gate derives the cap inventory. The tool has 225 compile-time caps and 7 ranking parameters.
 `docs/LIMITS.md` lists each cap, its value, and whether the file discloses a truncation when the cap
 fires, and `python3 docs/limits_build.py --check` proves that list against `src/`. `docs/TUNING.md`
 lists the measured cost of each cap.

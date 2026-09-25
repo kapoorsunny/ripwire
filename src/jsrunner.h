@@ -70,9 +70,10 @@
 //
 // F3 — the flag itself needs a Node new enough to accept it. `--experimental-strip-types` exists from
 // Node 22.6 only; type stripping is ON BY DEFAULT (the flag becomes a harmless no-op) from 22.18 and from
-// 23.6 — two separate release lines, not one continuous floor, because the backport to 22.x landed before
-// 23.6 shipped it upstream. So a `.ts`/`.mts`/`.cts` command reads `engines.node` from the SAME nearest
-// manifest (if any) and picks one of three answers, never a fourth guess: the bare form when the floor
+// 23.6 — two separate release lines, not one continuous floor: 23.6 turned it on first, the 22.x line got
+// it later by backport (22.18), and 23.0-23.5 do not have it. So a `.ts`/`.mts`/`.cts` command reads
+// `engines.node` from the SAME nearest manifest (if any) and picks one of three answers, never a fourth
+// guess: the bare form when the floor
 // proves every satisfying Node is new enough to have stripping on by default; the flagged form when the
 // floor proves >= 22.6 but not provably default-on; and `run_unknown="1"` when the floor is below 22.6
 // (an explicit `engines.node` that admits an older Node — `>=18`, `^20`, even a compound `>=24 || ^20`,
@@ -965,8 +966,8 @@ inline long long enginesFloor( std::string_view range ) noexcept
 // rv-nodetest-runner-60 F3: `--experimental-strip-types` exists from Node 22.6 only (an OLDER Node treats
 // it as an unrecognized flag and refuses to start at all — the flag is not "sometimes unnecessary", it is
 // sometimes a fatal error); type stripping is ON BY DEFAULT — the flag becomes a harmless no-op — from TWO
-// separate floors, 22.18 and 23.6, because the backport into the 22.x line landed before 23.6 shipped it
-// upstream: a bare 23.0-23.5 does NOT have it on by default even though it sorts after 22.18.
+// separate floors, 22.18 and 23.6: 23.6 turned it on upstream first and the 22.x line got it later, by
+// backport, in 22.18, so a bare 23.0-23.5 does NOT have it on by default even though it sorts after 22.18.
 constexpr long long kFloor22_6  = 22 * 1000 + 6;
 constexpr long long kFloor22_18 = 22 * 1000 + 18;
 constexpr long long kFloor23_0  = 23 * 1000 + 0;

@@ -31,7 +31,7 @@
 #include "model.h"              // Lang enum
 #include "ingest.h"             // AstQuerySpec, AstMatch, astQuery, IngestResult
 #include "docparse.h"           // detail::readWholeFile — THE canonical whole-file byte read; never re-rolled
-#include "pattern.h"            // pattern::stripQuotePair — THE canonical quote-strip; never re-rolled
+#include "infra/namesplit.h"   // namesplit::stripQuotePair — THE canonical quote-strip; never re-rolled
 #include "infra/Diagnostics.h"  // DISCLOSE (no-op in release; the fprintf below is the visible line)
 
 namespace rw
@@ -393,11 +393,11 @@ inline std::size_t indentOf( std::string_view line ) noexcept
 }
 
 // strip surrounding matched quotes from a scalar value (either '...' or "..."). No escape processing —
-// the values we accept (ids, messages, severities) don't need it. pattern::stripQuotePair IS this same
+// the values we accept (ids, messages, severities) don't need it. namesplit::stripQuotePair IS this same
 // strip (measured: --quality-delta's duplication kind, once #60's jsrunner.h needed a third copy of it).
 inline std::string_view unquote( std::string_view v ) noexcept
 {
-    return pattern::stripQuotePair( v );
+    return namesplit::stripQuotePair( v );
 }
 
 }   // namespace lintdetail
