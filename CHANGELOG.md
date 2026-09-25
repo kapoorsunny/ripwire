@@ -13,6 +13,17 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ---
 
+## [Unreleased]
+
+### Documented — README: release notes moved to a section near the end
+
+The four release blurbs (0.6.3, 0.6.2, 0.6.1, 0.6.0, with their "Thanks to" lines) sat near the top of
+README.md, right after the Languages line — a lot for a first-time reader to get through before
+Quickstart. They now live in a new `## Release notes` section near the end, just before
+`## Documentation`, text and thanks lines unchanged. The top of the README keeps one short line
+naming the current version and pointing at that section and at CHANGELOG.md. The old `## What's new`
+section (a stale, differently-worded duplicate of the 0.6.0 blurb) is removed.
+
 ## [0.6.3] — 2026-09-25
 
 ### Fixed — silent cuts in the report verbs and the MCP twins now say what they dropped
