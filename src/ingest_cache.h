@@ -279,7 +279,14 @@ constexpr std::uint32_t kCacheVersion = 25;           // 25: #150 AND #157 (trai
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 121;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 122;          // bump on any grammar/.scm/extraction change
+                                                      // 122 = 2026-09-25 (#320/#67, test/astrocheck.sh): .astro joins
+                                                      //   kLangTable on the TypeScript grammar, parsed through ONE
+                                                      //   included range over its `---` frontmatter; blank lines
+                                                      //   before the opening fence are skipped. Carried as 120 on
+                                                      //   the PR; renumbered 122 after #150 (120) and #310 (121).
+                                                      //   No record layout change: kCacheVersion stays 25 (NOT 24);
+                                                      //   kQSnapCacheScheme stays 14.
                                                       // 121 = 2026-09-24 (#310, Ruby class-level attribute DSL,
                                                       //   test/rubyattrscheck.sh — the attr_* floor reversal): a
                                                       //   class-body-level receiver-less attr_reader/attr_writer/

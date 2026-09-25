@@ -15,6 +15,13 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Added — Astro (`.astro`) frontmatter is indexed on the TypeScript grammar (#320, #67)
+
+An `.astro` file's `---` frontmatter is now parsed with the vendored TypeScript grammar, restricted to that
+block by one included range, so a frontmatter call resolves into the `.ts` service it imports. The template
+half is not read at all, and an `.astro` file reports `lang="ts"`; both are disclosed blind spots in
+`docs/ARCHITECTURE.md#astro-extraction`. `kParserVer` 121 → 122; `kCacheVersion` is unchanged.
+
 ### Documented — README: release notes moved to a section near the end
 
 The four release blurbs (0.6.3, 0.6.2, 0.6.1, 0.6.0, with their "Thanks to" lines) sat near the top of
