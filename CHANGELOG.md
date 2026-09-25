@@ -39,6 +39,12 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
   0.6.2. On Windows, Git Bash's `which` prints the name without `.exe`; the row now also tries the `.exe`
   name before it reports `on_path="0"`, so it compares the two files there too. It still marks
   `degraded="1"` on Windows.
+- The determinism check in AGENTS.md, CLAUDE.md, CONTRIBUTING, README, `--help`, the skills and the docs
+  now writes its two outputs outside the crawled tree:
+  `t=$(mktemp -d); ripwire . >"$t/a"; ripwire . >"$t/b"; diff -q "$t/a" "$t/b"`. Written inside it, the
+  second run crawled the first run's output as a new unindexed text file, and the map header's top-6
+  `unindexed=` list could change between the two runs. The engine was deterministic; the recipe was not.
+  The top-6 cut itself is well-defined (count descending, then extension name) and is unchanged.
 
 ## [0.6.3] — 2026-09-25
 

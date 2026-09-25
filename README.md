@@ -2648,11 +2648,12 @@ a RHEL 9 userland, both build flavours, and the fallback-emitter build — so th
 on every commit, not only when you check it. To re-check it on your own tree:
 
 ```bash
-ripwire . > a
-ripwire . > b
-diff -q a b              # two runs, byte-identical
-ripwire . --no-cache > c
-diff -q a c              # and the warm run equals the cold one
+t=$(mktemp -d)           # outside the tree: an output written inside it is crawled by the next run
+ripwire . > "$t/a"
+ripwire . > "$t/b"
+diff -q "$t/a" "$t/b"    # two runs, byte-identical
+ripwire . --no-cache > "$t/c"
+diff -q "$t/a" "$t/c"    # and the warm run equals the cold one
 ```
 
 Neither diff may report a difference.

@@ -146,8 +146,11 @@ path on a Mac with `cmake -S . -B build-nokqueue -DCMAKE_CXX_FLAGS=-DRW_OS_HAS_K
 Output is a sorted top-K. A sort has no tolerance band, so the contract is byte-identity:
 
 ```bash
-./build/ripwire <dir> >a; ./build/ripwire <dir> >b; diff -q a b
+t=$(mktemp -d); ./build/ripwire <dir> >"$t/a"; ./build/ripwire <dir> >"$t/b"; diff -q "$t/a" "$t/b"
 ```
+
+Write the two outputs OUTSIDE `<dir>`. Written inside it, the second run crawls the first run's output
+file, a new unindexed text file, and the `unindexed=` histogram can change between the two runs (#334).
 
 Run it three times — scheduling-dependent nondeterminism does not show up reliably in one pair.
 Warm (cached) output must equal cold output exactly.

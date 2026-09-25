@@ -568,7 +568,8 @@ fixed-canonical-merge-order reduction strategy this one does — independent agr
 strategy is right — and then partitions it by `hardware_concurrency()`, inheriting exactly this
 class. The strategy is only half the property; the partition has to be a property of the source.
 
-The gate is `./build/ripwire DIR > a; ./build/ripwire DIR > b; diff -q a b`, run three times.
+The gate is `t=$(mktemp -d); ./build/ripwire DIR >"$t/a"; ./build/ripwire DIR >"$t/b"; diff -q "$t/a" "$t/b"`, run three
+times, with both outputs outside `DIR` so the second run does not crawl the first run's output.
 Anything that makes output depend on timing is a bug even when the ranking still looks right.
 
 Tests follow from this. Float comparisons assert a **tolerance band** and the top-K **order**, never
