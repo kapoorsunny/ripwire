@@ -13,6 +13,31 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ---
 
+## [Unreleased]
+
+### Fixed — `--deps` no longer reports a TS/JS graph with missing alias edges as complete (#220, part 1)
+
+A TypeScript or JavaScript import written through a tsconfig/jsconfig `paths` alias (`@app/b`), a
+`baseUrl`-relative path, or a workspace package name (`@acme/lib`) draws no file-graph edge, so a cycle
+spelled through one was missing and the absent `<cycles>` element read as "acyclic". Those imports are still
+not resolved (that is part 2); they are now counted. A tree without one is byte-identical.
+- `--deps` and `--arch` carry `imports_unresolved="N" counts_floor="1"` on the root: cycles, cones,
+  `ccd`/`acd`/`nccd`, `violations=` and `propagation_cost=` are floors over a partial graph. `--arch`
+  also says so on stderr; its exit code is unchanged.
+- `--report` reads `## Dependency cycles (showing 1 of 1; a floor: 3 imports unresolved)`, and an empty
+  list reads "none found over the resolved edges" instead of "none (acyclic)".
+- `--impact` (XML, `--json`, `--format=columnar`, and the MCP `impact` tool) carries `imports_unresolved=`
+  beside `importers=` when a TS/JS import could land on one of the symbol's files.
+- Only a specifier the project's own config places in the tree counts: a `paths` key with a literal prefix
+  and an in-tree target, a catch-all key or `baseUrl` path only when it names an indexed file, or a
+  workspace member's name from `package.json` `workspaces` or `pnpm-workspace.yaml`. A bare package such
+  as `react` never counts. Relative `extends` chains are followed; a package-form `extends` is not read.
+- Measured with `--deps --no-cache`, before and after, on four TS/JS trees from the r4 corpus. Chainlit:
+  409 imports now disclosed (baseUrl 247, workspace 106, paths 57). Streamlit: 972 (workspace). mlflow: 204
+  (paths). Zulip and sktime report none and are byte-identical. An independent re-derivation from the
+  `--deps` rows and the config files agrees: mlflow exactly, Chainlit within 1, and Streamlit within the
+  48 rows `--deps` does not print (it lists at most 40 per file).
+
 ## [0.6.3] — 2026-09-25
 
 ### Fixed — silent cuts in the report verbs and the MCP twins now say what they dropped

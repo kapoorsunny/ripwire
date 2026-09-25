@@ -6043,18 +6043,23 @@ inline QMetrics computeQMetrics( const IngestResult& ing, const Graph& g )
 // a lens. The cut is disclosed where it is made: `lazyEdges` (→ <health lazy_edges=>) counts the DISTINCT
 // pairs left out, `lazyEdgesByFile[f]` (→ <f lazy_edges=>) the pairs left out of f's own row. recordLazyPair's
 // rule decides laziness: one load-time directive for the pair makes the whole pair load-time.
+// #220 part 1: `importsUnresolved` counts the TS/JS import directives that drew no edge although the project's own
+// config places their specifier in this tree (resolve.h tsimport::InRepoImportCounter). While it is non-zero the
+// graph is PARTIAL and every number read off it is a floor; the verbs say so beside it (imports_unresolved= with
+// counts_floor="1", absent at zero, so a tree without one stays byte-identical).
 struct StructuralIncludeAdj
 {
     std::vector<std::vector<std::uint32_t>> adj;               // UN-deduped occurrences, minus the all-lazy pairs
     std::vector<std::uint32_t>              lazyEdgesByFile;   // distinct (f, to) pairs left out, per f
     std::uint64_t                           lazyEdges = 0;     // Σ lazyEdgesByFile
+    std::uint64_t                           importsUnresolved = 0;   // #220: in-repo TS/JS directives with no edge
 };
 
 inline StructuralIncludeAdj resolveStructuralIncludeAdj( const IngestResult& ing )
 {
     HashMap<std::uint64_t, char> lazyPairs;
     StructuralIncludeAdj         out;
-    out.adj = buildPreciseIncludeAdj( ing, /*dedup=*/false, &lazyPairs );
+    out.adj = buildPreciseIncludeAdj( ing, /*dedup=*/false, &lazyPairs, &out.importsUnresolved );
     out.lazyEdgesByFile.assign( out.adj.size(), 0 );
     if( lazyPairs.empty() )
     {
@@ -6188,9 +6193,12 @@ inline void countFileImporters( const std::vector<std::vector<std::uint32_t>>& a
 
 // `fileFanInOut` (cut-fix C): optional, default nullptr — when non-null and the scan runs, it receives
 // countFileImporters' per-file counts. Untouched on the two early returns, which find no importer to rank.
+// `importsUnresolvedOut` (#220 part 1): optional — the adjacency build's count of in-repo TS/JS imports that drew no
+// edge, so the tier can say its importers= is a floor. 0 on the two early returns (nothing was built).
 inline std::vector<std::uint32_t> importersOfFiles( const IngestResult& ing, const std::vector<std::uint32_t>& defFiles,
                                                      std::vector<char>* lazyOut = nullptr,
-                                                     std::vector<std::uint32_t>* fileFanInOut = nullptr )
+                                                     std::vector<std::uint32_t>* fileFanInOut = nullptr,
+                                                     std::uint64_t* importsUnresolvedOut = nullptr )
 {
     std::vector<std::uint32_t> importers;
     if( lazyOut != nullptr )
@@ -6215,7 +6223,7 @@ inline std::vector<std::uint32_t> importersOfFiles( const IngestResult& ing, con
     // dedup=true: this is a MEMBERSHIP question ("does this file import a def file"), not an
     // occurrence-count one, so the deduped adjacency is both the right shape and the cheaper scan.
     HashMap<std::uint64_t, char>  lazyPairs;
-    const std::vector<std::vector<std::uint32_t>> adj = buildPreciseIncludeAdj( ing, /*dedup=*/true, lazyOut ? &lazyPairs : nullptr );
+    const std::vector<std::vector<std::uint32_t>> adj = buildPreciseIncludeAdj( ing, /*dedup=*/true, lazyOut ? &lazyPairs : nullptr, importsUnresolvedOut );
     // No `isDef[f]` pre-filter here (barrel-exclusion lane): a def file is not skipped wholesale, because
     // it may ALSO be a genuine importer of a DIFFERENT def file (the barrel-getter shape — see
     // scanImporterEdges' own comment). The narrower, correct exclusion — f is never its own importer — is
@@ -6262,7 +6270,9 @@ struct ImportTier
     std::size_t                shown  = 0;
     bool                       capped = false;
     std::string                xmlAttrs;   // " importers= shown_importers= importers_capped=" [+ importers_next= on a cut]
+                                           //   [+ imports_unresolved= when > 0]
     std::string                next;       // cut-fix E: the call that lists the whole tier; empty when uncut
+    std::uint64_t              importsUnresolved = 0;   // #220 part 1: importers= is a floor while > 0
 };
 
 // cut-fix C: the tier's DISPLAY size, split from its measurement (callhierarchy.h's rule: the cap policy is the
@@ -6291,7 +6301,8 @@ inline void sizeImportTier( ImportTier& t, int pageLimit, std::string_view sym =
     t.xmlAttrs = " importers=\"" + std::to_string( t.files.size() ) + "\""
                + " shown_importers=\"" + std::to_string( t.shown ) + "\""
                + " importers_capped=\"" + ( t.capped ? "1" : "0" ) + "\""
-               + rw::nextAttrXml( t.next, "importers_next" );
+               + rw::nextAttrXml( t.next, "importers_next" )
+               + rw::importsUnresolvedAttrXml( t.importsUnresolved );   // #220: absent at zero; the root's counts_floor covers it
     ENSURES( t.shown <= t.files.size(), "the page is a prefix of the ranked tier" );
     ENSURES( t.next.empty() || t.capped, "a follow-up is offered only for a cut tier" );
 }
@@ -6310,7 +6321,11 @@ inline ImportTier impactImportTier( const IngestResult& ing, const std::vector<N
     ImportTier t;
     std::vector<char>          lazyByFileOrder;   // importersOfFiles' own order (ascending file id) — see below
     std::vector<std::uint32_t> fileFanIn;         // per file: how many files import it — the rank-before-cap weight
-    t.files = importersOfFiles( ing, defFiles, &lazyByFileOrder, &fileFanIn );
+    // #220 part 1: the tier's floor concerns it only when a TS/JS import could land on one of its def files — a C++
+    // symbol's importers cannot hide behind a TS alias, so its answer neither pays for the count nor carries it.
+    const bool tsTarget = std::any_of( defFiles.begin(), defFiles.end(), [ & ]( std::uint32_t f )
+                                       { return f < ing.files.size() && tsimport::couldBeTsImportTarget( ing.files[f] ); } );
+    t.files = importersOfFiles( ing, defFiles, &lazyByFileOrder, &fileFanIn, tsTarget ? &t.importsUnresolved : nullptr );
 
     // t.files is about to be RESORTED into tier/path order; lazyByFileOrder must move WITH each entry, not
     // stay behind at its ascending-file-id slot — sort an index permutation, then rebuild both in lockstep.

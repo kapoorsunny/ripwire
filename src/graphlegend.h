@@ -565,9 +565,19 @@ inline const char* declinedCallsLegend( bool on ) noexcept { return on ? kDeclin
 // ONE absent-at-zero count attribute: ` name="N"`, or nothing at all when count is 0. declined_calls= below and
 // --skipped's extent_suspect_files=/macro_blanked_files= (root) and extent_suspect_syms=/macro_blanked= (<h> rows)
 // all spell through it, so the shape has one definition instead of a copy per verb.
+// `json` spells the same count as a key instead: `,"name":N` (imports_unresolved= is the one caller today).
+inline std::string countFieldOrEmpty( std::string_view name, std::size_t count, bool json )
+{
+    if( count == 0 )
+    {
+        return {};
+    }
+    const std::string n = std::to_string( count );
+    return json ? ",\"" + std::string( name ) + "\":" + n : " " + std::string( name ) + "=\"" + n + "\"";
+}
 inline std::string countAttrXmlOrEmpty( std::string_view name, std::size_t count )
 {
-    return count > 0 ? " " + std::string( name ) + "=\"" + std::to_string( count ) + "\"" : std::string();
+    return countFieldOrEmpty( name, count, /*json=*/false );
 }
 
 // The attribute and the key, one spelling each, absent at zero like bodyless_defs= and graph_unindexed=.
@@ -579,6 +589,37 @@ inline std::string declinedCallsKeyJson( std::size_t declinedCalls )
 {
     return declinedCalls > 0 ? ",\"declined_calls\":" + std::to_string( declinedCalls ) : std::string();
 }
+
+// ── #220 part 1 — imports_unresolved=, the FILE graph's own gauge (test/depsprecisecheck.sh, the #220 arms) ─────────
+// graph_unresolved= above is the CALL graph's resolver gauge; this is the include/import graph's. It counts the TS/JS
+// import directives that drew no edge although the project's own config places their specifier in this tree — a
+// tsconfig/jsconfig `paths` alias, a `baseUrl` path, a workspace member's package name (resolve.h, namespace
+// tsimport, states the three rules). Absent at zero, like graph_unindexed=: a tree with no such import is byte-
+// identical. On a root that carried no floor marker before (--deps, --arch) counts_floor="1" rides with it — THE
+// TRUNCATION VOCABULARY's rule-4 pairing (pageview.h): the marker names the cause, counts_floor says every count on
+// the answer is a floor. --impact's root carries counts_floor="1" already, so there the count rides alone. Each
+// legend clause below is emitted exactly when its attribute is (the caller passes the count, never a re-derivation).
+inline std::string importsUnresolvedAttrXml( std::uint64_t importsUnresolved )
+{
+    return countAttrXmlOrEmpty( "imports_unresolved", std::size_t( importsUnresolved ) );
+}
+inline std::string importsUnresolvedKeyJson( std::uint64_t importsUnresolved )
+{
+    return countFieldOrEmpty( "imports_unresolved", std::size_t( importsUnresolved ), /*json=*/true );
+}
+inline std::string importsUnresolvedFloorAttrXml( std::uint64_t importsUnresolved )
+{
+    return importsUnresolved > 0 ? importsUnresolvedAttrXml( importsUnresolved ) + kGraphCountFloorAttrXml : std::string();
+}
+inline constexpr const char* kDepsImportsUnresolvedLegend =
+    "imports_unresolved=N counts_floor=1 (root, absent at 0): N TS/JS imports name this tree (a tsconfig/jsconfig paths alias, a baseUrl path, a workspace package) yet drew no edge, so cycles (an absent cycles element too), afferent=/transitive=, godfiles and ccd/acd/nccd are floors over a partial graph. ";
+inline constexpr const char* kArchImportsUnresolvedLegend =
+    " imports_unresolved=N counts_floor=1 (absent at 0): N TS/JS imports name this tree (a paths alias, a baseUrl path, a workspace package) yet drew no edge, so violations= and the metrics are floors: an edge through one was never judged.";
+inline constexpr const char* kImpactImportsUnresolvedLegend =
+    "imports_unresolved=N (absent at 0): N TS/JS imports name this tree (a tsconfig/jsconfig paths alias, a baseUrl path, a workspace package) yet drew no edge, so importers= is a floor. ";
+inline const char* depsImportsUnresolvedLegend( bool on ) noexcept { return on ? kDepsImportsUnresolvedLegend : ""; }
+inline const char* archImportsUnresolvedLegend( bool on ) noexcept { return on ? kArchImportsUnresolvedLegend : ""; }
+inline const char* impactImportsUnresolvedLegend( bool on ) noexcept { return on ? kImpactImportsUnresolvedLegend : ""; }
 
 // ── THE DECL→DEF RESIDUE — unproven_defs= on the callers/callees answers (test/decltodefcheck.sh arm E2) ──
 // H1's fix (graph.h::declToDefFollowThrough) stopped a `file:name` selector from answering with same-named
