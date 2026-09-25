@@ -24,6 +24,22 @@ Quickstart. They now live in a new `## Release notes` section near the end, just
 naming the current version and pointing at that section and at CHANGELOG.md. The old `## What's new`
 section (a stale, differently-worded duplicate of the 0.6.0 blurb) is removed.
 
+### Fixed
+- `next=` is no longer silently dropped past its old 120-byte ceiling. `--for`'s page/widen
+  follow-up (`forPageInvocation`/`forWidenNext`), `--flip`'s cut-listing follow-up, and the
+  churn-decay map's `--in=DIR` scoped/stub follow-ups (including the task-router's `--for`-shaped
+  `<choice>` widening hint) used to build the full invocation and then throw it away when it
+  exceeded `kNextAttrMaxBytes`, leaving `next=` absent — indistinguishable from a root with nothing
+  to suggest, so a cut answer with a long follow-up (a deep path, a long symbol name) silently lost
+  its only route to the rest. `nextAttrXml` (the one place every next= producer funnels through)
+  now carries no length ceiling at all and always emits the full, runnable invocation; an answer
+  whose next= was already ≤120 B is unchanged.
+- `hooks/ripwire-nudge.sh`'s SessionStart primer read `git rev-parse --is-inside-work-tree` by exit
+  status only. A bare repository, or a cwd inside a work tree's own `.git` directory, prints `false`
+  with status 0 there, so the primer could still run in a population it was never meant to reach (the
+  same shape CodeRabbit flagged and 1cd00d4d fixed in the two route hooks). It now reads the answer.
+- CONTRIBUTING.md's Windows-matrix note named a stale gate count (647); the live count is 648.
+
 ## [0.6.3] — 2026-09-25
 
 ### Fixed — silent cuts in the report verbs and the MCP twins now say what they dropped
