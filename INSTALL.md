@@ -139,14 +139,22 @@ rm -f ~/.local/bin/ripwire
 rm -rf ~/.local/share/ripwire
 ```
 
-**2. Skill links.** This deletes only symlinks named `ripwire-*`, never a real directory or another skill.
+**2. Skills.** This deletes symlinks named `ripwire-*`, the `ripwire-*` copies the installer made where a symlink
+could not be (their `.ripwire-installed-copy` marker names the directory itself, the installer's own ownership rule),
+and its manifest. It never deletes another skill, or a `ripwire-*` directory without that marker, such as your own.
 
 ```bash
 for d in "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills" "${AGENTS_HOME:-$HOME/.agents}/skills" \
          "$HOME/.agents/skills" "${CODEX_HOME:-$HOME/.codex}/skills" "${HERMES_HOME:-$HOME/.hermes}/skills"; do
-  [ -d "$d" ] && find "$d" -maxdepth 1 -name 'ripwire-*' -type l -delete
+  [ -d "$d" ] || continue
+  find "$d" -maxdepth 1 -name 'ripwire-*' -type l -delete
+  find "$d" -mindepth 1 -maxdepth 1 -name 'ripwire-*' -type d -exec sh -c \
+    'm="$1/.ripwire-installed-copy"; [ -f "$m" ] && [ "$(cat "$m")" = "${1##*/}" ] && rm -rf "$1"' sh {} \;
+  rm -f "$d/.ripwire-manifest-v1"
 done
 ```
+
+A skill you copied by hand carries no marker, so this keeps it; delete that copy yourself.
 
 **3. Hooks** (only if you ran `--hook`). This removes ripwire's entries from Claude Code's `settings.json` and
 Codex's `hooks.json`, keeps every other hook, and saves a `.bak` copy of each file first.
