@@ -1232,6 +1232,20 @@ inline bool astroIsFenceLine( std::string_view src, std::size_t lineStart, std::
         && astroFenceTailIsBlank( src, lineStart + 3, lineEnd );
 }
 
+/// Advance `pos` past blank lines before the opening fence; returns how many rows were skipped.
+/// Astro's compiler accepts them (@astrojs/compiler 4.0.0), and each one moves the frontmatter down a row,
+/// which is what TSRange::start_point must carry.
+inline std::uint32_t astroSkipBlankLines( std::string_view src, std::size_t& pos ) noexcept
+{
+    std::uint32_t rows = 0;
+    for( std::size_t nl = src.find( '\n', pos ); nl != std::string_view::npos && astroFenceTailIsBlank( src, pos, nl ); nl = src.find( '\n', pos ) )
+    {
+        pos = nl + 1;
+        ++rows;
+    }
+    return rows;
+}
+
 // A template-only .astro and a MALFORMED one are different answers and must not share one `false`.
 // `None` is ordinary Astro and says nothing; `Unterminated` is a file whose frontmatter we can see the
 // start of and cannot extract, which is a silent zero unless it is disclosed (guardrail: honesty in output).
@@ -1245,16 +1259,18 @@ inline AstroFrontmatter astroFrontmatterRange( std::string_view src, TSRange& ou
     {
         pos = 3;
     }
-    // Astro requires the opening fence to be the first thing in the file; anything else is a template-only
+    const std::uint32_t fenceRow = astroSkipBlankLines( src, pos );
+    const std::size_t   openEnd  = src.find( '\n', pos );
+    // After any blank lines, the opening fence must be the first thing in the file; anything else is a template-only
     // component, which is legal and simply carries no TypeScript.
-    const std::size_t openEnd = src.find( '\n', pos );
     if( openEnd == std::string_view::npos || !astroIsFenceLine( src, pos, openEnd ) )
     {
         return AstroFrontmatter::None;
     }
 
-    const std::size_t contentStart = openEnd + 1;
-    std::uint32_t     row          = 1;   // the opening fence owned row 0
+    const std::size_t   contentStart = openEnd + 1;
+    const std::uint32_t contentRow   = fenceRow + 1;   // the opening fence owns fenceRow
+    std::uint32_t       row          = contentRow;
     for( std::size_t lineStart = contentStart; lineStart <= src.size(); )
     {
         const std::size_t nl      = src.find( '\n', lineStart );
@@ -1267,7 +1283,7 @@ inline AstroFrontmatter astroFrontmatterRange( std::string_view src, TSRange& ou
             }
             out.start_byte  = static_cast<std::uint32_t>( contentStart );
             out.end_byte    = static_cast<std::uint32_t>( lineStart );
-            out.start_point = TSPoint{ 1u, 0u };
+            out.start_point = TSPoint{ contentRow, 0u };
             out.end_point   = TSPoint{ row, 0u };
             return AstroFrontmatter::Ok;
         }

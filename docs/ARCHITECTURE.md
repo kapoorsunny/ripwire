@@ -307,7 +307,8 @@ WHAT IT CANNOT SEE, and every item is a real loss, not a rounding:
 - **Most recovered callers are `<file-scope>`.** Astro frontmatter is module-level code, so its top-level
   calls are owned by the module-scope node issue #60 mints, not by a named function.
 - **A `---` inside a template literal or a comment in the frontmatter ends the block early.** The scan is
-  lexical, and it contributes no symbols rather than a guess. The two refusals are NOT the same answer: a
+  lexical: symbols before the stray fence are kept, the rest are lost, and the file is flagged
+  `degraded-parse`. The two refusals are NOT the same answer: a
   file with no fence at all is an ordinary template-only component and is silent, while a file that opens
   `---` and never closes it is frontmatter we can see the start of and cannot extract — that one is
   disclosed through `ExtractShortfall` and appears as `<f why="extract-partial"/>` under `--skipped`,

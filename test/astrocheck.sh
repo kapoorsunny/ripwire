@@ -122,6 +122,29 @@ for quiet in ('templateonly.astro', 'page.astro', 'leak.astro', 'crlf.astro'):
 print('  PASS an unterminated `---` fence is disclosed as extract-partial, and ordinary .astro files are not')
 SKIPPY
 
+# (6d) BLANK LINES BEFORE THE OPENING FENCE. Astro's compiler (@astrojs/compiler 4.0.0, checked with parse()
+# and transform()) accepts blank and whitespace-only lines before the opening `---`. Before this arm such a
+# file was read as template-only: no symbols, no edges, and nothing disclosed. WRITTEN RED against 8a5e205a.
+# Every skipped row moves the frontmatter down, so the call sites are pinned by LINE, which is where a
+# start_point that forgot the skipped rows would show.
+mkdir -p "$TMP/lead"
+cp "$ROOT/test/astrofix/svc.ts" "$TMP/lead/svc.ts"
+printf -- '\n\n---\nimport { astroSquare } from "./svc";\nfunction leadHelper( n: number ): number { return astroSquare( n ); }\n---\n<p>{leadHelper( 2 )}</p>\n' > "$TMP/lead/lead.astro"
+printf -- '\r\n  \r\n---\r\nimport { astroSquare } from "./svc";\r\nfunction crlfLeadHelper( n: number ): number { return astroSquare( n ); }\r\n---\r\n<p>{crlfLeadHelper( 2 )}</p>\r\n' > "$TMP/lead/leadcrlf.astro"
+"$BIN" "$TMP/lead" --no-cache --uses=astroSquare > "$TMP/leaduses.xml"
+"$BIN" "$TMP/lead" --no-cache --skipped > "$TMP/leadskipped.xml"
+python3 - "$TMP/leaduses.xml" "$TMP/leadskipped.xml" <<'LEADPY'
+import sys, xml.etree.ElementTree as ET
+sites = {(u.get('p'), u.get('in_id')) for u in ET.parse(sys.argv[1]).getroot().iter('u')}
+for want in (('lead.astro:5', 'leadHelper'), ('leadcrlf.astro:5', 'crlfLeadHelper')):
+    assert want in sites, (f'{want[1]} was not read at {want[0]}: frontmatter behind blank lines', sorted(sites))
+doc = ET.parse(sys.argv[2]).getroot()
+root = doc if doc.tag == 'skipped' else doc.find('.//skipped')
+disclosed = sorted(f.get('p') for f in root.iter('f') if f.get('p', '').endswith('.astro')) if root is not None else []
+assert not disclosed, ('a well-formed .astro was disclosed as a shortfall', disclosed)
+print('  PASS frontmatter behind blank lines is read, on absolute lines, with nothing disclosed')
+LEADPY
+
 # (7) THE RESET. Interleave .astro files with .ts files whose marker sits at the END: a leaked included
 # range would truncate the .ts lex and the marker would vanish. Built here, not committed — 80 files would
 # join every other gate's view of test/.

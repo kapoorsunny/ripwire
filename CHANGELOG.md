@@ -13,6 +13,15 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ---
 
+## [Unreleased]
+
+### Added — Astro (`.astro`) frontmatter is indexed on the TypeScript grammar (#320, #67)
+
+An `.astro` file's `---` frontmatter is now parsed with the vendored TypeScript grammar, restricted to that
+block by one included range, so a frontmatter call resolves into the `.ts` service it imports. The template
+half is not read at all, and an `.astro` file reports `lang="ts"`; both are disclosed blind spots in
+`docs/ARCHITECTURE.md#astro-extraction`. `kParserVer` 121 → 122; `kCacheVersion` is unchanged.
+
 ## [0.6.2] — 2026-09-21
 
 ### Added — Microsoft's `cl.exe` builds the tree, so both Windows front ends compile and both gate
