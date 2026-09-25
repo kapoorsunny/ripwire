@@ -45,6 +45,9 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
   second run crawled the first run's output as a new unindexed text file, and the map header's top-6
   `unindexed=` list could change between the two runs. The engine was deterministic; the recipe was not.
   The top-6 cut itself is well-defined (count descending, then extension name) and is unchanged.
+- The Windows cache location with `TMPDIR`, `TEMP` and `TMP` all unset is now documented and kept as it
+  is. Windows' own temp-directory rule then falls back to the profile folder, so the cache is
+  `%USERPROFILE%\ripwire-<uid>`. That is per-user, and `--doctor`'s `cache-dir` row names it.
 
 ## [0.6.3] — 2026-09-25
 

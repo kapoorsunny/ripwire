@@ -960,7 +960,9 @@ ripwire --version
   the skills installer. The map itself runs without it.
 - **`ripwire . --doctor`**: every row should read `ok="1"`. `binary-path` stays marked `degraded="1"` on Windows
   (it asks Git Bash's `which`). When it fails, `which=` names the `ripwire` that `Path` finds first, and
-  `which_version=` is what that one prints for `--version`. The cache lives in `%LOCALAPPDATA%\Temp\ripwire-<uid>`.
+  `which_version=` is what that one prints for `--version`. The cache lives in `%LOCALAPPDATA%\Temp\ripwire-<uid>`
+  (your `TEMP`). With `TMPDIR`, `TEMP` and `TMP` all unset, Windows' own temp-directory rule falls back to your profile
+  folder, so the cache is `%USERPROFILE%\ripwire-<uid>`; the `cache-dir` row names the directory either way.
 - **Agent skills** (Claude Code, Codex): from Git Bash, in the unzipped folder, `bash skills/install.sh` (Claude Code)
   or `bash skills/install.sh --codex`. Or copy them by hand in PowerShell:
   `New-Item -ItemType Directory -Force "$HOME\.claude\skills" | Out-Null; Copy-Item -Recurse -Force "$bin\skills\ripwire-*" "$HOME\.claude\skills\"`
