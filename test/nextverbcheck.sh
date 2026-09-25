@@ -122,13 +122,13 @@ rrun --callers=@geometry.cpp:5 >"$TMP/ca2"; checkNext "callers @FILE:LINE" "$TMP
 rrun --callees=total_area >"$TMP/ce"; checkNext "callees" "$TMP/ce" '^--expand=total_area$'
 rrun --callers=distance --format=columnar >"$TMP/cac"; checkNext "callers columnar" "$TMP/cac" '^--uses=distance$'
 
-echo "=== (2b) PLAN_064 E2 regression: --impact with a LONG name keeps its full, runnable --safe-delete= ==="
-# The review's reproduction (rv-answers-next-064.md MUST-1): a long symbol name pushes --impact's root
+echo "=== (2b) 2026-09-25 regression: --impact with a LONG name keeps its full, runnable --safe-delete= ==="
+# From independent review, 2026-09-25: a long symbol name pushes --impact's root
 # next= past 120 B on an UNCUT answer, and the first draft of this lane's fix replaced a complete,
 # correctly-quoted, runnable next="--safe-delete=NAME" with next_dropped="1" — a working follow-up lost for
 # no reason but its own length. The ruling: nextAttrXml carries no length ceiling at all, so this stays the
 # FULL invocation whatever it costs. checkNext's own `${#v} -le 120` line is a fixture artifact of every
-# OTHER arm in this file, not a runtime contract (rv-answers-next-064.md), so this arm builds a fixture
+# OTHER arm in this file, not a runtime contract, so this arm builds a fixture
 # deliberately over it and checks the invocation directly instead of through checkNext.
 LONGSYM="a_very_long_python_function_name_that_a_caller_uses_and_that_pushes_the_next_invocation_well_past_one_hundred_and_twenty_bytes_total"
 LREPO="$TMP/longsym"; mkdir -p "$LREPO"

@@ -551,7 +551,7 @@ else
 fi
 # …and past the OLD ceiling it used to emit no HINT AT ALL (base), then this lane's first draft disclosed
 # the loss as next_dropped="1" instead of the full invocation — still no route back to the rest. The
-# ruling (PLAN_064 E2, 2026-09-25): nextAttrXml carries no length ceiling, so an over-long task's widening
+# ruling (2026-09-25): nextAttrXml carries no length ceiling, so an over-long task's widening
 # next= is now the FULL forWidenNext invocation, and it must paste and run. RED on origin/main: no next=
 # at all on the choice for a task this long.
 LONGTASK="Find the code responsible for this retry timeout bug in the scheduler and the queue and the retry budget and the backoff table and the metrics"
@@ -564,18 +564,18 @@ sys.stdout.write( '' if choice is None else choice.get( 'next', '' ) )
 PY
 )"
 if [ -z "$FWLRAWNEXT" ]; then
-    no "PLAN_064 E2: an over-long task's widening next= is absent (want the full forWidenNext invocation)"
+    no "an over-long task's widening next= is absent (want the full forWidenNext invocation)"
 else
-    if [ "${#FWLRAWNEXT}" -gt 120 ]; then ok "PLAN_064 E2: the over-long task's widening next= is emitted in full (${#FWLRAWNEXT} B), never dropped"
-    else no "PLAN_064 E2: this task's widening next= is only ${#FWLRAWNEXT} B (<=120) — not a real test of the no-ceiling rule"; fi
+    if [ "${#FWLRAWNEXT}" -gt 120 ]; then ok "the over-long task's widening next= is emitted in full (${#FWLRAWNEXT} B), never dropped"
+    else no "this task's widening next= is only ${#FWLRAWNEXT} B (<=120) — not a real test of the no-ceiling rule"; fi
     FWLNEXT="$( python3 -c 'import shlex, sys; sys.stdout.write( "\n".join( shlex.split( sys.argv[1] ) ) )' "$FWLRAWNEXT" )"
     OLDIFS="$IFS"; IFS='
 '; set -f; # shellcheck disable=SC2086
     set -- $FWLNEXT; IFS="$OLDIFS"; set +f
     FWLRUN="$( "$BIN" "$REPO" --no-cache "$@" )"; rcl=$?
     { [ $rcl -eq 0 ] && printf '%s' "$FWLRUN" | grep -q '<files '; } \
-        && ok "PLAN_064 E2: the over-long task's full widening next= runs and returns the file-grain <files> page" \
-        || no "PLAN_064 E2: the over-long task's widening next= failed to run (rc=$rcl, argv=[$FWLRAWNEXT])"
+        && ok "the over-long task's full widening next= runs and returns the file-grain <files> page" \
+        || no "the over-long task's widening next= failed to run (rc=$rcl, argv=[$FWLRAWNEXT])"
 fi
 
 # ── two routers, ONE vocabulary: every shipped skill must be nameable by --help-task ──────────────────

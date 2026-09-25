@@ -1167,7 +1167,8 @@ inline void writeCappedList( std::FILE* out, const char* tag, const Seq& seq, st
 
 // P3 (nextverb.h): the ONE pasteable follow-up, and it is EXACT — the smallest --limit that cuts none of
 // the listings THIS run cut. Empty when nothing was cut (so an uncut root is byte-identical to what it was).
-// Emitted in full whatever its length (PLAN_064 E2, 2026-09-25): nextAttrXml carries no ceiling on next=, so
+// Emitted in full whatever its length (2026-09-25 fix: a cut answer's next= used to be dropped past 120 B):
+// nextAttrXml carries no ceiling on next=, so
 // a very long gate name no longer costs the reader the one pasteable route back to the rest.
 inline std::string flipNextInvocation( const FlipResult& res, std::size_t maxRows, int pageOffset )
 {

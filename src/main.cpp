@@ -1206,7 +1206,8 @@ inline std::string churnDecayWindowLabel( std::string_view minedSpan )
 // total="6" and handed back a next= that yields twelve rows — a page pointer into a different corpus, which is
 // worse than no pointer at all. The scoped next= carries no LENGTH cap either, the same as every other next=
 // producer (forPageInvocation, flipimpact): nextAttrXml (nextverb.h) never truncates or drops next= on length
-// (PLAN_064 E2, 2026-09-25); a long --since plus a deep DIR plus --limit/--offset is simply emitted in full.
+// (2026-09-25 fix for a cut answer's next= being dropped past 120 B); a long --since plus a deep DIR plus
+// --limit/--offset is simply emitted in full.
 //
 // THE SHAPE. One function, two callers, one cap. `withIn` picks the scoped page (--in=DIR carried, at the next
 // offset) or the stub's "same run without --in".
@@ -1277,9 +1278,9 @@ inline std::string scopedMapNextInvocation( const rw::Config& cfg, std::string_v
             inv += " --limit=" + std::to_string( cfg.pageLimit );
         }
     }
-    // Built and returned in full, whatever its length (PLAN_064 E2, 2026-09-25): nextAttrXml (nextverb.h)
-    // carries no ceiling on next=, so a long --since plus a deep DIR plus --limit/--offset is simply pasted
-    // in full rather than truncated or dropped.
+    // Built and returned in full, whatever its length (2026-09-25 fix: a cut answer's next= used to be
+    // dropped past 120 B): nextAttrXml (nextverb.h) carries no ceiling on next=, so a long --since plus a
+    // deep DIR plus --limit/--offset is simply pasted in full rather than truncated or dropped.
     return inv;
 }
 
@@ -1862,7 +1863,7 @@ int runDefaultMap( const MainDispatch& d )
         if( nextOffset < scopedRecentOf )
         {
             scopedNext        = scopedMapNextInvocation( cfg, mapAnn.scopeDir, /*withIn=*/true, nextOffset );
-            mapAnn.scopedNext = scopedNext;   // always the full invocation now (PLAN_064 E2): no length ceiling
+            mapAnn.scopedNext = scopedNext;   // always the full invocation now (no length ceiling on next=)
         }
         stubNext           = scopedMapNextInvocation( cfg, mapAnn.scopeDir, /*withIn=*/false, 0 );
         mapAnn.stubSymbols = true;
@@ -3394,8 +3395,8 @@ int runHelpTask( const rw::Config& cfg, const rw::IngestResult& ing, const std::
         out += "<choice intent=\"" + ex( choice.id ) + "\" skill=\"" + ex( choice.skill ) + "\" reason=\"" + ex( choice.reason );
         out += "\" score=\"" + std::to_string( choice.score ) + "\"";
         // present-only: the WIDENING follow-up of a --for-shaped recommendation, nothing on any other.
-        // Keyed off the INTENT, and spelled by forpage.h's own forWidenNext — the same quoting, and (PLAN_064
-        // E2, 2026-09-25) emitted in full whatever its length: nextAttrXml carries no ceiling on next=, so a
+        // Keyed off the INTENT, and spelled by forpage.h's own forWidenNext — the same quoting, and (as of
+        // 2026-09-25) emitted in full whatever its length: nextAttrXml carries no ceiling on next=, so a
         // long task is pasted in full rather than truncated or dropped.
         const bool widens = rw::taskroute::isOneOf( choice.id, std::begin( rw::taskroute::kForShapedIntents ),
                                                    std::size( rw::taskroute::kForShapedIntents ) );

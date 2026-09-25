@@ -140,7 +140,8 @@ inline std::size_t distinctFilesOf( const IngestResult& ing, const std::vector<N
 }
 
 // `--for=TASK --limit=N [--offset=M]`, the task quoted as a shell would need it (nextFlag). Built and emitted
-// in FULL, whatever its length: nextAttrXml (nextverb.h) carries no ceiling on next= (PLAN_064 E2, 2026-09-25)
+// in FULL, whatever its length: nextAttrXml (nextverb.h) carries no ceiling on next= (2026-09-25 fix: a
+// cut answer's next= used to be dropped past 120 B)
 // — the paging quintet still says how to continue, but the attribute itself is never truncated or dropped.
 // Folded onto pagedNext (nextverb.h), the same composer --tree/--zoom/--external-surface use, with
 // offsetAtZero=false: --for's page 0 must stay `--limit=N` with no `--offset=0` tail (forwidencheck.sh arm 5).

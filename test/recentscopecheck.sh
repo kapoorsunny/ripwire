@@ -535,8 +535,8 @@ ofP2="$( scopedTag "$P2EX" | grep -oE 'of="[0-9]+"' | head -1 | tr -dc '0-9' )"
     && ok "arm 10d: the pasted next= lands on the SAME corpus (of=\"$ofP2\" both sides)" \
     || no "arm 10d: the pasted next= sees of=\"$ofP2\" where the page it came from saw of=\"$ofEx\""
 # past 120 B the pasteable next= attribute used to be ABSENT — a hand-hacked "policed" ceiling in
-# nextAttrXml that discarded a complete, runnable invocation instead of naming the loss (PLAN_064 E2's
-# first draft; REVERTED). The ruling: a complete answer in the fewest bytes still means a follow-up
+# nextAttrXml that discarded a complete, runnable invocation instead of naming the loss (an earlier draft
+# of this fix; REVERTED). The ruling: a complete answer in the fewest bytes still means a follow-up
 # TERMINATES the search, so nextAttrXml (2026-09-25) now carries NO length ceiling at all — the full
 # invocation is emitted whatever it costs, and it must actually paste and run.
 # RED on origin/main (the base silently drops next= past 120 B — absent, and has_more="1" is the reader's

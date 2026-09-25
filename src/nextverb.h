@@ -151,7 +151,8 @@ inline std::string nextFlag( std::string_view flag, std::string_view value )
 // then none is added: the default window is what the next page uses too). `invocation` carries every other flag
 // that shapes the rows (--zoom=D, --zoom-levels=N), since the next page must be a page of the SAME listing.
 //
-// `offsetAtZero` (PLAN_064 E2 fold, 2026-09-25): --tree/--zoom/--external-surface always page an already-cut
+// `offsetAtZero` (folded in on 2026-09-25 with the next=-length-ceiling removal): --tree/--zoom/--external-surface
+// always page an already-cut
 // listing, so their next offset is never 0 and `--offset=` always belongs — the default keeps that. --for's
 // widening page (forpage.h's forPageInvocation) is the one caller whose FIRST page is offset 0, and there
 // `--offset=0` must stay unemitted (forwidencheck.sh arm 5 pins the bare `--limit=40` tail); it passes false.

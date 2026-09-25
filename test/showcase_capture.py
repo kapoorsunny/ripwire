@@ -525,7 +525,7 @@ add(S7, f"{BIN} . --rank-by=churn --top-k=5", "Rank by git change-frequency prio
 # fmt_block's display cut, so the reader never reaches the scoped one, its next= or the stub; too narrow and
 # DIR has --limit or fewer touched files, the page does not cut, and the block prints capped="0" with no
 # paging half and no next= — the case showing none of what it exists to show. A THIRD constraint squeezes
-# from the side: every --exclude lengthens the continuation the scoped page replays, and (PLAN_064 E2,
+# from the side: every --exclude lengthens the continuation the scoped page replays, and (as of
 # 2026-09-25) next= is now emitted in FULL whatever its length — a narrower corpus keeps the demonstrated
 # next= short and readable, not the difference between showing one and showing nothing.
 #
@@ -578,7 +578,7 @@ def inCaseUnshown( n ):
         if 'capped="1"' not in scoped.group( 0 ):
             gone.append( f'capped="1" (the window is too narrow for --limit={_IN_LIMIT} to cut)' )
         if "next=" not in scoped.group( 0 ):
-            gone.append( "the scoped page's next= (unexpectedly absent — PLAN_064 E2: next= is no longer dropped for length)" )
+            gone.append( "the scoped page's next= (unexpectedly absent — next= is no longer dropped for length, as of 2026-09-25)" )
     if "<symbols stubbed=" not in shown:
         gone.append( "the <symbols stubbed=> stub (past the display cut)" )
     return gone

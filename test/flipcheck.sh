@@ -278,7 +278,7 @@ printf '%s' "$D10" | grep -q '<capped what="depth" at="8"/>' \
 printf '%s' "$D10" | grep -q 'what=depth' \
     && ok "depth: the capped clause defining what=depth rides with the row" || no "depth: <capped what=\"depth\"> emitted with no clause defining it"
 
-# ── PLAN_064 E2 (2026-09-25): a next= over 120 B used to be dropped SILENTLY (base), then this lane's
+# ── 2026-09-25: a next= over 120 B used to be dropped SILENTLY (base), then this lane's
 # first draft replaced a complete, runnable invocation with next_dropped="1" instead — a working follow-up
 # lost either way for no reason but its own length. The ruling: nextAttrXml carries NO length ceiling, so
 # flipNextInvocation's full "--flags --flip=NAME --limit=N" is now always emitted, and it must actually
