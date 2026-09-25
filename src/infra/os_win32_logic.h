@@ -38,6 +38,13 @@
 #include <string>
 #include <string_view>
 
+// shSingleQuote (jsonesc.h) is used below (as PowerShell's own quoting, via its escapedQuote= argument) to quote
+// the PATH-remedy hint's directory as a shell literal (CodeRabbit 4109273959). jsonesc.h cannot be #included
+// here for the same reason os.h forward-declares it instead of including it (see os.h's own copy of this
+// comment): jsonesc.h needs emit.h's formatTo, and emit.h #includes os.h, which #includes this file — a cycle.
+// No default argument here (see os.h): every call below passes both arguments explicitly.
+namespace rw { std::string shSingleQuote( const std::string& s, std::string_view escapedQuote ); }
+
 namespace rw::oswin
 {
 
@@ -1137,11 +1144,15 @@ constexpr bool extensionInList( std::string_view path, std::string_view pathext 
 // remedy is a shell `export PATH=` line; both Windows testers on #334 read that line in PowerShell, where it does
 // nothing. Here it is PowerShell's own assignment, with the directory in native '\' separators (a program path is '/'-
 // separated), for this window, and the pointer to the user Path that new windows read (README's Windows install sets it).
+// The directory (plus the trailing ';') is single-quoted as a literal via the shared shSingleQuote (jsonesc.h),
+// with PowerShell's own doubled-quote escape (`''`, not POSIX's `'\''`); `$env:Path` is appended outside the
+// quotes so it still expands to the existing Path.
 inline std::string powerShellPathPrependHint( std::string_view programDir ) noexcept
 {
     std::string dir( programDir );
     std::replace( dir.begin(), dir.end(), '/', '\\' );
-    return "$env:Path = \"" + dir + ";$env:Path\" in PowerShell (this window; add the directory to your user Path for new ones)";
+    return "$env:Path = " + rw::shSingleQuote( dir + ";", "''" ) + " + $env:Path"
+           " in PowerShell (this window; add the directory to your user Path for new ones)";
 }
 
 }   // namespace rw::oswin

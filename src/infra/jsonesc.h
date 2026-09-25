@@ -308,12 +308,18 @@ inline bool isJsonWs( char c ) noexcept
 // it in for free. gitmine.h's rw::shSingleQuote is the more widely used name (main.cpp, prcontext.h,
 // quality.h, mcp server) — kept as the canonical spelling; docparse.h's detail::shellQuote now
 // forwards here instead of carrying its own copy.
-inline std::string shSingleQuote( const std::string& s )
+//
+// `escapedQuote` is what an embedded `'` becomes: POSIX's own default `'\''` (close the literal, an
+// escaped literal quote, reopen), or PowerShell's `''` (doubled, its own non-interpolating spelling —
+// rw::oswin::powerShellPathPrependHint, os_win32_logic.h, forward-declares this rather than including
+// this header: os.h -> jsonesc.h -> emit.h -> os.h would cycle, since emit.h itself #includes os.h).
+// One shape, one place to fix a quoting bug — CodeRabbit 4109273959's own finding about exactly that.
+inline std::string shSingleQuote( const std::string& s, std::string_view escapedQuote = "'\\''" )
 {
     std::string out = "'";
     for( char c : s )
     {
-        if( c == '\'' ) { out += "'\\''"; }
+        if( c == '\'' ) { out += escapedQuote; }
         else
         {
             out += c;

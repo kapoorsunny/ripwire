@@ -665,15 +665,15 @@ done
 # placeholder username `x` — not a real developer's home directory. Keyed on the full `path:line:content`
 # the sweep itself prints, so an edit that changes the line (content OR line number) drops out of the
 # allowlist and is reported like any other hit, never silently waved through.
-ARM2_EXEMPT_HITS='test/verify_os_win32_logic.cpp:304:    CHECK( fromNative( u"c:\\Users\\x", 64, error, written ) == "C:/Users/x" );
-test/verify_os_win32_logic.cpp:361:    CHECK( rebaseMsysTmp( "/tmp/ripwire-1001", "C:\\Users\\x\\AppData\\Local\\Temp\\" ) == "C:/Users/x/AppData/Local/Temp/ripwire-1001" );
-test/verify_os_win32_logic.cpp:391:    CHECK( rebasedProgramPath( doctorCacheDir, nativeTmp ) == "C:/Users/x/AppData/Local/Temp/ripwire-1001" );
-test/verify_os_win32_logic.cpp:401:    CHECK( rebasedProgramPath( "C:/Users/x/project", nativeTmp ) == oracle( "C:/Users/x/project" ) );
-test/verify_os_win32_logic.cpp:402:    CHECK( rebasedProgramPath( "C:/Users/x/project", nativeTmp ).empty() );
-test/verify_os_win32_logic.cpp:434:    CHECK( rebasedProgramPath( "/tmp/ripwire-1001", nativeTmp ) == "C:/Users/x/AppData/Local/Temp/ripwire-1001" );
-test/verify_os_win32_logic.cpp:439:    CHECK( rebasedProgramPath( "C:/Users/x/AppData/Local/Temp/ripwire", nativeTmp ).empty() );
-test/verify_os_win32_logic.cpp:445:    CHECK( rebasedProgramPath( "/tmp/ripwire", nativeTmp ) == "C:/Users/x/AppData/Local/Temp/ripwire" );
-test/verify_os_win32_logic.cpp:802:    CHECK( !isAcceptableShell( "C:/Users/x/AppData/Local/Microsoft/WindowsApps/bash.exe" ) );      // WSL alias'
+ARM2_EXEMPT_HITS='test/verify_os_win32_logic.cpp:306:    CHECK( fromNative( u"c:\\Users\\x", 64, error, written ) == "C:/Users/x" );
+test/verify_os_win32_logic.cpp:363:    CHECK( rebaseMsysTmp( "/tmp/ripwire-1001", "C:\\Users\\x\\AppData\\Local\\Temp\\" ) == "C:/Users/x/AppData/Local/Temp/ripwire-1001" );
+test/verify_os_win32_logic.cpp:393:    CHECK( rebasedProgramPath( doctorCacheDir, nativeTmp ) == "C:/Users/x/AppData/Local/Temp/ripwire-1001" );
+test/verify_os_win32_logic.cpp:403:    CHECK( rebasedProgramPath( "C:/Users/x/project", nativeTmp ) == oracle( "C:/Users/x/project" ) );
+test/verify_os_win32_logic.cpp:404:    CHECK( rebasedProgramPath( "C:/Users/x/project", nativeTmp ).empty() );
+test/verify_os_win32_logic.cpp:436:    CHECK( rebasedProgramPath( "/tmp/ripwire-1001", nativeTmp ) == "C:/Users/x/AppData/Local/Temp/ripwire-1001" );
+test/verify_os_win32_logic.cpp:441:    CHECK( rebasedProgramPath( "C:/Users/x/AppData/Local/Temp/ripwire", nativeTmp ).empty() );
+test/verify_os_win32_logic.cpp:447:    CHECK( rebasedProgramPath( "/tmp/ripwire", nativeTmp ) == "C:/Users/x/AppData/Local/Temp/ripwire" );
+test/verify_os_win32_logic.cpp:804:    CHECK( !isAcceptableShell( "C:/Users/x/AppData/Local/Microsoft/WindowsApps/bash.exe" ) );      // WSL alias'
 hits="$( sweep '/Users/' || true )"
 if [ -n "$hits" ]; then
     hits="$( printf '%s\n' "$hits" | grep -vFx -- "$ARM2_EXEMPT_HITS" || true )"

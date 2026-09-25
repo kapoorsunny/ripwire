@@ -52,6 +52,16 @@
 #include <string>
 #include <string_view>
 
+// shSingleQuote (jsonesc.h) is used below to quote the PATH-remedy hint's `dir` as a shell literal (CodeRabbit
+// 4109273959), but jsonesc.h cannot be #included here: jsonesc.h needs emit.h's formatTo, and emit.h itself
+// #includes this file (for rw::os::open_memstream) — os.h -> jsonesc.h -> emit.h -> os.h would be a cycle. A
+// forward declaration is enough: this header only CALLS shSingleQuote from an inline function, so no TU needs
+// its body unless that inline function is actually invoked, and every caller of rw::os::path_prepend_hint pulls
+// in jsonesc.h's real definition some other way (main.cpp via gitmine.h; a unit test by including it directly).
+// The default argument is omitted here (repeating a DIFFERENT default across declarations is illegal, an
+// identical one is redundant) — jsonesc.h's own declaration supplies it, and every call below takes 1 argument.
+namespace rw { std::string shSingleQuote( const std::string& s, std::string_view escapedQuote ); }
+
 namespace rw::os
 {
 
@@ -246,9 +256,12 @@ static_assert( requires( const stat_t& st ) { st.st_mode; st.st_size; st.st_mtim
 // path_prepend_hint: the line a user pastes to put `dir` (a program path) first on PATH in the shell they use there, as
 // --doctor's NOT ON PATH hint prints it. POSIX: an `export PATH=` line and the rc-file reminder. Windows: PowerShell's
 // `$env:Path =` (oswin::powerShellPathPrependHint), since a POSIX line pasted there does nothing (#334).
+// `dir` is single-quoted as a shell literal (CodeRabbit 4109273959): unquoted or double-quoted, a `$`, a backtick or
+// a `$(...)` in the directory name would expand or run when the user pastes the hint. `$PATH` stays outside the
+// quotes so it still expands to the existing PATH.
 inline std::string path_prepend_hint( std::string_view dir )
 {
-    return "export PATH=\"" + std::string( dir ) + ":$PATH\" (and put that line in your shell rc file)";
+    return "export PATH=" + shSingleQuote( std::string( dir ), "'\\''" ) + ":\"$PATH\" (and put that line in your shell rc file)";
 }
 
 // ── process start and path intake ──────────────────────────────────────────────────────────────────────────
