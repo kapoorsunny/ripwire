@@ -16,15 +16,15 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 ## [Unreleased]
 
 ### Fixed
-- `next=` is no longer silently dropped past its 120-byte ceiling. `--for`'s page/widen follow-up
-  (`forPageInvocation`/`forWidenNext`), `--flip`'s cut-listing follow-up, and the churn-decay map's
-  `--in=DIR` scoped/stub follow-ups (including the task-router's `--for`-shaped `<choice>` widening
-  hint) used to build the full invocation and then throw it away when it exceeded
-  `kNextAttrMaxBytes`, leaving `next=` absent — indistinguishable from a root with nothing to
-  suggest, so a cut answer lost its only route to the rest. `nextAttrXml` (the one place every next=
-  producer already funnels through) now polices the ceiling itself and discloses `next_dropped="1"`
-  instead of saying nothing; the attribute itself still never exceeds 120 bytes, so nothing that
-  already parses `next=` breaks.
+- `next=` is no longer silently dropped past its old 120-byte ceiling. `--for`'s page/widen
+  follow-up (`forPageInvocation`/`forWidenNext`), `--flip`'s cut-listing follow-up, and the
+  churn-decay map's `--in=DIR` scoped/stub follow-ups (including the task-router's `--for`-shaped
+  `<choice>` widening hint) used to build the full invocation and then throw it away when it
+  exceeded `kNextAttrMaxBytes`, leaving `next=` absent — indistinguishable from a root with nothing
+  to suggest, so a cut answer with a long follow-up (a deep path, a long symbol name) silently lost
+  its only route to the rest. `nextAttrXml` (the one place every next= producer funnels through)
+  now carries no length ceiling at all and always emits the full, runnable invocation; an answer
+  whose next= was already ≤120 B is unchanged.
 - `hooks/ripwire-nudge.sh`'s SessionStart primer read `git rev-parse --is-inside-work-tree` by exit
   status only. A bare repository, or a cwd inside a work tree's own `.git` directory, prints `false`
   with status 0 there, so the primer could still run in a population it was never meant to reach (the

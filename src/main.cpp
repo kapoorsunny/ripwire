@@ -60,7 +60,7 @@ static_assert( rw::kTestGateCcxBarMirror == rw::quality::kCcxBar, "situ.h kTestG
 #include "query.h"
 #include "pattern.h"               // R2: the pattern surface's compiler + disclosures (the matcher runs inside the ingest walk)
 #include "verify.h"                // G4 verify-a-claim: the --verify closed claim grammar + verdict/limit vocabularies (runVerify below)
-#include "forpage.h"               // forWidenNext — the ONE spelling of the --for widening page, with its byte ceiling
+#include "forpage.h"               // forWidenNext — the ONE spelling of the --for widening page
 #include "taskroute.h"             // --help-task: deterministic task -> one safe CLI recommendation or abstention
 #include "quality.h"
 #include "cloneidiom.h"          // idiom-class demotion for clone findings — the closed 3-idiom shape classifier both --clones and the quality-delta duplication kind annotate rows with
@@ -1204,10 +1204,9 @@ inline std::string churnDecayWindowLabel( std::string_view minedSpan )
 // that shapes the CORPUS was dropped from the invocation the tool told the caller to paste: --exclude,
 // --no-ignore, --ignore-tests, --stable, --legend, --max-tokens, --token-budget. `--in=a --exclude=b` reported
 // total="6" and handed back a next= that yields twelve rows — a page pointer into a different corpus, which is
-// worse than no pointer at all. And the scoped next= had no LENGTH cap, while every other next= in the tool
-// was policed against kNextAttrMaxBytes (forPageInvocation, flipimpact): a long --since plus a deep DIR plus
-// --limit/--offset sails past 120 bytes and pastes wrong. (PLAN_064 E2, 2026-09-25: that policing moved into
-// nextAttrXml itself, which now discloses `next_dropped="1"` past the ceiling instead of pasting silence.)
+// worse than no pointer at all. The scoped next= carries no LENGTH cap either, the same as every other next=
+// producer (forPageInvocation, flipimpact): nextAttrXml (nextverb.h) never truncates or drops next= on length
+// (PLAN_064 E2, 2026-09-25); a long --since plus a deep DIR plus --limit/--offset is simply emitted in full.
 //
 // THE SHAPE. One function, two callers, one cap. `withIn` picks the scoped page (--in=DIR carried, at the next
 // offset) or the stub's "same run without --in".
@@ -1278,10 +1277,9 @@ inline std::string scopedMapNextInvocation( const rw::Config& cfg, std::string_v
             inv += " --limit=" + std::to_string( cfg.pageLimit );
         }
     }
-    // Built in full even past kNextAttrMaxBytes: nextAttrXml (nextverb.h) is the one place that polices the
-    // ceiling now, and it discloses `next_dropped="1"` rather than nothing (PLAN_064 E2) — a long --since plus
-    // a deep DIR plus --limit/--offset can still sail past 120 bytes, but a reader is now TOLD so, instead of
-    // reading absence as "no scoped page exists" (has_more= already says otherwise).
+    // Built and returned in full, whatever its length (PLAN_064 E2, 2026-09-25): nextAttrXml (nextverb.h)
+    // carries no ceiling on next=, so a long --since plus a deep DIR plus --limit/--offset is simply pasted
+    // in full rather than truncated or dropped.
     return inv;
 }
 
@@ -1864,7 +1862,7 @@ int runDefaultMap( const MainDispatch& d )
         if( nextOffset < scopedRecentOf )
         {
             scopedNext        = scopedMapNextInvocation( cfg, mapAnn.scopeDir, /*withIn=*/true, nextOffset );
-            mapAnn.scopedNext = scopedNext;   // "" past kNextAttrMaxBytes: has_more= still says a page exists
+            mapAnn.scopedNext = scopedNext;   // always the full invocation now (PLAN_064 E2): no length ceiling
         }
         stubNext           = scopedMapNextInvocation( cfg, mapAnn.scopeDir, /*withIn=*/false, 0 );
         mapAnn.stubSymbols = true;
@@ -3396,9 +3394,9 @@ int runHelpTask( const rw::Config& cfg, const rw::IngestResult& ing, const std::
         out += "<choice intent=\"" + ex( choice.id ) + "\" skill=\"" + ex( choice.skill ) + "\" reason=\"" + ex( choice.reason );
         out += "\" score=\"" + std::to_string( choice.score ) + "\"";
         // present-only: the WIDENING follow-up of a --for-shaped recommendation, nothing on any other.
-        // Keyed off the INTENT, and spelled by forpage.h's own forWidenNext — the same quoting and the same
-        // kNextAttrMaxBytes ceiling nextAttrXml polices on every next= (PLAN_064 E2), so a task too long to
-        // paste never pastes a hint that would run wrong — it gets `next_dropped="1"` instead of nothing.
+        // Keyed off the INTENT, and spelled by forpage.h's own forWidenNext — the same quoting, and (PLAN_064
+        // E2, 2026-09-25) emitted in full whatever its length: nextAttrXml carries no ceiling on next=, so a
+        // long task is pasted in full rather than truncated or dropped.
         const bool widens = rw::taskroute::isOneOf( choice.id, std::begin( rw::taskroute::kForShapedIntents ),
                                                    std::size( rw::taskroute::kForShapedIntents ) );
         out += rw::nextAttrXml( widens ? rw::forWidenNext( cfg.helpTask ) : std::string() );
