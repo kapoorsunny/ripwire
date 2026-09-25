@@ -323,18 +323,30 @@ mkdir -p "$dst"
 #    manifest entry records what THIS installer once put at a path; it is not evidence about what is at that
 #    path NOW, so it must never by itself justify removing a real directory.
 #
-#    A real directory is ours ONLY when it is provably ours: it carries the copy marker this installer writes
-#    at copy time, OR it is EMPTY (the failed link an older installer left behind, nothing to lose), OR its
-#    contents are byte-for-byte identical to the skill this checkout ships under that name right now (the shape
-#    Git Bash's own deep-copy fallback and an NTFS junction Bash reports as a plain directory both produce —
-#    #334's actual failure mode, and still caught because the copy holds nothing but ripwire's own bytes).
-#    Byte comparison (`diff -rq` against the shipped source) was chosen over, say, hashing the manifest's
-#    recorded skill name because it needs no extra bookkeeping, degrades safely (no shipped skill left under
-#    that name => no match => left alone), and is exactly the property "this directory is ours" means. Anything
-#    that fails all three checks is left untouched, reported with a one-line `kept` note, and never added to
-#    the manifest's ours set — the manifest is written from what this run itself verified, never from what a
-#    past run once claimed.
-#    test/skillinstallcheck.sh section (F) drives all of it with an `ln` that behaves like that Git Bash.
+#    A real directory is ours ONLY when it is provably ours, checked in this order:
+#    1. MARKED: it carries the copy marker this installer writes at copy time, and the marker NAMES THIS
+#       DIRECTORY (B2, train 20 review). The marker holds the skill name it was copied as, so a marked copy the
+#       user renamed to another ripwire-* name to keep their edits (the marker then names a different skill) is
+#       theirs and is kept; before, an empty marker proved "some ripwire copy", not "this path", and the renamed
+#       copy was pruned as stale with the edits in it. The contract: a copied skill is ours (edits made inside it
+#       are replaced on re-run); edit your own copy under a different name.
+#       A NAMELESS (empty) marker, written by 0.6.4 candidates before B2, proves nothing about the path: such a
+#       directory is ours only when its name is a shipped skill and its contents, the marker aside, are
+#       byte-identical to that skill. Otherwise it is kept.
+#    2. EMPTY TREE: it holds no non-directory entry at ANY depth (B1). This is #334's actual shape. On Windows
+#       without symlink privilege every 0.6.0-0.6.3 installer's unverified `ln -sfn DIR DEST` left an empty
+#       directory, and on the SECOND run DEST was already a real directory, so coreutils/MSYS `ln` resolved the
+#       target to DEST/basename(DIR) and left an empty ripwire-x/ripwire-x inside it. A tree of empty
+#       directories holds no user bytes. `find` failing anywhere (an unreadable subdirectory, no find at all)
+#       means the tree is NOT provably empty, so its errors are handled explicitly and never read as "empty".
+#    3. BYTE-IDENTICAL: its contents are identical (`diff -rq`) to the skill this checkout ships under that name
+#       right now: an unmarked deep copy holding nothing but ripwire's own bytes. Residual gap, deliberately on
+#       the safe side: an unmarked copy of a skill whose bytes have changed since is kept as the user's.
+#    Byte comparison needs no extra bookkeeping and degrades safely (no shipped skill left under that name =>
+#    no match => left alone). Anything that fails every check is left untouched, reported with a one-line
+#    `kept` note, and never added to the manifest's ours set: the manifest is written from what this run
+#    itself verified, never from what a past run once claimed.
+#    test/skillinstallcheck.sh sections (F)-(I) drive all of it with an `ln` that behaves like that Git Bash.
 copyMarker=".ripwire-installed-copy"
 # shipped_src_for NAME — the skill directory this checkout would install under NAME right now, or nothing if
 # this checkout ships no such skill (a stale/renamed name, or a Hermes-native one outside non-hermes modes).
@@ -346,11 +358,27 @@ shipped_src_for()
         printf '%s\n' "$src/hermes/$1"
     fi
 }
+# tree_holds_no_files DIR: true only when `find` read the WHOLE tree cleanly and found no non-directory entry
+# in it. find's own failure (rc != 0: an unreadable subdirectory, find missing) returns false: not provably
+# empty, so the directory is kept rather than removed.
+tree_holds_no_files()
+{
+    _files="$( find "$1" ! -type d 2>/dev/null )" || return 1
+    [ -z "$_files" ]
+}
 dir_is_ours()
 {
     # $1 = the real directory found at the destination; $2 = the shipped skill dir to byte-compare it
     # against, or "" when this checkout ships nothing under that name.
-    [ -f "$1/$copyMarker" ] || [ -z "$( ls -A "$1" 2>/dev/null )" ] \
+    if [ -f "$1/$copyMarker" ]; then
+        _marked="$( cat "$1/$copyMarker" 2>/dev/null )" || return 1
+        [ "$_marked" = "$( basename "$1" )" ] && return 0           # our copy, of this very skill
+        [ -z "$_marked" ] || return 1                                 # a copy of ANOTHER skill: the user's
+        # a nameless marker (pre-B2 candidate): ours only if byte-identical to the skill shipped under this name
+        [ -n "${2:-}" ] && [ -d "$2" ] && diff -rq -x "$copyMarker" "$2" "$1" >/dev/null 2>&1
+        return
+    fi
+    tree_holds_no_files "$1" \
         || { [ -n "${2:-}" ] && [ -d "$2" ] && diff -rq "$2" "$1" >/dev/null 2>&1; }
 }
 # a real directory this installer cannot prove it created — the one shape it must never remove
@@ -426,7 +454,7 @@ install_skill()
     else
         [ -e "$target" ] || [ -L "$target" ] && remove_ours "$target"
         if cp -R "${1%/}" "$target" 2>/dev/null && cmp -s "$1/SKILL.md" "$target/SKILL.md" \
-           && : >"$target/$copyMarker" 2>/dev/null; then
+           && printf '%s\n' "$2" >"$target/$copyMarker" 2>/dev/null; then
             echo "copied $2 -> $target${3:-} (a symlink did not take here, e.g. Windows without Developer Mode; re-run after updating ripwire to refresh the copy)"
             copied=$(( copied + 1 ))
         else

@@ -97,9 +97,9 @@ The skills are symlinks named `ripwire-*` — a copy instead, marked as the inst
 can't be made (e.g. Windows without Developer Mode). Re-running the installer is safe: it refreshes the
 links and copies it manages and removes any that a newer release no longer ships, but it only ever
 replaces a real directory it can prove is its own; a real `ripwire-*` directory it did not create (yours)
-is left untouched, with a one-line note, and is never counted as installed. openclaw reads
-`~/.agents/skills` only while its state directory is the default `~/.openclaw`. Add `--contributor` to
-also activate the skill for building ripwire itself.
+is left untouched, with a one-line note, and is never counted as installed. A copied skill is ours; edit
+your own copy under a different name. openclaw reads `~/.agents/skills` only while its state directory is
+the default `~/.openclaw`. Add `--contributor` to also activate the skill for building ripwire itself.
 
 ### Advisory hooks (optional)
 

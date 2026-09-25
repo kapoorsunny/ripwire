@@ -346,7 +346,7 @@ links=0; for l in "$E"/ripwire-*; do [ -L "$l" ] && [ -f "$l/SKILL.md" ] && link
 # The user's own ripwire-mine (not shipped, not ours) survives, and the install completes around it; a stale copy of ours is pruned.
 U="$F/user"; mkdir -p "$U/ripwire-mine" "$U/ripwire-retired"
 printf 'mine\n' >"$U/ripwire-mine/SKILL.md"
-printf 'old\n' >"$U/ripwire-retired/SKILL.md"; : >"$U/ripwire-retired/.ripwire-installed-copy"
+printf 'old\n' >"$U/ripwire-retired/SKILL.md"; printf 'ripwire-retired\n' >"$U/ripwire-retired/.ripwire-installed-copy"   # marker names this dir (B2)
 bash "$SK/install.sh" "$U" >"$F/out5" 2>&1
 U_RC=$?
 { [ "$U_RC" -eq 0 ] && [ "$( cat "$U/ripwire-mine/SKILL.md" 2>/dev/null )" = "mine" ] && [ -L "$U/ripwire-router" ]; } \
@@ -442,5 +442,138 @@ B_RC=$?
 grep -qE '^copied ripwire-router' "$B/out1" \
     && ok "(b) the refreshed marked copy is reported as copied (recognised as ours via the marker), not kept" \
     || no "(b) the refreshed marked copy was not reported as copied: $( grep -i router "$B/out1" )"
+
+# ── (H) B1: NESTED failed-link leftovers. Every 0.6.x installer ran `ln -sfn "$d" "$dst/$name"` with nothing
+#    removed first. On the SECOND run DEST is already a real (empty, #334) directory, and coreutils/MSYS `ln`
+#    resolves the target to DEST/basename(SRC) before it links -- `-n` only applies to a symlink DEST -- so the
+#    failed link lands INSIDE it: an empty ripwire-x/ripwire-x. A tree of empty directories holds no user bytes;
+#    it is ours and must be replaced. The shim below is (F)'s #334 `ln` plus that coreutils target resolution.
+H="$TMP/nested"; mkdir -p "$H/shim"
+cat >"$H/shim/ln" <<'LNSHIM'
+#!/bin/sh
+# #334's ln (exit 0, a directory "link" is an empty directory) with coreutils' target resolution.
+for last in "$@"; do :; done
+srcArg=""; for a in "$@"; do case "$a" in -*) ;; *) [ "$a" = "$last" ] || srcArg="$a" ;; esac; done
+t="$last"
+if [ -d "$t" ] && [ ! -L "$t" ]; then t="$t/$( basename "${srcArg%/}" )"; fi
+[ -e "$t" ] || [ -L "$t" ] || mkdir -p "$t"
+exit 0
+LNSHIM
+chmod +x "$H/shim/ln"
+# old_063_install DST — the 0.6.0-0.6.3 skill loop in one line each: `ln -sfn` (unverified) + a manifest.
+old_063_install()
+{
+    printf 'version=1\n' >"$1/.ripwire-manifest-v1"
+    for d in "$SK"/ripwire-*/; do
+        grep -q '^audience: contributor' "$d/SKILL.md" 2>/dev/null && continue
+        PATH="$H/shim:$PATH" ln -sfn "$d" "$1/$( basename "$d" )"
+        printf 'skill=%s\n' "$( basename "$d" )" >>"$1/.ripwire-manifest-v1"
+    done
+}
+H1="$H/upgrade-real-ln"; mkdir -p "$H1"
+old_063_install "$H1"; old_063_install "$H1"                         # the double install #334 users have
+mkdir -p "$H1/ripwire-router/ripwire-router/ripwire-router"           # and a third, deeper level for good measure
+nestedH=0; for c in "$H1"/ripwire-*; do [ -d "$c/$( basename "$c" )" ] && nestedH=$(( nestedH + 1 )); done
+[ "$nestedH" -eq "$shipped" ] \
+    && ok "(H) setup: a simulated 0.6.x double install leaves $shipped nested empty ripwire-x/ripwire-x trees" \
+    || no "(H) setup: only $nestedH of $shipped nested leftovers were produced — the arms below measure nothing"
+bash "$SK/install.sh" "$H1" >"$H/out1" 2>&1
+H_RC=$?
+links=0; for l in "$H1"/ripwire-*; do [ -L "$l" ] && [ -f "$l/SKILL.md" ] && links=$(( links + 1 )); done
+{ [ "$H_RC" -eq 0 ] && [ "$links" -eq "$shipped" ] && ! grep -q '^kept ' "$H/out1" \
+  && grep -q "^done\. $shipped ripwire skills active" "$H/out1"; } \
+    && ok "(H) B1: nested empty leftovers are replaced by live links, all $shipped skills active, none kept" \
+    || no "(H) B1: over nested empty leftovers: rc=$H_RC, $links of $shipped live links, $( grep -c '^kept ' "$H/out1" ) kept; $( tail -1 "$H/out1" )"
+# The same upgrade with the #334 ln still on PATH (the reporter's actual host): every skill must be COPIED over them.
+H2="$H/upgrade-shim"; mkdir -p "$H2"
+old_063_install "$H2"; old_063_install "$H2"
+PATH="$H/shim:$PATH" bash "$SK/install.sh" "$H2" >"$H/out2" 2>&1
+H_RC2=$?
+usable=0; for s in "$H2"/ripwire-*/SKILL.md; do [ -f "$s" ] && usable=$(( usable + 1 )); done
+nestedLeft="$( find "$H2" -mindepth 2 -maxdepth 2 -type d -name 'ripwire-*' | wc -l | tr -d ' ' )"
+{ [ "$H_RC2" -eq 0 ] && [ "$usable" -eq "$shipped" ] && [ "$nestedLeft" -eq 0 ] && ! grep -q '^kept ' "$H/out2"; } \
+    && ok "(H) B1: on the #334 host itself, nested leftovers are replaced by $shipped copies, none nested, none kept" \
+    || no "(H) B1: #334 host over nested leftovers: rc=$H_RC2, $usable of $shipped usable, $nestedLeft still nested, $( grep -c '^kept ' "$H/out2" ) kept"
+# (H-neg) the same nested shape with ONE user file anywhere inside is the user's: kept, file intact.
+H3="$H/nested-user"; mkdir -p "$H3"
+old_063_install "$H3"; old_063_install "$H3"
+mkdir -p "$H3/ripwire-orient/ripwire-orient/deeper"
+printf 'my notes\n' >"$H3/ripwire-orient/ripwire-orient/deeper/notes.txt"
+bash "$SK/install.sh" "$H3" >"$H/out3" 2>&1
+H_RC3=$?
+{ [ "$H_RC3" -eq 0 ] && [ ! -L "$H3/ripwire-orient" ] \
+  && [ "$( cat "$H3/ripwire-orient/ripwire-orient/deeper/notes.txt" 2>/dev/null )" = "my notes" ] \
+  && grep -q '^kept ripwire-orient: not installed by ripwire' "$H/out3"; } \
+    && ok "(H-neg) a nested leftover holding a user file (at any depth) is kept, file intact, with the kept note" \
+    || no "(H-neg) the nested tree holding a user file was altered: rc=$H_RC3, notes=$( cat "$H3/ripwire-orient/ripwire-orient/deeper/notes.txt" 2>/dev/null )"
+links=0; for l in "$H3"/ripwire-*; do [ -L "$l" ] && [ -f "$l/SKILL.md" ] && links=$(( links + 1 )); done
+[ "$links" -eq $(( shipped - 1 )) ] \
+    && ok "(H-neg) every other nested leftover around it is still replaced ($links live links)" \
+    || no "(H-neg) only $links of $(( shipped - 1 )) other skills became live links"
+# (H-err) a tree `find` cannot fully read is NOT provably empty: its own errors never count as "empty". Kept.
+# (Skipped as root, where nothing is unreadable.)
+if [ "$( id -u )" -ne 0 ]; then
+    H4="$H/nested-unreadable"; mkdir -p "$H4/ripwire-router/ripwire-router"
+    chmod 000 "$H4/ripwire-router/ripwire-router"
+    bash "$SK/install.sh" "$H4" >"$H/out4" 2>&1
+    H_RC4=$?
+    chmod 755 "$H4/ripwire-router/ripwire-router" 2>/dev/null
+    { [ "$H_RC4" -eq 0 ] && [ -d "$H4/ripwire-router/ripwire-router" ] && [ ! -L "$H4/ripwire-router" ] \
+      && grep -q '^kept ripwire-router: not installed by ripwire' "$H/out4"; } \
+        && ok "(H-err) a nested tree with an unreadable subdirectory is kept (a find error never reads as empty)" \
+        || no "(H-err) an unreadable nested tree was treated as empty: rc=$H_RC4, $( grep -i router "$H/out4" | head -2 )"
+fi
+
+# ── (I) B2: a copy's marker names the skill it was copied as. A marked copy the user renamed to ANOTHER ripwire-*
+#    name (to keep their edits) is theirs: the marker names a different directory, so it is kept, never pruned
+#    as stale. Before this the marker was an empty file, proving "some ripwire copy", not "this path", and the
+#    renamed copy was `rm -rf`'d with the user's edits in it.
+I="$TMP/renamed"; mkdir -p "$I"
+PATH="$F/shim:$PATH" bash "$SK/install.sh" "$I" >/dev/null 2>&1          # force the copy fallback
+[ "$( cat "$I/ripwire-router/.ripwire-installed-copy" 2>/dev/null )" = "ripwire-router" ] \
+    && ok "(I) a copy's marker records the skill name it was copied as" \
+    || no "(I) the copy marker does not name its skill: [$( cat "$I/ripwire-router/.ripwire-installed-copy" 2>/dev/null )]"
+cp -R "$I/ripwire-router" "$I/ripwire-router-custom"
+printf '\nmy own edits\n' >>"$I/ripwire-router-custom/SKILL.md"
+cp "$I/ripwire-router-custom/SKILL.md" "$TMP/renamed-expected"
+PATH="$F/shim:$PATH" bash "$SK/install.sh" "$I" >"$I.out1" 2>&1
+I_RC=$?
+{ [ "$I_RC" -eq 0 ] && [ -d "$I/ripwire-router-custom" ] && cmp -s "$I/ripwire-router-custom/SKILL.md" "$TMP/renamed-expected" \
+  && grep -q '^kept ripwire-router-custom: not installed by ripwire' "$I.out1" && ! grep -q '^pruned .*ripwire-router-custom' "$I.out1"; } \
+    && ok "(I) B2: a marked copy renamed to another ripwire-* name is kept with the note, edits intact, not pruned" \
+    || no "(I) B2: the renamed marked copy was pruned or altered: rc=$I_RC, $( grep -i 'router-custom' "$I.out1" )"
+grep -qx 'skill=ripwire-router-custom' "$I/.ripwire-manifest-v1" 2>/dev/null \
+    && no "(I) B2: the manifest claims the user's renamed copy" \
+    || ok "(I) B2: the manifest does not claim the user's renamed copy"
+# The renamed copy kept under a SHIPPED name is still the user's: a marker naming ripwire-router inside ripwire-orient.
+rm -rf "$I/ripwire-orient"; cp -R "$I/ripwire-router" "$I/ripwire-orient"
+PATH="$F/shim:$PATH" bash "$SK/install.sh" "$I" >"$I.out2" 2>&1
+{ [ "$( cat "$I/ripwire-orient/.ripwire-installed-copy" 2>/dev/null )" = "ripwire-router" ] \
+  && grep -q '^kept ripwire-orient: not installed by ripwire' "$I.out2"; } \
+    && ok "(I) B2: a marker naming another skill, found under a shipped name, is kept (not refreshed over)" \
+    || no "(I) B2: a copy of ripwire-router sitting at ripwire-orient was replaced: $( grep -i 'ripwire-orient' "$I.out2" )"
+
+# ── (I-old) a NAMELESS marker (an empty file, written by 0.6.4 candidates before B2) proves nothing about the path.
+#    It counts as ours only when the directory's name is a shipped skill AND its contents (the marker aside) are
+#    byte-identical to that skill; anything else is kept.
+J="$TMP/nameless"; mkdir -p "$J"
+for n in ripwire-router ripwire-orient; do cp -R "$SK/$n" "$J/$n"; : >"$J/$n/.ripwire-installed-copy"; done
+printf '\nmy edits\n' >>"$J/ripwire-orient/SKILL.md"                     # drifted: not provably ours
+cp -R "$SK/ripwire-router" "$J/ripwire-router-mine"; : >"$J/ripwire-router-mine/.ripwire-installed-copy"   # renamed
+mkdir -p "$J/ripwire-retired-old"; printf 'old\n' >"$J/ripwire-retired-old/SKILL.md"; : >"$J/ripwire-retired-old/.ripwire-installed-copy"
+bash "$SK/install.sh" "$J" >"$J.out" 2>&1
+J_RC=$?
+{ [ "$J_RC" -eq 0 ] && [ -L "$J/ripwire-router" ] && [ -f "$J/ripwire-router/SKILL.md" ]; } \
+    && ok "(I-old) a nameless-marker copy under a shipped name, byte-identical to it, is ours: replaced by a live link" \
+    || no "(I-old) the identical nameless-marker copy was not replaced: rc=$J_RC, $( grep 'ripwire-router ' "$J.out" ) $( grep '^kept ripwire-router:' "$J.out" )"
+{ [ ! -L "$J/ripwire-orient" ] && grep -q 'my edits' "$J/ripwire-orient/SKILL.md" 2>/dev/null \
+  && grep -q '^kept ripwire-orient: not installed by ripwire' "$J.out"; } \
+    && ok "(I-old) a nameless-marker copy whose contents drifted from the shipped skill is kept, edits intact" \
+    || no "(I-old) the drifted nameless-marker copy was replaced: $( grep -i 'ripwire-orient' "$J.out" )"
+{ [ -d "$J/ripwire-router-mine" ] && [ -d "$J/ripwire-retired-old" ] \
+  && grep -q '^kept ripwire-router-mine: not installed by ripwire' "$J.out" \
+  && grep -q '^kept ripwire-retired-old: not installed by ripwire' "$J.out"; } \
+    && ok "(I-old) a nameless-marker directory under a name this checkout does not ship is kept, never pruned" \
+    || no "(I-old) a nameless-marker directory under an unshipped name was pruned: $( grep -E 'router-mine|retired-old' "$J.out" )"
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }
