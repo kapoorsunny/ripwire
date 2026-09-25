@@ -1205,8 +1205,9 @@ inline std::string churnDecayWindowLabel( std::string_view minedSpan )
 // --no-ignore, --ignore-tests, --stable, --legend, --max-tokens, --token-budget. `--in=a --exclude=b` reported
 // total="6" and handed back a next= that yields twelve rows — a page pointer into a different corpus, which is
 // worse than no pointer at all. And the scoped next= had no LENGTH cap, while every other next= in the tool
-// returns "" past kNextAttrMaxBytes (forPageInvocation, flipimpact): a long --since plus a deep DIR plus
-// --limit/--offset sails past 120 bytes and pastes wrong.
+// was policed against kNextAttrMaxBytes (forPageInvocation, flipimpact): a long --since plus a deep DIR plus
+// --limit/--offset sails past 120 bytes and pastes wrong. (PLAN_064 E2, 2026-09-25: that policing moved into
+// nextAttrXml itself, which now discloses `next_dropped="1"` past the ceiling instead of pasting silence.)
 //
 // THE SHAPE. One function, two callers, one cap. `withIn` picks the scoped page (--in=DIR carried, at the next
 // offset) or the stub's "same run without --in".
@@ -1277,7 +1278,11 @@ inline std::string scopedMapNextInvocation( const rw::Config& cfg, std::string_v
             inv += " --limit=" + std::to_string( cfg.pageLimit );
         }
     }
-    return inv.size() > rw::kNextAttrMaxBytes ? std::string() : inv;
+    // Built in full even past kNextAttrMaxBytes: nextAttrXml (nextverb.h) is the one place that polices the
+    // ceiling now, and it discloses `next_dropped="1"` rather than nothing (PLAN_064 E2) — a long --since plus
+    // a deep DIR plus --limit/--offset can still sail past 120 bytes, but a reader is now TOLD so, instead of
+    // reading absence as "no scoped page exists" (has_more= already says otherwise).
+    return inv;
 }
 
 inline void scopedRecentPage( const MainDispatch& d, const std::vector<rw::RecentFile>& sorted, ChurnRanking& cr )
@@ -3392,8 +3397,8 @@ int runHelpTask( const rw::Config& cfg, const rw::IngestResult& ing, const std::
         out += "\" score=\"" + std::to_string( choice.score ) + "\"";
         // present-only: the WIDENING follow-up of a --for-shaped recommendation, nothing on any other.
         // Keyed off the INTENT, and spelled by forpage.h's own forWidenNext — the same quoting and the same
-        // kNextAttrMaxBytes ceiling the answer's next= obeys, so a task too long to paste emits nothing
-        // rather than a hint that pastes wrong.
+        // kNextAttrMaxBytes ceiling nextAttrXml polices on every next= (PLAN_064 E2), so a task too long to
+        // paste never pastes a hint that would run wrong — it gets `next_dropped="1"` instead of nothing.
         const bool widens = rw::taskroute::isOneOf( choice.id, std::begin( rw::taskroute::kForShapedIntents ),
                                                    std::size( rw::taskroute::kForShapedIntents ) );
         out += rw::nextAttrXml( widens ? rw::forWidenNext( cfg.helpTask ) : std::string() );

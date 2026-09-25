@@ -35,9 +35,28 @@ inline constexpr const char* kNextLegendClause =
 // attribute-escaped ` next="…"`; empty invocation ⇒ empty string (a root with nothing honest to suggest says nothing).
 // `attr` names a SECONDARY listing's own follow-up (cut-fix E: --impact's importers_next=, beside the root's next=),
 // escaped by the same policy; the default is the root's one next=.
+//
+// PLAN_064 E2 (2026-09-25): this is the ONE choke point every next= producer already funnels through
+// (forPageInvocation/forWidenNext, flipNextInvocation, scopedMapNextInvocation), so it is also the one place
+// that disciplines kNextAttrMaxBytes. An invocation over the ceiling used to be built and then discarded by
+// each producer separately, `next=` simply absent — indistinguishable from a root with nothing to suggest at
+// all, so a cut answer silently lost its only route to the rest. A truncated command line is still worse than
+// none (the original forpage.h rule stands: never paste a hint that would run wrong), but saying NOTHING is
+// worse than naming the loss: emit `<attr>_dropped="1"` instead, so a reader can tell "no follow-up exists"
+// from "one exists but didn't fit". Never both attributes at once, and the disclosure costs the same handful
+// of bytes on every dialect that already emits presence-only cut markers (shown=/capped=).
 inline std::string nextAttrXml( std::string_view invocation, std::string_view attr = "next" )
 {
     if( invocation.empty() ) { return {}; }
+    if( invocation.size() > kNextAttrMaxBytes )
+    {
+        std::string a;
+        a.reserve( attr.size() + 12 );
+        a += ' ';
+        a += attr;
+        a += "_dropped=\"1\"";
+        return a;
+    }
     std::string a;
     a.reserve( invocation.size() + attr.size() + 8 );
     a += ' ';

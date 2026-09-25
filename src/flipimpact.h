@@ -1166,9 +1166,10 @@ inline void writeCappedList( std::FILE* out, const char* tag, const Seq& seq, st
 }
 
 // P3 (nextverb.h): the ONE pasteable follow-up, and it is EXACT — the smallest --limit that cuts none of
-// the listings THIS run cut. Empty when nothing was cut (so an uncut root is byte-identical to what it was)
-// and empty again if a very long gate name pushes the invocation past kNextAttrMaxBytes, because a truncated
-// command line is worse than none — the reader still has the cap disclosure on every cut listing.
+// the listings THIS run cut. Empty when nothing was cut (so an uncut root is byte-identical to what it was).
+// Built in full even when a very long gate name pushes it past kNextAttrMaxBytes: nextAttrXml is the one place
+// that polices the ceiling now, and it discloses `next_dropped="1"` (PLAN_064 E2) rather than nothing — the
+// reader still has the cap disclosure on every cut listing either way.
 inline std::string flipNextInvocation( const FlipResult& res, std::size_t maxRows, int pageOffset )
 {
     const std::size_t totals[] = { res.regions.size(), res.branches.size(), res.hosts.size(),
@@ -1186,8 +1187,7 @@ inline std::string flipNextInvocation( const FlipResult& res, std::size_t maxRow
     {
         return {};
     }
-    const std::string invocation = "--flags " + rw::nextFlag( "--flip=", res.name ) + " --limit=" + std::to_string( widestCut );
-    return invocation.size() > rw::kNextAttrMaxBytes ? std::string() : invocation;
+    return "--flags " + rw::nextFlag( "--flip=", res.name ) + " --limit=" + std::to_string( widestCut );
 }
 
 // C1 F-07 (2026-09-10): six row listings, every one cut at 25 in silence. The vocabulary they use is

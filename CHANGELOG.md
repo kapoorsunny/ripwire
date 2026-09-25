@@ -13,6 +13,19 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- `next=` is no longer silently dropped past its 120-byte ceiling. `--for`'s page/widen follow-up
+  (`forPageInvocation`/`forWidenNext`), `--flip`'s cut-listing follow-up, and the churn-decay map's
+  `--in=DIR` scoped/stub follow-ups (including the task-router's `--for`-shaped `<choice>` widening
+  hint) used to build the full invocation and then throw it away when it exceeded
+  `kNextAttrMaxBytes`, leaving `next=` absent — indistinguishable from a root with nothing to
+  suggest, so a cut answer lost its only route to the rest. `nextAttrXml` (the one place every next=
+  producer already funnels through) now polices the ceiling itself and discloses `next_dropped="1"`
+  instead of saying nothing; the attribute itself still never exceeds 120 bytes, so nothing that
+  already parses `next=` breaks.
+
 ## [0.6.3] — 2026-09-25
 
 ### Fixed — silent cuts in the report verbs and the MCP twins now say what they dropped

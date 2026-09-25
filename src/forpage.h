@@ -139,9 +139,10 @@ inline std::size_t distinctFilesOf( const IngestResult& ing, const std::vector<N
     return split.src.size() + split.tests.size();
 }
 
-// `--for=TASK --limit=N [--offset=M]`, the task quoted as a shell would need it (nextFlag). "" when the
-// invocation would not fit kNextAttrMaxBytes — a hint that pastes wrong is worse than no hint (the flipimpact.h
-// rule), and the paging quintet still says how to continue.
+// `--for=TASK --limit=N [--offset=M]`, the task quoted as a shell would need it (nextFlag). Built in full even
+// past kNextAttrMaxBytes: nextAttrXml (nextverb.h) is the one place that polices the ceiling now, and it
+// discloses `next_dropped="1"` rather than saying nothing (PLAN_064 E2) — the paging quintet still says how
+// to continue either way.
 inline std::string forPageInvocation( std::string_view task, int limit, int offset )
 {
     std::string inv = nextFlag( "--for=", task );
@@ -150,7 +151,7 @@ inline std::string forPageInvocation( std::string_view task, int limit, int offs
     {
         inv += " --offset=" + std::to_string( offset );
     }
-    return inv.size() > kNextAttrMaxBytes ? std::string() : inv;
+    return inv;
 }
 
 // the r=1 row's widening follow-up: the page at its default width

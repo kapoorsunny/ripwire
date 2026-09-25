@@ -549,10 +549,17 @@ if [ -n "$FWNEXT" ]; then
 else
     no "no next= recovered from the locate-task recommendation"
 fi
-# …and past the ceiling it emits NOTHING rather than a hint that pastes wrong (forpage.h's own rule).
+# …and past the ceiling it emits no HINT THAT PASTES WRONG (forpage.h's own rule) — but PLAN_064 E2
+# (2026-09-25): the loss is now disclosed as next_dropped="1" rather than said nothing at all. RED on
+# origin/main: no next_dropped= anywhere on the choice, so a reader could not tell "no widening exists"
+# from "one exists but the task was too long to paste".
 LONGTASK="Find the code responsible for this retry timeout bug in the scheduler and the queue and the retry budget and the backoff table and the metrics"
 FWL="$( route "$LONGTASK" )"
 case "$FWL" in *'next='*) no "an over-long task emitted a next= past the ceiling: $FWL";; *) ok "a task too long to paste emits no widening next= at all";; esac
+case "$FWL" in
+    *'next_dropped="1"'*) ok "PLAN_064 E2: an over-long task's dropped widening next= is disclosed as next_dropped=\"1\"" ;;
+    *) no "PLAN_064 E2: an over-long task emits no next_dropped=\"1\" — the drop is silent: $FWL" ;;
+esac
 
 # ── two routers, ONE vocabulary: every shipped skill must be nameable by --help-task ──────────────────
 # F-R1-09 measured 8 of 16. This arm reads BOTH sides from disk — the skill directories that exist, and

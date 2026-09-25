@@ -534,8 +534,11 @@ ofP2="$( scopedTag "$P2EX" | grep -oE 'of="[0-9]+"' | head -1 | tr -dc '0-9' )"
 [ -n "$ofP2" ] && [ "$ofP2" = "$ofEx" ] \
     && ok "arm 10d: the pasted next= lands on the SAME corpus (of=\"$ofP2\" both sides)" \
     || no "arm 10d: the pasted next= sees of=\"$ofP2\" where the page it came from saw of=\"$ofEx\""
-# past kNextAttrMaxBytes (120 B) the attribute is ABSENT — a hint that pastes wrong is worse than none — and
-# has_more= still says the page exists, so a reader is never told the answer is complete.
+# past kNextAttrMaxBytes (120 B) the pasteable next= attribute is ABSENT — a truncated command line still
+# pastes wrong — but PLAN_064 E2 (2026-09-25): the loss is now DISCLOSED as next_dropped="1" rather than
+# said nothing at all, so has_more="1" is never the reader's only signal that a page exists past this one.
+# RED on origin/main (the base drops it silently — no next_dropped= anywhere, and a reader seeing the
+# scoped block can't tell "nothing to suggest" from "the page exists but the hint didn't fit").
 LONG="$( run --rank-by=churn-decay --in=db --exclude=util/u0.py --exclude=my --exclude=-dash --exclude=gold_outside.py --since='3 years ago' --limit=39 --offset=1 2>/dev/null )"
 tagLong="$( scopedTag "$LONG" )"
 if [ -z "$tagLong" ]; then
@@ -546,6 +549,11 @@ elif printf '%s' "$tagLong" | grep -q 'has_more="1"'; then
     ok "arm 10e: an over-120-byte next= is absent, and has_more=\"1\" still says the page exists"
 else
     no "arm 10e: the long-invocation page is not cut, so the cap is untested (got: $tagLong)"
+fi
+if printf '%s' "$tagLong" | grep -q 'next_dropped="1"'; then
+    ok "arm 10f (PLAN_064 E2): the over-120-byte drop is disclosed as next_dropped=\"1\" (not silent)"
+else
+    no "arm 10f (PLAN_064 E2): no next_dropped=\"1\" on the over-120-byte scoped block — the drop is silent: $tagLong"
 fi
 
 # ── arm 11: the scoped block's ABSENCE rule is the global block's ──────────────────────────────────

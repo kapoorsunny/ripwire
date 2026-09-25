@@ -278,5 +278,35 @@ printf '%s' "$D10" | grep -q '<capped what="depth" at="8"/>' \
 printf '%s' "$D10" | grep -q 'what=depth' \
     && ok "depth: the capped clause defining what=depth rides with the row" || no "depth: <capped what=\"depth\"> emitted with no clause defining it"
 
+# ── PLAN_064 E2 (2026-09-25): a next= over kNextAttrMaxBytes (120 B) used to be dropped SILENTLY —
+# flipNextInvocation built the full "--flags --flip=NAME --limit=N" invocation and then threw it away
+# once it passed the ceiling, so a cut flip report lost its only route to the rest. It must now disclose
+# next_dropped="1" instead of saying nothing. RED on origin/main's binary: this fixture's gate name alone
+# pushes the invocation past 120 B, and the pre-fix binary emits no next= and no next_dropped= at all.
+LONGGATE="FIXTURE_ANSWERSNEXT064_A_VERY_LONG_MACRO_GATE_NAME_THAT_PUSHES_THE_NEXT_INVOCATION_PAST_ONE_HUNDRED_TWENTY_BYTES_XYZ"
+LG="$TMP/longgate"; mkdir -p "$LG"
+{ printf '#pragma once\n#ifndef %s\n#define %s 0\n#endif\n#if %s\n' "$LONGGATE" "$LONGGATE" "$LONGGATE"
+  i=0; while [ $i -lt 30 ]; do printf 'int hostFn%d() { return %d; }\n' $i $i; i=$(( i + 1 )); done
+  printf '#endif\n'; } >"$LG/gate.h"
+NEXTLONG="$( flip "$LG" "$LONGGATE" )"
+[ "$( attr "$NEXTLONG" flip hosts )" = "30" ] && [ "$( attr "$NEXTLONG" hosts hosts_capped )" = "1" ] \
+    && ok "E2 guard: the 30-host fixture really cuts hosts at 25 (hosts_capped=\"1\") — the arms below can fail" \
+    || no "E2 guard: fixture did not cut (hosts=$( attr "$NEXTLONG" flip hosts ) hosts_capped=$( attr "$NEXTLONG" hosts hosts_capped )) — the next= arms below are vacuous"
+printf '%s' "$NEXTLONG" | grep -q '<flip[^>]* next="' \
+    && no "E2: a next= longer than 120 B was emitted anyway: $( printf '%s' "$NEXTLONG" | grep -o '<flip[^>]*>' )" \
+    || ok "E2: the over-120-byte next= is absent (never a truncated, unrunnable command line)"
+printf '%s' "$NEXTLONG" | grep -q '<flip[^>]* next_dropped="1"' \
+    && ok "E2: the drop is disclosed as next_dropped=\"1\" instead of silence" \
+    || no "E2: no next_dropped=\"1\" on the cut, over-120-byte flip report — the drop is silent: $( printf '%s' "$NEXTLONG" | grep -o '<flip[^>]*>' )"
+# control: a short gate name that still cuts DOES carry a real, runnable next=
+SHORTLONG="$( flip "$FIX" FIXTURE_DARK_FEATURE --limit=1 )"
+SN="$( attr "$SHORTLONG" flip next )"
+if [ -n "$SN" ]; then
+    [ "${#SN}" -le 120 ] && ok "E2 control: a short-name cut flip's next= is ${#SN} B (<=120), and present" \
+                         || no "E2 control: a short-name cut flip's next= is ${#SN} B (>120)"
+else
+    no "E2 control: FIXTURE_DARK_FEATURE --limit=1 carries no next= at all — the control case is vacuous"
+fi
+
 [ $fail -eq 0 ] && echo "flipcheck: ALL PASS" || echo "flipcheck: FAILURES"
 exit $fail
