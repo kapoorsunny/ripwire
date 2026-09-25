@@ -275,8 +275,9 @@ jobs:
           cmp cold.xml warm.xml || { echo "windows-package: cold and warm runs printed different bytes" >&2; exit 1; }
 
       # The README's skills route for Windows: skills/install.sh, from the unzipped folder (a path with a space), under
-      # Git Bash, into a sandbox HOME. Git Bash's `ln -s` may copy rather than link; either way every skill must land
-      # with a readable SKILL.md. --hook is not exercised: the hooks are bash scripts and the README calls them untested.
+      # Git Bash, into a sandbox HOME. Whether Git Bash's `ln -s` links or not, EVERY user-facing skill must land with
+      # a SKILL.md that a NATIVE Windows program (python.exe, not an MSYS tool) can read, and the manifest must declare
+      # exactly those. --hook is not exercised: the hooks are bash scripts and the README calls them untested.
       - name: skills/install.sh from the unzipped folder under Git Bash (Claude Code and Codex destinations)
         run: |
           h="$( cygpath -u "$RUNNER_TEMP" )/rw skills home"
@@ -284,12 +285,37 @@ jobs:
           cd "$( cygpath -u "$RW_DIR" )"
           env -u CLAUDE_CONFIG_DIR -u CODEX_HOME -u AGENTS_HOME HOME="$h" bash skills/install.sh
           env -u CLAUDE_CONFIG_DIR -u CODEX_HOME -u AGENTS_HOME HOME="$h" bash skills/install.sh --codex
-          want=0; for s in skills/ripwire-*/SKILL.md; do [ -f "$s" ] && want=$(( want + 1 )); done
+          want=0; for s in skills/ripwire-*/SKILL.md; do grep -q '^audience: contributor' "$s" || want=$(( want + 1 )); done
+          chk="$( cygpath -u "$GITHUB_WORKSPACE" )/scripts/ci-windows-skills-check.sh"   # scripts/ is not in the package
           for d in "$h/.claude/skills" "$h/.agents/skills"; do
-            n=0; for s in "$d"/ripwire-*/SKILL.md; do [ -f "$s" ] && n=$(( n + 1 )); done
-            echo "$d: $n of $want skills installed with a readable SKILL.md"
-            [ "$n" -ge 10 ] || { echo "windows-package: skills/install.sh installed $n skills into $d" >&2; exit 1; }
+            bash "$chk" "$d" "$want"
           done
+
+      # (h) #334: on a Windows machine WITHOUT symlink privilege, Git Bash's `ln -sfn DIR DEST` exits 0 and leaves an
+      # EMPTY directory, and the 0.6.3 installer announced sixteen empty directories as active skills. This runner HAS
+      # the privilege, so the step above never takes that path. Here an `ln` that behaves like that Git Bash comes
+      # first on PATH: every skill must be reported `copied`, read back natively, and be declared in the manifest.
+      # Then MSYS=winsymlinks:nativestrict, the mode that must either make a real native link or fall back the same way.
+      - name: "skills/install.sh where ln -s links nothing (#334): every skill copied, verified, declared"
+        run: |
+          h="$( cygpath -u "$RUNNER_TEMP" )/rw nolink home"; shim="$( cygpath -u "$RUNNER_TEMP" )/rw-ln-shim"
+          rm -rf "$h" "$shim" && mkdir -p "$h" "$shim"
+          cat > "$shim/ln" <<'LNSHIM'
+          #!/bin/sh
+          for last in "$@"; do :; done
+          [ -e "$last" ] || [ -L "$last" ] || mkdir -p "$last"
+          exit 0
+          LNSHIM
+          chmod +x "$shim/ln"
+          chk="$( cygpath -u "$GITHUB_WORKSPACE" )/scripts/ci-windows-skills-check.sh"
+          cd "$( cygpath -u "$RW_DIR" )"
+          want=0; for s in skills/ripwire-*/SKILL.md; do grep -q '^audience: contributor' "$s" || want=$(( want + 1 )); done
+          PATH="$shim:$PATH" bash skills/install.sh "$h/copied" | tee copied.out
+          [ "$( grep -c '^copied ripwire-' copied.out )" -eq "$want" ] || { echo "windows-package: expected $want 'copied' lines under a no-op ln" >&2; exit 1; }
+          if grep '^installed ripwire-' copied.out; then echo "windows-package: a skill was reported linked by an ln that links nothing" >&2; exit 1; fi
+          bash "$chk" "$h/copied" "$want"
+          MSYS=winsymlinks:nativestrict bash skills/install.sh "$h/native" | tee native.out
+          bash "$chk" "$h/native" "$want"
 
       # (c, d, f) The fixed cross-platform verb set on the unzipped exe, TWICE: the two runs must be byte-identical
       # (determinism), the script itself fails on a malformed MCP handshake, and the first run's outputs go to

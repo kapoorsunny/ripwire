@@ -13,6 +13,19 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ---
 
+## [Unreleased]
+
+### Fixed — Windows findings from the 0.6.3 preview test (#334, reported by @elsRobin)
+
+- `skills/install.sh` no longer reports empty directories as installed skills. On Windows without symlink
+  privilege, Git Bash's `ln -sfn` exits 0 and leaves an empty directory; the installer printed `installed`
+  for each one, wrote all of them to the manifest and announced them as active. It now checks each link by
+  its result (a symlink whose `SKILL.md` reads back). When the link did not take, it copies the skill and
+  prints `copied`. When the copy fails too, it prints `FAILED`, leaves the skill out of the count and the
+  manifest, and exits 1. The prune step recognises its own copies (a marker file, an empty leftover
+  directory, or a name its last manifest listed) and leaves any other `ripwire-*` directory alone; before,
+  a user's own `ripwire-*` directory made the installer stop with `rm: … is a directory`.
+
 ## [0.6.3] — 2026-09-25
 
 ### Fixed — silent cuts in the report verbs and the MCP twins now say what they dropped
