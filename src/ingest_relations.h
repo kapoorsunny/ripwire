@@ -843,10 +843,11 @@ inline std::string importSpecifierText( TSNode node, std::string_view src )
     }
     std::string_view s = src.substr( a, b - a );
 
-    // TS/JS specifier is a `string` node whose text includes the quote delimiters; strip exactly one pair.
-    if( kindIs( ts_node_type( node ), "string" ) && s.size() >= 2 && ( s.front() == '\'' || s.front() == '"' ) && s.back() == s.front() )
+    // TS/JS specifier is a `string` node whose text includes the quote delimiters; strip exactly one pair
+    // (pattern::stripQuotePair — the one quote-strip this and jsrunner.h's node:test check both apply).
+    if( kindIs( ts_node_type( node ), "string" ) )
     {
-        s = s.substr( 1, s.size() - 2 );
+        s = pattern::stripQuotePair( s );
     }
 
     return std::string( s );

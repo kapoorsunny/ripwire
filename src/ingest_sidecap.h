@@ -125,13 +125,11 @@ inline std::uint32_t bindSiteByte( const RawBind& b ) noexcept { return b.startB
 // pybind pass is GATED on a `pybind11`/`PYBIND11` signal in the file, so a repo without pybind captures
 // NOTHING (the whole feature is inert → byte-identical output on any binding-free corpus). JNI needs no
 // capture here — buildGraph decodes it straight from `Java_*` def names.
-inline std::string ffiUnquote( std::string_view s )   // strip one layer of "..." / '...'; leaves interior verbatim
+// strip one layer of "..." / '...'; leaves interior verbatim. pattern::stripQuotePair IS this same strip
+// (measured: --quality-delta's duplication kind, once #60's jsrunner.h needed a third copy of it).
+inline std::string ffiUnquote( std::string_view s )
 {
-    if( s.size() >= 2 && ( s.front() == '"' || s.front() == '\'' ) && s.back() == s.front() )
-    {
-        return std::string( s.substr( 1, s.size() - 2 ) );
-    }
-    return std::string( s );
+    return std::string( pattern::stripQuotePair( s ) );
 }
 
 // "A::B::method" → { scope="B", name="method" }; "foo" → { "", "foo" }. Scope is the IMMEDIATE enclosing
