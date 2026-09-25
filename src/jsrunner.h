@@ -36,15 +36,50 @@
 // evidence at all (there is only ever the one command, so `go.mod`'s presence would be sufficient, but no
 // issue reports that gap and it is out of scope for #323, which is TS/JS only); Rust/Swift/C# were not
 // reported and are not audited here. This is a stated scope limit, not a silent one — see the fix report.
+//
+// #60 (train 20): a repo can have NO package.json at all (the reporter's own repro: one source file, one
+// node:test-based test file, nothing else) — in which case the walk above finds no manifest, decides
+// nothing, and the row stayed run_unknown="1" forever, even though the test file names its own runner in
+// its own bytes (`import test from "node:test"`, `require("node:test")`). That is evidence about the FILE,
+// the same kind pythonrunner::hasMainGuard already reads for Python's main-guard case, so `hasNodeTestImport`
+// below re-parses the test file with its own grammar (never a substring scan — a "node:test" mention inside
+// a comment or an unrelated string literal is not a real import) and is consulted ONLY as a FALLBACK, after
+// `nearestPackageJson`'s own evidence has had its say: an authoritative-but-unrecognized `scripts.test`
+// (mocha, say) still wins and is never overridden by this weaker, file-local evidence (the same F2 rule
+// `detectFramework` already applies one level up, restated at this new layer) — see resolveJsVerb's own
+// caller comment in testmap.h. A `.ts`/`.mts`/`.cts` file additionally needs a Node-version decision: node's
+// own `--test` runner strips TypeScript types WITHOUT a flag only from Node 23.6 onward; earlier Nodes need
+// `--experimental-strip-types` (which 23.6+ still accepts, now a no-op). This file cannot see which Node
+// will actually run the emitted command, so it reads `engines.node` from the SAME nearest manifest (if any)
+// and derives the flagged, conservative form UNLESS that field proves every satisfying Node is >= 23.6 —
+// never a guess at an unseen runtime. See nodeTestVerb / floorGuaranteesTypeStripping below.
 
 #include "docparse.h"
+#include "infra/Diagnostics.h" // ASSUME — the same raw-reparse contract pythonrunner.h's hasMainGuard uses
 #include "infra/dirwalk.h"    // ascendToRoot — the ONE nearest-config walk, shared with pythonrunner.h
+#include "infra/fieldid.h"    // fieldChild/NodeField — the ONE field-lookup pythonrunner.h/ingest_jsimports.h share
 #include "infra/jsonesc.h"    // jsonStringEnd — the ONE escape-aware JSON string walk, applied inline below (see detail's banner)
 #include "infra/namesplit.h"  // isIdentChar / containsWordBoundedBy — the shared ident-byte test and word-boundary scan
+#include "infra/nodekind.h"   // kindIs — grammar-string compare without a libc call (per nodekind.h's own banner)
+#include "infra/tschildren.h" // ChildCursor/appendChildren — the ONE DFS-stack child-walk shape (tschildren.h's own banner)
 
 #include <filesystem>
+#include <limits>
 #include <string>
 #include <string_view>
+#include <vector>
+
+// #60: re-parsed here with the SAME raw-reparse contract pythonrunner.h's hasMainGuard already uses (a
+// fresh TSParser over the file's own bytes, independent of the ingest walk that parsed it once already and
+// keeps no tree around for a caller this late) — never a second, ingest.cpp-private grammar table. Declared
+// extern "C" at file scope, matching pythonrunner.h's tree_sitter_python/tree_sitter_toml pair and
+// verbs_doctor.h's identical trio for these three JS/TS/TSX grammars.
+extern "C"
+{
+    const TSLanguage* tree_sitter_javascript( void );
+    const TSLanguage* tree_sitter_typescript( void );
+    const TSLanguage* tree_sitter_tsx( void );
+}
 
 namespace rw::jsrunner
 {
@@ -513,6 +548,226 @@ inline std::string nearestPackageJson( const std::string& file, std::string_view
         return true;
     } );
     return decisive.empty() ? fallback : decisive;
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// #60 (train 20): the test file's OWN node:test import/require, consulted ONLY when nearestPackageJson's
+// manifest evidence decided nothing for this file (see this section's own banner above, and resolveJsVerb's
+// caller comment in testmap.h for the precedence wiring).
+// ---------------------------------------------------------------------------------------------------------
+
+namespace detail
+{
+
+/// The grammar `path`'s own extension selects, reduced to the three this file re-parses with (the same
+/// ".ts"/".mts"/".cts" -> typescript, ".tsx" -> tsx, else javascript split ingest_crawl.h's kLangTable
+/// uses for the full crawl — jsx parses natively under the plain javascript grammar, same as there).
+inline const TSLanguage* grammarForPath( std::string_view path ) noexcept
+{
+    if( path.ends_with( ".tsx" ) )
+    {
+        return tree_sitter_tsx();
+    }
+    if( path.ends_with( ".ts" ) || path.ends_with( ".mts" ) || path.ends_with( ".cts" ) )
+    {
+        return tree_sitter_typescript();
+    }
+    return tree_sitter_javascript();   // .js/.jsx/.mjs/.cjs
+}
+
+/// Whether `node` is a `string` node (never a template string — a computed specifier proves nothing, the
+/// same reading ingest_relations.h::jsModuleLoadTarget already gives it) whose one quote pair strips to
+/// exactly "node:test" — single or double, either quote style. The stripping mirrors
+/// ingest_relations.h::importSpecifierText exactly (that function is ingest.cpp-private; this file re-parses
+/// independently, so the same two-line strip is applied here rather than shared across that boundary).
+inline bool isNodeTestStringLiteral( TSNode node, std::string_view src ) noexcept
+{
+    if( !rw::kindIs( ts_node_type( node ), "string" ) )
+    {
+        return false;
+    }
+    const std::uint32_t a = ts_node_start_byte( node ), b = ts_node_end_byte( node );
+    if( a >= b || b > src.size() )
+    {
+        return false;
+    }
+    std::string_view s = src.substr( a, b - a );
+    if( s.size() >= 2 && ( s.front() == '\'' || s.front() == '"' ) && s.back() == s.front() )
+    {
+        s = s.substr( 1, s.size() - 2 );
+    }
+    return s == "node:test";
+}
+
+/// Whether `node` is itself node:test EVIDENCE — an ES `import … from "node:test"` (any clause shape: the
+/// source field alone decides it, never the imported names) or a CommonJS `require("node:test")` call
+/// (bare `require` callee, exactly one argument, that argument a string — the same three conditions
+/// ingest_relations.h::jsModuleLoadTarget applies to `require`/`import(...)` calls generally, narrowed here
+/// to the one specifier this evidence cares about). A "node:test" byte sequence anywhere else — a comment,
+/// an unrelated string, `"node:test/mock"` — is a DIFFERENT node kind or a different string value and never
+/// matches either shape; this is the parse-based check the negative-control gate arm pins.
+inline bool nodeIsNodeTestEvidence( TSNode node, std::string_view src ) noexcept
+{
+    if( rw::kindIs( ts_node_type( node ), "import_statement" ) )
+    {
+        const TSNode source = fieldChild( node, NodeField::Source );
+        return !ts_node_is_null( source ) && isNodeTestStringLiteral( source, src );
+    }
+    if( rw::kindIs( ts_node_type( node ), "call_expression" ) )
+    {
+        const TSNode callee = fieldChild( node, NodeField::Function );
+        if( ts_node_is_null( callee ) || !rw::kindIs( ts_node_type( callee ), "identifier" ) )
+        {
+            return false;
+        }
+        const std::uint32_t ca = ts_node_start_byte( callee ), cb = ts_node_end_byte( callee );
+        if( ca >= cb || cb > src.size() || src.substr( ca, cb - ca ) != "require" )
+        {
+            return false;
+        }
+        const TSNode args = fieldChild( node, NodeField::Arguments );
+        if( ts_node_is_null( args ) )
+        {
+            return false;
+        }
+        TSNode          only  = {};
+        std::uint32_t   named = 0;
+        rw::ChildCursor cursor( args );
+        rw::forEachNamedChild( args, cursor.cur, [ & ]( TSNode c ) { only = c; ++named; return true; } );
+        return named == 1 && isNodeTestStringLiteral( only, src );
+    }
+    return false;
+}
+
+} // namespace detail
+
+/// #60: whether `source` (the bytes of a TS/JS test file at `path`) itself imports or requires node's own
+/// "node:test" module — checked by re-parsing `source` with the grammar `path`'s extension selects and
+/// walking the WHOLE tree (a DFS stack, `infra/tschildren.h::appendChildren`'s own documented shape),
+/// never a substring scan: a "node:test" mention inside a comment or an unrelated string literal is not an
+/// import and must not count (the negative-control gate arm pins this). Oversized input, a failed parse, or
+/// any syntax error anywhere in the file yields NO evidence — the same conservative read
+/// pythonrunner::topLevelEvidence already applies to Python's main-guard scan, applied here to a whole-tree
+/// walk instead of a top-level-only one (a `require("node:test")` can sit inside a function body, unlike an
+/// ES `import`, which the grammar accepts only at top level regardless of source validity).
+inline bool hasNodeTestImport( std::string_view source, std::string_view path )
+{
+    if( source.size() > std::numeric_limits<std::uint32_t>::max() )
+    {
+        return false;
+    }
+    TSParser* parser = ts_parser_new();
+    ASSUME( parser != nullptr, "ts_parser_new: the default tree-sitter allocator aborts on failure" );
+    const bool languageSet = ts_parser_set_language( parser, detail::grammarForPath( path ) );
+    ASSUME( languageSet, "the javascript/typescript/tsx grammars are linked into this binary at a supported ABI" );
+    TSTree* tree = ts_parser_parse_string( parser, nullptr, source.data(), std::uint32_t( source.size() ) );
+    ts_parser_delete( parser );
+    if( tree == nullptr )
+    {
+        return false;   // an external-scanner error on this text: no evidence, never a guessed runner
+    }
+    const TSNode root = ts_tree_root_node( tree );
+    bool         found = false;
+    if( !ts_node_has_error( root ) )
+    {
+        std::vector<TSNode> pending{ root };
+        while( !pending.empty() )
+        {
+            const TSNode node = pending.back();
+            pending.pop_back();
+            if( detail::nodeIsNodeTestEvidence( node, source ) )
+            {
+                found = true;
+                break;
+            }
+            rw::ChildCursor cursor( node );
+            rw::appendChildren( node, cursor.cur, pending );
+        }
+    }
+    ts_tree_delete( tree );
+    return found;
+}
+
+/// The `engines.node` field's raw string value, or "" when absent — the same top-level-key + string-value
+/// shape `testScript` already reads for "scripts"/"test", applied to "engines"/"node" instead. `packageJson`
+/// may itself be "" (no manifest anywhere in the crawl boundary — the #60 repro exactly): topLevelObjectBody
+/// on an empty string finds nothing, same as a manifest that simply omits the field.
+inline std::string enginesNode( std::string_view packageJson )
+{
+    const detail::ObjSpan obj = detail::topLevelObjectBody( packageJson, "engines" );
+    if( obj.begin == std::string_view::npos )
+    {
+        return {};
+    }
+    return detail::stringValue( packageJson.substr( obj.begin, obj.end - obj.begin ), "node" );
+}
+
+/// #60: whether an `engines.node` range PROVES every Node version satisfying it is >= 23.6 — the
+/// version node's own `--test` runner started stripping TypeScript types WITHOUT `--experimental-strip-
+/// types` (the flag stays accepted, now a no-op, on 23.6+, so adding it is never WRONG, only sometimes
+/// unnecessary — the asymmetry `nodeTestVerb` below relies on). This is NOT a semver engine: it reads the
+/// FIRST major.minor pair in the range as a FLOOR, which is exactly right for the shapes real package.json
+/// files use (">=X.Y[.Z]", "^X.Y[.Z]", "~X.Y[.Z]", a bare "X.Y[.Z]", ">X.Y[.Z]" — patch-level exclusivity
+/// never changes a major.minor comparison) and DELIBERATELY refuses to decide — returns false, the
+/// conservative direction, since that only costs an unneeded flag rather than handing a reader on an older
+/// Node a command that fails outright — for anything a floor read cannot safely bound: a range with no
+/// version number, or one led by `<`/`<=` (asserts an UPPER bound, never a floor; a compound range beyond
+/// that shape, e.g. "^18 || ^20", is likewise left undecided by the same leading-token read).
+inline bool floorGuaranteesTypeStripping( std::string_view range ) noexcept
+{
+    std::size_t p = 0;
+    while( p < range.size() && ( range[p] == ' ' || range[p] == '\t' ) )
+    {
+        ++p;
+    }
+    if( p < range.size() && range[p] == '<' )
+    {
+        return false;   // an upper-bound-led range asserts nothing about the floor
+    }
+    while( p < range.size() && !( range[p] >= '0' && range[p] <= '9' ) )   // skip '>=', '^', '~', '>', or nothing
+    {
+        ++p;
+    }
+    const auto readInt = [ & ]() -> int
+    {
+        const std::size_t start = p;
+        int               v     = 0;
+        while( p < range.size() && range[p] >= '0' && range[p] <= '9' && p - start < 6 )
+        {
+            v = v * 10 + ( range[p] - '0' );
+            ++p;
+        }
+        return p == start ? -1 : v;
+    };
+    const int major = readInt();
+    if( major < 0 )
+    {
+        return false;   // no version number found at all: undecidable
+    }
+    int minor = 0;
+    if( p < range.size() && range[p] == '.' )
+    {
+        ++p;
+        const int m = readInt();
+        minor = m < 0 ? 0 : m;
+    }
+    return major > 23 || ( major == 23 && minor >= 6 );
+}
+
+/// #60: the command for node's own built-in test runner at `path`, decided from its own extension and —
+/// for a TypeScript source — the nearest manifest's `engines.node` evidence, never a guess at the Node
+/// version that will actually run it. `.js`/`.jsx`/`.mjs`/`.cjs` never need type stripping and always get
+/// the bare form; `packageJson` may be "" (no manifest in the boundary at all), which reads as "no engines
+/// evidence" exactly like a present manifest that omits the field — both take the flagged, conservative
+/// form, the honest answer when nothing says the target Node is new enough.
+inline const char* nodeTestVerb( std::string_view path, std::string_view packageJson )
+{
+    const bool isTs = path.ends_with( ".ts" ) || path.ends_with( ".mts" ) || path.ends_with( ".cts" ) || path.ends_with( ".tsx" );
+    if( !isTs )
+    {
+        return "node --test";
+    }
+    return floorGuaranteesTypeStripping( enginesNode( packageJson ) ) ? "node --test" : "node --experimental-strip-types --test";
 }
 
 } // namespace rw::jsrunner

@@ -385,6 +385,66 @@ W="$( runjs testgatenpmrunfix src/lib.ts )"; WEC="$( rcjs testgatenpmrunfix src/
     && ok "(w) G3: npm run <script> indirection stays the honest run_unknown=\"1\" floor" \
     || no "(w) G3 indirection handling changed unexpectedly (exit=$WEC): $W"
 
+# ── (x1)-(x5) #60 (train 20): the test file's OWN node:test import/require, consulted ONLY when
+#     package.json evidence (above) decides nothing for it — closes the issue's last gap, where a bare
+#     node:test repro with NO package.json at all stayed run_unknown="1" forever. Fixtures:
+#       test/testgatenodetestimportfix/         the issue's own exact repro (src/bounded.ts + test/behavior.test.ts,
+#                                                `import test from "node:test"`, no package.json anywhere)
+#       test/testgatenodetestimportjsfix/        the .js variant of the same import shape
+#       test/testgatenodetestimportrequirefix/   `const test = require("node:test")` (CommonJS)
+#       test/testgatenodetestimportnegfix/       "node:test" appears only in a comment and a string — never
+#                                                 a real import/require — must NOT derive a runner (parsed,
+#                                                 not a substring scan)
+#       test/testgatenodetestimportprecedencefix/ package.json scripts.test="vitest run" AND the test file
+#                                                 also imports node:test — the explicit manifest evidence
+#                                                 must still win
+
+# (x1) the exact #60 repro: no package.json, a .ts test file importing node:test -> derived, and — since
+#      nothing here can prove the target Node is >= 23.6 — the conservative, flagged form.
+X1="$( runjs testgatenodetestimportfix src/bounded.ts )"; X1EC="$( rcjs testgatenodetestimportfix src/bounded.ts )"
+{ [ "$X1EC" = 4 ] && printf '%s' "$X1" | grep -qF 'run="node --experimental-strip-types --test test/behavior.test.ts"'; } \
+    && ok '(x1) #60: exact repro (no package.json, import test from "node:test") -> node --experimental-strip-types --test' \
+    || no "(x1) #60 repro not derived (exit=$X1EC): $X1"
+
+# (x2) .js variant: no type-stripping question at all, so the bare form.
+X2="$( runjs testgatenodetestimportjsfix src/bounded.js )"; X2EC="$( rcjs testgatenodetestimportjsfix src/bounded.js )"
+{ [ "$X2EC" = 4 ] && printf '%s' "$X2" | grep -qF 'run="node --test test/behavior.test.js"'; } \
+    && ok '(x2) #60: .js variant, import test from "node:test" -> node --test' \
+    || no "(x2) #60 .js variant not derived (exit=$X2EC): $X2"
+
+# (x3) require("node:test") — the CommonJS shape.
+X3="$( runjs testgatenodetestimportrequirefix src/bounded.js )"; X3EC="$( rcjs testgatenodetestimportrequirefix src/bounded.js )"
+{ [ "$X3EC" = 4 ] && printf '%s' "$X3" | grep -qF 'run="node --test test/behavior.test.js"'; } \
+    && ok '(x3) #60: require("node:test") -> node --test' \
+    || no "(x3) #60 require() variant not derived (exit=$X3EC): $X3"
+
+# (x4) negative control: "node:test" in a comment and a string, no real import/require — must stay the
+#      honest unknown (the obligation still gates, exit 4; only the runner is undecided).
+X4="$( runjs testgatenodetestimportnegfix src/bounded.js )"; X4EC="$( rcjs testgatenodetestimportnegfix src/bounded.js )"
+{ [ "$X4EC" = 4 ] && printf '%s' "$X4" | grep -q 'run_unknown="1"' && ! printf '%s' "$X4" | grep -q 'run="node --test'; } \
+    && ok '(x4) #60: "node:test" only in a comment/string -> run_unknown="1" (parsed, not a substring scan)' \
+    || no "(x4) #60 negative control wrongly derived a runner (exit=$X4EC): $X4"
+
+# (x5) precedence: an explicit package.json scripts.test still wins over the test file's own node:test
+#      import — vitest is named authoritatively, so it is the answer even though the same file imports
+#      node:test too (train 18's F2 rule, restated at this new evidence layer).
+X5="$( runjs testgatenodetestimportprecedencefix src/lib.ts )"; X5EC="$( rcjs testgatenodetestimportprecedencefix src/lib.ts )"
+{ [ "$X5EC" = 4 ] && printf '%s' "$X5" | grep -qF 'run="npx vitest run src/lib.test.ts"' && ! printf '%s' "$X5" | grep -q 'run="node --test'; } \
+    && ok '(x5) #60: package.json scripts.test="vitest run" still wins over a node:test import in the same file' \
+    || no "(x5) #60 precedence broken, node:test import overrode scripts.test (exit=$X5EC): $X5"
+
+# (x6) xml well-formed for the #60 fixtures
+if command -v xmllint >/dev/null 2>&1; then
+    x6ok=1
+    for X in "$X1" "$X2" "$X3" "$X4" "$X5"; do
+        [ -n "$X" ] || continue
+        printf '%s' "$X" | xmllint --noout - 2>/dev/null || x6ok=0
+    done
+    if [ "$x6ok" = 1 ]; then ok "(x6) xml well-formed (#60 node:test import-evidence fixtures)"; else no "(x6) xml malformed"; fi
+else
+    printf '  SKIP  (x6) xml well-formed, #60 fixtures (no xmllint)\n'
+fi
+
 # (t) xml well-formed for the fix-round fixtures
 if command -v xmllint >/dev/null 2>&1; then
     tok=1

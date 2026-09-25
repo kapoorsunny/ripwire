@@ -13,6 +13,53 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ---
 
+## [Unreleased]
+
+### Fixed — `--test-gate` derives `node --test` from a bare `node:test` import, with no `package.json` at all
+
+#60's core defect (a TS/JS test file's call-graph reach and `--affected`/`--test-gate` listing) was fixed
+in 0.6.2. What was left: the reporter's own repro (`src/bounded.ts` + `test/behavior.test.ts`, `import test
+from "node:test"`, **no `package.json` anywhere in the repo**) still read `run_unknown="1"`, because
+`jsrunner.h`'s runner derivation (#323) reads only the nearest `package.json`'s own evidence, and a repo
+with none has no evidence for that walk to find. Thanks to @YogevKr for the report and the clean two-arm
+repro, and to @alex-michaud for the non-test `--callers` arm that helped confirm the core fix.
+
+- **New evidence source: the test file's own import/require.** When `package.json` evidence decides
+  nothing for a TS/JS test file — no manifest anywhere in the crawl boundary, or the nearest one is a true
+  marker (no `scripts.test`, no `vitest`/`jest` dependency) — the file's own bytes are read for a `node:test`
+  import: `import test from "node:test"`, `import { test, describe } from "node:test"`, or
+  `require("node:test")`, single or double quoted. This is a real parse (the same grammar the file's own
+  extension selects), not a substring scan: a `"node:test"` mention inside a comment or an unrelated string
+  literal is not evidence and does not derive a runner.
+- **Precedence is unchanged.** An explicit `package.json` `scripts.test` (or a `vitest`/`jest` dependency)
+  still wins exactly as #323/#331 already decided — including an authoritative-but-unrecognized script
+  (mocha, say), which is a decided "no" and is never overridden by the weaker, file-local import evidence.
+  The import fallback applies ONLY to today's `run_unknown="1"` case.
+- **`.ts`/`.mts`/`.cts`/`.tsx` get a Node-version-aware command, not a blind guess.** Node's own `--test`
+  runner strips TypeScript types without a flag only from Node 23.6 onward (earlier Nodes need
+  `--experimental-strip-types`, which 23.6+ still accepts as a no-op). This tool cannot see which Node will
+  run the emitted command, so it reads `engines.node` from the nearest manifest (if any) and derives the
+  bare form ONLY when that range proves every satisfying Node is >= 23.6; otherwise — including when there
+  is no manifest at all — it emits the flagged, conservative form. This applies to BOTH the new import-
+  evidence path and the existing `scripts.test: "node --test"` path (previously spelled `node --test <file>`
+  unconditionally for a `.ts` file, with no version awareness at all). `.js`/`.jsx`/`.mjs`/`.cjs` never need
+  the flag and always get the bare form.
+- New fixtures, `test/testgatenodetestimportfix/` through `test/testgatenodetestimportprecedencefix/`
+  (`test/testgatecheck.sh` arms x1-x6): the exact repro, a `.js` variant, `require("node:test")`, a negative
+  control (`"node:test"` only in a comment/string — parsed, not matched), and a precedence control
+  (`scripts.test: "vitest run"` still wins over a `node:test` import in the same file).
+
+### Documented — TS/JS test runners this still cannot derive (`run_unknown="1"` stays honest, not a bug)
+
+Narrowed from the 0.6.3 list: the third gap below (node's test runner against a `.ts` file on an unknown
+Node version) is now derived, honestly flagged — see the fix above. Still not derived, and correctly
+`run_unknown="1"`: node's own test runner invoked through `tsx` (a common way to run it against `.ts`
+files, when neither `package.json` nor the test file's own bytes name `node:test` directly) and `bun`'s
+test runner. See #323's own discussion for a user-declared runner template, which would be the way to name
+either of these explicitly once implemented.
+
+---
+
 ## [0.6.3] — 2026-09-25
 
 ### Fixed — silent cuts in the report verbs and the MCP twins now say what they dropped

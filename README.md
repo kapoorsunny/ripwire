@@ -1428,12 +1428,27 @@ entrypoint discloses why `untested=` reads zero instead of looking like there wa
 The capture above predates that attribute (and a few other root attributes added since), so its root
 lacks it; today's root carries `untested_modscope="N"` immediately after `untested=`.
 
-A TS/JS `run_unknown="1"` can mean the manifest genuinely names nothing recognized, or it can mean a
-real runner this tool does not yet derive: node's own test runner invoked through `tsx` (a common way
-to run it against `.ts` files), `bun`'s test runner, and node's test runner against a `.ts` file on a
-node version too old to strip TypeScript types natively. These stay an honest unknown rather than a
-guess; `pnpm`/`yarn`-prefixed test scripts derive correctly today (spelled `npx …`, which finds a
-local binary first).
+A TS/JS file with NO manifest evidence of its own (no `package.json` anywhere in the crawl boundary, or
+the nearest one decides nothing) still gets one more chance before falling to the shell/Python driver
+search above: its own bytes are read for a `node:test` import or require — `import test from "node:test"`,
+`import { test, describe } from "node:test"`, `require("node:test")`, single or double quoted (#60). This
+is a real parse, not a substring scan: a `"node:test"` mention inside a comment or an unrelated string
+literal is not evidence. An explicit `package.json` `scripts.test` (or `vitest`/`jest` dependency) still
+wins over this — including an authoritative-but-unrecognized script, which is a decided "no" — so the
+import fallback only ever fires on what was previously `run_unknown="1"`. For a `.ts`/`.mts`/`.cts`/`.tsx`
+file — whether the runner was named by `scripts.test: "node --test"` or inferred from the import above —
+the command is additionally Node-version-aware: node's own `--test` runner strips TypeScript types without
+a flag only from Node 23.6 onward, and this tool cannot see which Node will run the emitted command, so it
+reads `engines.node` from the nearest manifest and spells the bare `node --test <file>` ONLY when that
+range proves every satisfying Node is >= 23.6 — otherwise (including when there is no manifest at all) it
+spells `node --experimental-strip-types --test <file>`, the flag 23.6+ still accepts as a no-op.
+
+A TS/JS `run_unknown="1"` can still mean the manifest genuinely names nothing recognized (and the test file
+itself names no `node:test` import either), or it can mean a real runner this tool does not yet derive:
+node's own test runner invoked through `tsx` (when neither the manifest nor the test file's own bytes name
+`node:test` directly) and `bun`'s test runner. These stay an honest unknown rather than a guess;
+`pnpm`/`yarn`-prefixed test scripts derive correctly today (spelled `npx …`, which finds a local binary
+first).
 
 </details>
 
