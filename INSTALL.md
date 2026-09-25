@@ -101,6 +101,11 @@ is left untouched, with a one-line note, and is never counted as installed. A co
 your own copy under a different name. openclaw reads `~/.agents/skills` only while its state directory is
 the default `~/.openclaw`. Add `--contributor` to also activate the skill for building ripwire itself.
 
+On Windows (the release zip), run the installer in the unzipped folder from a Git Bash window, or from PowerShell by
+Git Bash's full path:
+`& "C:\Program Files\Git\bin\bash.exe" skills/install.sh`. A bare `bash` there is often WSL's
+(`C:\Windows\System32\bash.exe`), which installs into the WSL home, where Windows agents never look.
+
 ### Advisory hooks (optional)
 
 `bash ~/.local/share/ripwire/skills/install.sh --hook` registers ripwire's advisory hooks for Claude Code in
