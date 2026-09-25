@@ -370,4 +370,77 @@ leftX=0; for c in "$X"/ripwire-*; do [ -e "$c" ] && leftX=$(( leftX + 1 )); done
     && ok "(F) a failed skill leaves no directory behind and is not declared in the manifest" \
     || no "(F) after total failure: $leftX ripwire-* entries remain; manifest: $( grep -c '^skill=' "$X/.ripwire-manifest-v1" 2>/dev/null )"
 
+# ── (G) issue C4 (train 20 CodeRabbit, PR #336): a manifest entry alone must never justify removing a real
+#    directory. f4db53be's `dir_is_ours` treated ANY name the previous manifest listed as installer-owned, so
+#    a user who deleted a shipped skill's symlink and dropped their own real directory of the same name (a
+#    customised copy) had it silently `rm -rf`'d on the next run, with a symlink put in its place, rc 0, no
+#    message. The fix: a real directory is ours only when it carries the copy marker, is empty, or is
+#    byte-identical to the skill this checkout ships under that name now — never on a manifest entry alone.
+#    Exercised on both paths a manifest entry can drive: install (a still-shipped name) and prune (a name no
+#    longer shipped, so a manifest-only "ours" verdict would otherwise be removed as stale).
+G="$TMP/c4"; mkdir -p "$G"
+bash "$SK/install.sh" "$G" >/dev/null 2>&1                        # normal run: real symlinks, writes the manifest
+if [ -L "$G/ripwire-router" ]; then
+    rm -f "$G/ripwire-router"
+    mkdir -p "$G/ripwire-router"
+    printf "my own customised skill, not ripwire's\n" >"$G/ripwire-router/SKILL.md"
+    printf 'a note the user left here\n' >"$G/ripwire-router/NOTES.txt"
+    bash "$SK/install.sh" "$G" >"$G/out1" 2>&1
+    G_RC=$?
+    { [ -d "$G/ripwire-router" ] && [ ! -L "$G/ripwire-router" ] \
+      && [ "$( cat "$G/ripwire-router/SKILL.md" 2>/dev/null )" = "my own customised skill, not ripwire's" ] \
+      && [ -f "$G/ripwire-router/NOTES.txt" ]; } \
+        && ok "(G) C4: a real user directory that replaced a previously-installed skill link survives a re-run untouched" \
+        || no "(G) C4: the user's ripwire-router directory was altered or removed by a re-run (data loss): rc=$G_RC, content=$( cat "$G/ripwire-router/SKILL.md" 2>/dev/null )"
+    [ "$G_RC" -eq 0 ] \
+        && ok "(G) C4: the run still exits 0 around a kept user directory" \
+        || no "(G) C4: the run exited $G_RC instead of 0 with a kept user directory"
+    grep -qE '^kept ripwire-router: not installed by ripwire' "$G/out1" \
+        && ok "(G) C4: install.sh prints a one-line note naming the kept directory" \
+        || no "(G) C4: no kept-directory note was printed: $( grep -i router "$G/out1" )"
+    grep -qx 'skill=ripwire-router' "$G/.ripwire-manifest-v1" 2>/dev/null \
+        && no "(G) C4: the manifest still claims the user's own ripwire-router" \
+        || ok "(G) C4: the manifest does not claim the user's own ripwire-router"
+    [ -L "$G/ripwire-router" ] \
+        && no "(G) C4: ripwire-router was turned into a symlink over the user's directory" \
+        || ok "(G) C4: ripwire-router was not turned into a symlink over the user's directory"
+    otherLinks=0; for l in "$G"/ripwire-*; do [ "$( basename "$l" )" = "ripwire-router" ] && continue
+        [ -L "$l" ] && [ -f "$l/SKILL.md" ] && otherLinks=$(( otherLinks + 1 )); done
+    [ "$otherLinks" -eq $(( shipped - 1 )) ] \
+        && ok "(G) C4: every OTHER shipped skill still installs normally around the kept directory" \
+        || no "(G) C4: only $otherLinks of $(( shipped - 1 )) other skills installed around the kept directory"
+else
+    no "(G) C4 setup: ripwire-router did not install as a symlink on a plain run — cannot exercise the scenario"
+fi
+
+# The prune path's own C4 twin: a name no longer shipped, with a HAND-WRITTEN previous manifest claiming it,
+# and a real user directory sitting there instead of anything this installer made. Before the fix, a manifest
+# entry alone was enough to prune (delete) it.
+G2="$TMP/c4-prune"; mkdir -p "$G2/ripwire-totally-not-shipped"
+printf 'version=1\nskill=ripwire-totally-not-shipped\n' >"$G2/.ripwire-manifest-v1"
+printf 'not a ripwire skill\n' >"$G2/ripwire-totally-not-shipped/SKILL.md"
+bash "$SK/install.sh" "$G2" >"$G2/out1" 2>&1
+{ [ -d "$G2/ripwire-totally-not-shipped" ] && [ ! -L "$G2/ripwire-totally-not-shipped" ] \
+  && [ "$( cat "$G2/ripwire-totally-not-shipped/SKILL.md" 2>/dev/null )" = "not a ripwire skill" ]; } \
+    && ok "(G) C4 (prune path): a stale name a hand-written manifest claims, holding a real user directory, is not pruned" \
+    || no "(G) C4 (prune path): the user's directory under a stale manifest-claimed name was removed"
+grep -qE '^kept ripwire-totally-not-shipped: not installed by ripwire' "$G2/out1" \
+    && ok "(G) C4 (prune path): prints the kept note for the stale-but-user-owned directory" \
+    || no "(G) C4 (prune path): no kept note printed: $( grep -i totally "$G2/out1" )"
+
+# ── (b) a MARKED copy from a previous run is refreshed on re-run even if its content has since drifted from
+#    what this checkout ships — the marker alone proves ownership; byte-comparison is only the fallback check
+#    used for an UNMARKED real directory (e.g. a Windows deep copy), never for one of our own marked copies.
+B="$F/marked-drift"; mkdir -p "$B"
+PATH="$F/shim:$PATH" bash "$SK/install.sh" "$B" >/dev/null 2>&1     # force the copy fallback
+printf '\nstale drifted content appended by hand\n' >>"$B/ripwire-router/SKILL.md"
+PATH="$F/shim:$PATH" bash "$SK/install.sh" "$B" >"$B/out1" 2>&1
+B_RC=$?
+{ [ "$B_RC" -eq 0 ] && [ "$( cat "$B/ripwire-router/SKILL.md" )" = "$( cat "$SK/ripwire-router/SKILL.md" )" ]; } \
+    && ok "(b) a marked copy from a previous run is refreshed on re-run even after local drift" \
+    || no "(b) a marked, drifted copy was NOT refreshed on re-run: rc=$B_RC"
+grep -qE '^copied ripwire-router' "$B/out1" \
+    && ok "(b) the refreshed marked copy is reported as copied (recognised as ours via the marker), not kept" \
+    || no "(b) the refreshed marked copy was not reported as copied: $( grep -i router "$B/out1" )"
+
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

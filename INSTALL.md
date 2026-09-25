@@ -93,10 +93,13 @@ has not been verified against a real install yet. If you use one, the help-wante
 [#69 (Hermes)](https://github.com/redhat-et/ripwire/issues/69) and
 [#68 (openclaw)](https://github.com/redhat-et/ripwire/issues/68) ask for exactly that check.
 
-The skills are symlinks named `ripwire-*`. Re-running the installer is safe: it refreshes the links and
-removes any that a newer release no longer ships. openclaw reads `~/.agents/skills` only while its state
-directory is the default `~/.openclaw`. Add `--contributor` to also activate the skill for building ripwire
-itself.
+The skills are symlinks named `ripwire-*` — a copy instead, marked as the installer's own, when a symlink
+can't be made (e.g. Windows without Developer Mode). Re-running the installer is safe: it refreshes the
+links and copies it manages and removes any that a newer release no longer ships, but it only ever
+replaces a real directory it can prove is its own; a real `ripwire-*` directory it did not create (yours)
+is left untouched, with a one-line note, and is never counted as installed. openclaw reads
+`~/.agents/skills` only while its state directory is the default `~/.openclaw`. Add `--contributor` to
+also activate the skill for building ripwire itself.
 
 ### Advisory hooks (optional)
 
