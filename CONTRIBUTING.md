@@ -780,6 +780,12 @@ ls /tmp/tsanlog.*     # one file per process that raced; none means no report
 6. If your change alters emitted output, regenerate the goldens as their **own** commit with the
    diff reviewed by eye — never bundled with logic.
 7. Keep formatting churn out of logic commits.
+8. **Cutting a release:** bump the version in `CMakeLists.txt`'s `project()` call, rename
+   `CHANGELOG.md`'s `## [Unreleased]` section to the new version, and add the release's blurb to
+   README.md's `## Release notes` section (newest first, with a `Thanks to` line where one applies) —
+   never to a `## What's new` section, which no longer exists (moved 2026-09-25; see git history if
+   you are looking for it). Update the one-line **Latest: 0.6.x** pointer near the top of README.md to
+   match.
 
 **The gate count is a build product.** It is stated in `README.md`, `docs/EVALS.md` and
 `present/deck5_ripwire_build.js` — eight sites — and every one of them is written by
