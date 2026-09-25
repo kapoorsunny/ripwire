@@ -958,9 +958,9 @@ ripwire --version
 
 - **Git for Windows** is needed for the git-history features (churn, `--situ`, the `git` row of `--doctor`) and for
   the skills installer. The map itself runs without it.
-- **`ripwire . --doctor`**: every row should read `ok="1"` except `binary-path`, which Windows marks
-  `degraded="1"` and may report as failing even when `ripwire` is on `Path` (its PATH lookup is a known gap).
-  The cache lives in `%LOCALAPPDATA%\Temp\ripwire-<uid>`.
+- **`ripwire . --doctor`**: every row should read `ok="1"`. `binary-path` stays marked `degraded="1"` on Windows
+  (it asks Git Bash's `which`). When it fails, `which=` names the `ripwire` that `Path` finds first, and
+  `which_version=` is what that one prints for `--version`. The cache lives in `%LOCALAPPDATA%\Temp\ripwire-<uid>`.
 - **Agent skills** (Claude Code, Codex): from Git Bash, in the unzipped folder, `bash skills/install.sh` (Claude Code)
   or `bash skills/install.sh --codex`. Or copy them by hand in PowerShell:
   `New-Item -ItemType Directory -Force "$HOME\.claude\skills" | Out-Null; Copy-Item -Recurse -Force "$bin\skills\ripwire-*" "$HOME\.claude\skills\"`

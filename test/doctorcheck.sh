@@ -231,6 +231,32 @@ echo "$TROW" | grep -q 'hint=' \
     && no "(F2) same-bytes row wrongly carries a hint" \
     || ok "(F2) same-bytes row carries no hint"
 
+# ── (F3) #334: a DIFFERENT, older ripwire earlier on PATH. The Windows tester's `which` found a 0.6.2 they had built
+#     themselves ahead of the 0.6.3 they ran. The row must fail on identity (not on the name, not on an mtime), keep
+#     both paths, and name the PATH copy's own build from its --version line, so the mismatch reads as two versions. ──
+OLDDIR="$TMP/olderripwire"; mkdir -p "$OLDDIR"
+printf '%s\n' '#!/bin/sh' 'case "$1" in --version) echo "ripwire 0.6.2 (Release, Clang 20.1.8, emit=std::print, built_from=0000000f334)";; esac' >"$OLDDIR/ripwire"
+chmod +x "$OLDDIR/ripwire"
+OLDCACHE="$TMP/oldcache"; mkdir -p "$OLDCACHE"
+OOUT="$( PATH="$OLDDIR:$PATH" TMPDIR="$OLDCACHE" "$BIN" "$REPO" --doctor --no-cache 2>/dev/null )"
+OROW="$( echo "$OOUT" | grep -oE '<c n="binary-path"[^<]*/>' )"
+{ echo "$OROW" | grep -q ' ok="0"' && echo "$OROW" | grep -q 'same_file="0"' && echo "$OROW" | grep -q 'same_bytes="0"' \
+  && echo "$OROW" | grep -qF "which=\"$OLDDIR/ripwire\""; } \
+    && ok "(F3) an older ripwire earlier on PATH fails the row on identity, naming its path in which=" \
+    || no "(F3) an older ripwire earlier on PATH: $OROW"
+echo "$OROW" | grep -qF 'which_version="ripwire 0.6.2 (Release, Clang 20.1.8, emit=std::print, built_from=0000000f334)"' \
+    && ok "(F3) the row names the PATH copy's own build (which_version=), so the mismatch reads as 0.6.2 vs this binary" \
+    || no "(F3) the row does not name the PATH copy's build: $OROW"
+# The fake is written AFTER this binary was built, so by mtime it is the newer file. The base binary's hint therefore
+# called the running binary STALE and said to invoke the 0.6.2 directly; the stated release numbers must win.
+OHINT="$( echo "$OROW" | grep -oE 'hint="STALE:[^"]*"' )"
+echo "$OHINT" | grep -qF "STALE: $OLDDIR/ripwire (ripwire 0.6.2" \
+    && ok "(F3) the hint names the 0.6.2 on PATH as the stale one, by its stated version, not by mtime" \
+    || no "(F3) the hint does not name the PATH copy as the older build: $OHINT"
+echo "$TROW" | grep -q 'which_version=' \
+    && no "(F3) a byte-identical copy was asked for its version (only a mismatch runs the PATH copy)" \
+    || ok "(F3) a byte-identical PATH copy carries no which_version= (the PATH binary is run only on a mismatch)"
+
 # ── (G) NOT on PATH at all — the state every fresh install is in until the user adds ~/.local/bin, and the
 #     state in which a stranger runs this binary by absolute path to ask what is wrong. Used to be ok="1"
 #     (passed=7/7) with `ripwire` a "command not found" at the prompt. Fails the row, names the fix. ──

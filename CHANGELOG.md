@@ -32,6 +32,13 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
   0.6.3 in the report) each refuse and rewrite the other's cache and re-parse on every run. One build run
   twice in a row reuses its own cache, on Windows as elsewhere. The Windows CI job now checks that
   directly: the second run's `RIPWIRE_CACHE_STATS` line must show every file reused and none re-parsed.
+- `--doctor`'s `binary-path` row, when a different `ripwire` comes first on PATH, now names that
+  binary's build: `which_version=` is the line it prints for `--version`. Its `STALE:` hint goes by the
+  release numbers the two binaries state, where it used to go by mtime. A 0.6.2 copied onto PATH after
+  0.6.3 was installed had the newer mtime, so the hint called the running 0.6.3 stale and said to run the
+  0.6.2. On Windows, Git Bash's `which` prints the name without `.exe`; the row now also tries the `.exe`
+  name before it reports `on_path="0"`, so it compares the two files there too. It still marks
+  `degraded="1"` on Windows.
 
 ## [0.6.3] — 2026-09-25
 

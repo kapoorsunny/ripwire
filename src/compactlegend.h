@@ -1069,7 +1069,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // doctor: src/verbs_doctor.h runDoctor (+ doctorBinaryPathVerdictAttr, doctorNotOnPathHint)
     { "checks", "checks=/passed=: checks run / how many passed; exit 1 when passed= is below checks=", false, "doctor", MapHeaderRead::No, {}, "doctor" },   // also defines passed=
     { "built_from", "built_from=: the commit this binary was built from; at= is the tree HEAD now, a mismatch is normal", false, "doctor", MapHeaderRead::No, {}, "doctor" },
-    { "self", "self=/which=: this binary's path and the one which ripwire finds on PATH", true, "c", MapHeaderRead::No, {}, "doctor" },   // also defines which=
+    { "self", "self=/which=: this binary's path and the one which ripwire finds on PATH; which_version= is the version line that one prints when they differ", true, "c", MapHeaderRead::No, {}, "doctor" },   // also defines which= which_version=
     { "on_path", "on_path=0|1: whether a ripwire is on PATH; 0 fails the row and hint= carries the export line", true, "c", MapHeaderRead::No, {}, "doctor" },
     { "same_file", "same_file=1: the PATH copy is this very file (same device and inode)", true, "c", MapHeaderRead::No, {}, "doctor" },
     { "same_bytes", "same_bytes=1: a different file with identical content, a copied install (ok); 0 fails the row", true, "c", MapHeaderRead::No, {}, "doctor" },

@@ -218,10 +218,12 @@ jobs:
           fi
 
       # --doctor with the unzipped directory on PATH, under the conditions a PowerShell user has (no TMPDIR, no
-      # XDG_CACHE_HOME). Every row must pass except binary-path, which on Windows is DISCLOSED as degraded
-      # (degrade_reason="win32-which-spelling": Git Bash's `which` never prints ".exe", src/verbs_doctor.h) and may
-      # read ok="0" on a correct install; the README says so. The cache directory (#326) must be the user's temp
-      # directory's ripwire-<uid>, under %LOCALAPPDATA% — compared in long form, the runner's TEMP is 8.3 (RUNNER~1).
+      # XDG_CACHE_HOME). Every row must pass. binary-path stays DISCLOSED as degraded on Windows
+      # (degrade_reason="win32-which-spelling": Git Bash's `which` never prints ".exe", src/verbs_doctor.h), but since
+      # #334 it retries the ".exe" spelling, so the unzipped exe first on PATH must read ok="1" same_file="1". Then a
+      # fake older `ripwire` put first on PATH must fail the row on identity and be named by its own --version line.
+      # The cache directory (#326) must be the user's temp directory's ripwire-<uid>, under %LOCALAPPDATA% — compared
+      # in long form, the runner's TEMP is 8.3 (RUNNER~1).
       - name: "--doctor passes, and the cache directory is under %LOCALAPPDATA% (#326)"
         run: |
           unset TMPDIR XDG_CACHE_HOME
@@ -236,9 +238,18 @@ jobs:
           [ -z "$bad" ] || { echo "windows-package: --doctor rows failed (rc=$rc): $bad" >&2; exit 1; }
           bp="$( grep -o '<c n="binary-path"[^>]*>' doctor.xml )"
           case "$bp" in
-            *'ok="1"'*) echo "binary-path ok" ;;
-            *'degraded="1" degrade_reason="win32-which-spelling"'*) echo "binary-path: disclosed Windows degrade (expected): $bp" ;;
-            *) echo "windows-package: binary-path failed without the disclosed Windows degrade: $bp" >&2; exit 1 ;;
+            *' ok="1"'*' same_file="1"'*) echo "binary-path ok, the unzipped exe itself: $bp" ;;
+            *) echo "windows-package: binary-path does not resolve the unzipped ripwire.exe on PATH as this binary: $bp" >&2; exit 1 ;;
+          esac
+          fake="$( cygpath -u "$RUNNER_TEMP" )/rw-older-ripwire"; mkdir -p "$fake"
+          printf '%s\n' '#!/bin/sh' 'echo "ripwire 0.6.2 (Release, fake, emit=std::print, built_from=0000000f334)"' > "$fake/ripwire"
+          chmod +x "$fake/ripwire"
+          PATH="$fake:$PATH" "$pkgdir/ripwire.exe" "$( cygpath -w "$GITHUB_WORKSPACE" )" --doctor > doctor-stale.xml || true   # the real exe, by path: `ripwire` is the fake now
+          sp="$( grep -o '<c n="binary-path"[^>]*>' doctor-stale.xml )"
+          echo "with an older ripwire first on PATH: $sp"
+          case "$sp" in
+            *' ok="0"'*' same_file="0"'*'which_version="ripwire 0.6.2 (Release, fake'*'hint="STALE: '*'rw-older-ripwire/ripwire (ripwire 0.6.2'*) ;;
+            *) echo "windows-package: an older ripwire first on PATH was not reported as the stale 0.6.2" >&2; exit 1 ;;
           esac
           dir="$( grep -o '<c n="cache-dir"[^>]*>' doctor.xml | sed -n 's/.* dir="\([^"]*\)".*/\1/p' )"
           long="$( cygpath -m -l "$dir" )"; lad="$( cygpath -m -l "$LOCALAPPDATA" )"; tmp="$( cygpath -m -l "$( cygpath -w "$TEMP" )" )"
