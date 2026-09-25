@@ -62,6 +62,7 @@
 #include "infra/namesplit.h"  // isIdentChar / containsWordBoundedBy — the shared ident-byte test and word-boundary scan
 #include "infra/nodekind.h"   // kindIs — grammar-string compare without a libc call (per nodekind.h's own banner)
 #include "infra/tschildren.h" // ChildCursor/appendChildren — the ONE DFS-stack child-walk shape (tschildren.h's own banner)
+#include "pattern.h"          // pattern::stripQuotePair — the ONE quote-strip this and importSpecifierText both apply
 
 #include <filesystem>
 #include <limits>
@@ -320,6 +321,19 @@ inline bool matchesWord( std::string_view text, std::string_view word )
     return rw::namesplit::containsWordBoundedBy( text, word, isWordByte );
 }
 
+/// The string value of package.json's top-level `objectKey.fieldKey` (`"scripts"."test"`,
+/// `"engines"."node"`) — the ONE "read a nested top-level field" shape `testScript` and `enginesNode` both
+/// need, factored out once rather than each re-deriving it (measured: --quality-delta's duplication kind).
+inline std::string nestedStringValue( std::string_view packageJson, std::string_view objectKey, std::string_view fieldKey )
+{
+    const ObjSpan obj = topLevelObjectBody( packageJson, objectKey );
+    if( obj.begin == std::string_view::npos )
+    {
+        return {};
+    }
+    return stringValue( packageJson.substr( obj.begin, obj.end - obj.begin ), fieldKey );
+}
+
 } // namespace detail
 
 /// Whether `dependencies` or `devDependencies` (either one — testmap.h's callers do not care which) names
@@ -341,12 +355,7 @@ inline bool hasDependency( std::string_view packageJson, std::string_view pkg )
 /// The literal `scripts.test` command string, or "" when package.json has no such field.
 inline std::string testScript( std::string_view packageJson )
 {
-    const detail::ObjSpan obj = detail::topLevelObjectBody( packageJson, "scripts" );
-    if( obj.begin == std::string_view::npos )
-    {
-        return {};
-    }
-    return detail::stringValue( packageJson.substr( obj.begin, obj.end - obj.begin ), "test" );
+    return detail::nestedStringValue( packageJson, "scripts", "test" );
 }
 
 // The three runners #323 names, and nothing else — a fourth framework (mocha, ava, tap, jasmine…) is a
@@ -577,9 +586,11 @@ inline const TSLanguage* grammarForPath( std::string_view path ) noexcept
 
 /// Whether `node` is a `string` node (never a template string — a computed specifier proves nothing, the
 /// same reading ingest_relations.h::jsModuleLoadTarget already gives it) whose one quote pair strips to
-/// exactly "node:test" — single or double, either quote style. The stripping mirrors
-/// ingest_relations.h::importSpecifierText exactly (that function is ingest.cpp-private; this file re-parses
-/// independently, so the same two-line strip is applied here rather than shared across that boundary).
+/// exactly "node:test" — single or double, either quote style. The stripping IS
+/// ingest_relations.h::importSpecifierText's own two-line strip (that function is ingest.cpp-private and
+/// this file re-parses independently, so the two cannot call one another directly) — factored out once,
+/// as `pattern::stripQuotePair`, rather than a second hand-rolled copy (measured: --quality-delta's
+/// duplication kind).
 inline bool isNodeTestStringLiteral( TSNode node, std::string_view src ) noexcept
 {
     if( !rw::kindIs( ts_node_type( node ), "string" ) )
@@ -591,12 +602,7 @@ inline bool isNodeTestStringLiteral( TSNode node, std::string_view src ) noexcep
     {
         return false;
     }
-    std::string_view s = src.substr( a, b - a );
-    if( s.size() >= 2 && ( s.front() == '\'' || s.front() == '"' ) && s.back() == s.front() )
-    {
-        s = s.substr( 1, s.size() - 2 );
-    }
-    return s == "node:test";
+    return pattern::stripQuotePair( src.substr( a, b - a ) ) == "node:test";
 }
 
 /// Whether `node` is itself node:test EVIDENCE — an ES `import … from "node:test"` (any clause shape: the
@@ -694,12 +700,7 @@ inline bool hasNodeTestImport( std::string_view source, std::string_view path )
 /// on an empty string finds nothing, same as a manifest that simply omits the field.
 inline std::string enginesNode( std::string_view packageJson )
 {
-    const detail::ObjSpan obj = detail::topLevelObjectBody( packageJson, "engines" );
-    if( obj.begin == std::string_view::npos )
-    {
-        return {};
-    }
-    return detail::stringValue( packageJson.substr( obj.begin, obj.end - obj.begin ), "node" );
+    return detail::nestedStringValue( packageJson, "engines", "node" );
 }
 
 /// #60: whether an `engines.node` range PROVES every Node version satisfying it is >= 23.6 — the

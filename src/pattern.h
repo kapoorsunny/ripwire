@@ -818,6 +818,21 @@ inline std::string_view nodeText( TSNode n, std::string_view src ) noexcept
     return src.substr( a, b - a );
 }
 
+/// Strip exactly one matched `'...'`/`"..."` pair from `text` — the ONE quote-strip
+/// ingest_relations.h::importSpecifierText (a TS/JS/Python import/require specifier) and
+/// jsrunner.h::isNodeTestStringLiteral (#60's node:test import/require check) both apply to a `string`
+/// node's own span text, kept here once rather than duplicated in each (measured: --quality-delta's
+/// duplication kind). Any other shape — no matching quote pair, an unquoted identifier, an empty span —
+/// is returned unchanged.
+inline std::string_view stripQuotePair( std::string_view text ) noexcept
+{
+    if( text.size() >= 2 && ( text.front() == '\'' || text.front() == '"' ) && text.back() == text.front() )
+    {
+        return text.substr( 1, text.size() - 2 );
+    }
+    return text;
+}
+
 // Structural equality for metavariable unification (ast-grep does_node_match_exactly). NOT whole-subtree
 // text equality: `a + b` and `a  +  b` must unify (only whitespace differs) while `a + b` and `a - b`
 // must not, and re-serializing text cannot tell those two cases apart.
