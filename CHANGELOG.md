@@ -117,11 +117,13 @@ A TypeScript or JavaScript import written through a tsconfig/jsconfig `paths` al
 `baseUrl`-relative path, or a workspace package name (`@acme/lib`) draws no file-graph edge, so a cycle
 spelled through one was missing and the absent `<cycles>` element read as "acyclic". Those imports are still
 not resolved (that is part 2); they are now counted. A tree without one is byte-identical.
-- `--deps` and `--arch` carry `imports_unresolved="N" counts_floor="1"` on the root: cycles, cones,
-  `ccd`/`acd`/`nccd`, `violations=` and `propagation_cost=` are floors over a partial graph. `--arch`
-  also says so on stderr; its exit code is unchanged.
-- `--report` reads `## Dependency cycles (showing 1 of 1; a floor: 3 imports unresolved)`, and an empty
-  list reads "none found over the resolved edges" instead of "none (acyclic)".
+- `--deps` and `--arch` carry `imports_unresolved="N" graph_partial="1"` on the root: every value is
+  measured over the resolved edges only. Not every one is a lower bound: a missing edge can merge two
+  reported cycles into one, and `instab=`/`I=`/`D=` can move either way. `afferent=`, `transitive=`,
+  `ccd`/`acd`/`nccd` and `violations=` can only rise. `--arch` also says on stderr that `violations=` can
+  only rise; its exit code is unchanged.
+- `--report` reads `## Dependency cycles (showing 1 of 1; measured over resolved edges: 3 imports unresolved)`,
+  and an empty list reads "none found over the resolved edges" instead of "none (acyclic)".
 - `--impact` (XML, `--json`, `--format=columnar`, and the MCP `impact` tool) carries `imports_unresolved=`
   beside `importers=` when a TS/JS import could land on one of the symbol's files.
 - Only a specifier the project's own config places in the tree counts: a `paths` key with a literal prefix

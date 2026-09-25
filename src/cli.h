@@ -1376,7 +1376,7 @@ inline constexpr char kHelpHead[] =
         "                               stabledeps/cycles/ccd/acd/nccd/shape. <health lazy_edges=> counts the pairs left out,\n"
         "                               a row's lazy_edges= its own; both absent when 0. A TS/JS import through a tsconfig paths\n"
         "                               alias, a baseUrl path or a workspace package draws no edge yet: the root's\n"
-        "                               imports_unresolved=N counts_floor=1 counts them, and every number above is then a floor\n"
+        "                               imports_unresolved=N graph_partial=1 counts them: numbers above are over resolved edges only\n"
         "    --hotspots                 rank files by complexity times recent git churn — where maintenance hurts\n"
         "                               complexity x recent git churn (maintenance pain); each row's top= is the worst function's\n"
         "                               BARE name, top_ccx= its cognitive complexity, top_l= its source line (build an --expand\n"
