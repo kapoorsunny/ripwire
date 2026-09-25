@@ -5480,34 +5480,7 @@ inline std::string displaySym( const std::string& sym, std::string_view root )
 // that cannot round-trip through both is refused at the flag rather than mangled at the emitter.
 inline bool scopeGlobMatch( std::string_view s, std::string_view p ) noexcept
 {
-    std::size_t si = 0, pi = 0, starAt = std::string_view::npos, resumeAt = 0;
-    while( si < s.size() )
-    {
-        if( pi < p.size() && ( p[ pi ] == '?' || p[ pi ] == s[ si ] ) )
-        {
-            ++si;
-            ++pi;
-        }
-        else if( pi < p.size() && p[ pi ] == '*' )
-        {
-            starAt   = pi++;      // remember the last `*` and where its tail may resume, so a failed suffix
-            resumeAt = si;        // match backtracks by one character instead of giving up
-        }
-        else if( starAt != std::string_view::npos )
-        {
-            pi = starAt + 1;
-            si = ++resumeAt;
-        }
-        else
-        {
-            return false;
-        }
-    }
-    while( pi < p.size() && p[ pi ] == '*' )
-    {
-        ++pi;                     // trailing stars may still match the empty tail
-    }
-    return pi == p.size();
+    return wildcardMatch( s, p );   // arch.h — one wildcard loop for the scope patterns and resolve.h's workspace globs
 }
 
 // The wildcard-free arm: a root-anchored prefix that must end ON a component boundary, so `alpha` can never
