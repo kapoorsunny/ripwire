@@ -611,25 +611,34 @@ inline const TSLanguage* grammarForPath( std::string_view path ) noexcept
     return tree_sitter_javascript();   // .js/.jsx/.mjs/.cjs
 }
 
-/// Whether `node` is a `string` node (never a template string — a computed specifier proves nothing, the
-/// same reading ingest_relations.h::jsModuleLoadTarget already gives it) whose one quote pair strips to
-/// exactly "node:test" — single or double, either quote style. The stripping IS
-/// ingest_relations.h::importSpecifierText's own two-line strip (that function is ingest.cpp-private and
-/// this file re-parses independently, so the two cannot call one another directly) — factored out once,
-/// as `pattern::stripQuotePair`, rather than a second hand-rolled copy (measured: --quality-delta's
-/// duplication kind).
-inline bool isNodeTestStringLiteral( TSNode node, std::string_view src ) noexcept
+/// The string VALUE of a `string` node (never a template string — a computed specifier proves nothing, the
+/// same reading ingest_relations.h::jsModuleLoadTarget already gives it) — its one quote pair stripped,
+/// single or double, either quote style. The stripping IS ingest_relations.h::importSpecifierText's own
+/// two-line strip (that function is ingest.cpp-private and this file re-parses independently, so the two
+/// cannot call one another directly) — factored out once, as `pattern::stripQuotePair`, rather than a
+/// second hand-rolled copy (measured: --quality-delta's duplication kind). A template string (or any other
+/// node kind) is never a static specifier and yields "".
+inline std::string stringLiteralValue( TSNode node, std::string_view src ) noexcept
 {
     if( !rw::kindIs( ts_node_type( node ), "string" ) )
     {
-        return false;
+        return {};
     }
     const std::uint32_t a = ts_node_start_byte( node ), b = ts_node_end_byte( node );
     if( a >= b || b > src.size() )
     {
-        return false;
+        return {};
     }
-    return pattern::stripQuotePair( src.substr( a, b - a ) ) == "node:test";
+    return std::string( pattern::stripQuotePair( src.substr( a, b - a ) ) );
+}
+
+/// Whether `node` is a `string` node whose value is exactly "node:test" — `isNodeTestStringLiteral` is
+/// `stringLiteralValue`'s own null-and-non-string cases folded into ONE comparison, not a second hand-rolled
+/// walk (measured: --quality-delta's duplication kind, the same reason `stringLiteralValue` itself factored
+/// the quote-strip out of `nodeIsNodeTestEvidence` in the first place).
+inline bool isNodeTestStringLiteral( TSNode node, std::string_view src ) noexcept
+{
+    return stringLiteralValue( node, src ) == "node:test";
 }
 
 /// Whether `node` is itself node:test EVIDENCE — an ES `import … from "node:test"` (any clause shape: the
@@ -670,24 +679,6 @@ inline bool nodeIsNodeTestEvidence( TSNode node, std::string_view src ) noexcept
         return named == 1 && isNodeTestStringLiteral( only, src );
     }
     return false;
-}
-
-/// The string VALUE of a `string` node — the same node-kind guard `isNodeTestStringLiteral` applies,
-/// generalized to hand back the specifier text itself instead of comparing it against one fixed value
-/// (rv-nodetest-runner-60 F2: a relative import specifier's own bytes, not just whether they spell
-/// "node:test"). A template string (or any other node kind) is never a static specifier and yields "".
-inline std::string stringLiteralValue( TSNode node, std::string_view src ) noexcept
-{
-    if( !rw::kindIs( ts_node_type( node ), "string" ) )
-    {
-        return {};
-    }
-    const std::uint32_t a = ts_node_start_byte( node ), b = ts_node_end_byte( node );
-    if( a >= b || b > src.size() )
-    {
-        return {};
-    }
-    return std::string( pattern::stripQuotePair( src.substr( a, b - a ) ) );
 }
 
 /// rv-nodetest-runner-60 F2: append `node`'s own relative (`./`/`../`) STATIC specifier to `out`, if it has
