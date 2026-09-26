@@ -2911,8 +2911,8 @@ terms.
 the skills installer no longer reports success after creating empty folders: it copies instead, or says it failed. `--doctor`
 no longer mistakes an older ripwire on PATH for the running one (thanks @elsRobin). `--deps` no longer reports `cycles="0"`
 when TypeScript alias or workspace imports couldn't be resolved (thanks @srinchow). `node:test` files get a runnable
-`node --test` command (thanks @YogevKr and @alex-michaud), and a long `next=` is never dropped. Astro joins the languages
-(thanks @sclyde).
+`node --test` command where Node can run them as written (thanks @YogevKr and @alex-michaud), and a long `next=` is
+never dropped. Astro joins the languages (thanks @sclyde).
 
 **ripwire 0.6.3 — nothing cut quietly, and a Windows download.** A cut answer now keeps its strongest rows and
 names what it dropped, with a `next=` for the rest. Releases include a Windows x64 zip (preview), checked against
