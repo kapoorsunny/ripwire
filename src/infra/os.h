@@ -52,15 +52,7 @@
 #include <string>
 #include <string_view>
 
-// shSingleQuote (jsonesc.h) is used below to quote the PATH-remedy hint's `dir` as a shell literal (CodeRabbit
-// 4109273959), but jsonesc.h cannot be #included here: jsonesc.h needs emit.h's formatTo, and emit.h itself
-// #includes this file (for rw::os::open_memstream) — os.h -> jsonesc.h -> emit.h -> os.h would be a cycle. A
-// forward declaration is enough: this header only CALLS shSingleQuote from an inline function, so no TU needs
-// its body unless that inline function is actually invoked, and every caller of rw::os::path_prepend_hint pulls
-// in jsonesc.h's real definition some other way (main.cpp via gitmine.h; a unit test by including it directly).
-// The default argument is omitted here (repeating a DIFFERENT default across declarations is illegal, an
-// identical one is redundant) — jsonesc.h's own declaration supplies it, and every call below takes 1 argument.
-namespace rw { std::string shSingleQuote( const std::string& s, std::string_view escapedQuote ); }
+#include "shquote.h"   // rw::shSingleQuote: path_prepend_hint quotes its directory as a shell literal
 
 namespace rw::os
 {
@@ -261,7 +253,7 @@ static_assert( requires( const stat_t& st ) { st.st_mode; st.st_size; st.st_mtim
 // quotes so it still expands to the existing PATH.
 inline std::string path_prepend_hint( std::string_view dir )
 {
-    return "export PATH=" + shSingleQuote( std::string( dir ), "'\\''" ) + ":\"$PATH\" (and put that line in your shell rc file)";
+    return "export PATH=" + shSingleQuote( std::string( dir ) ) + ":\"$PATH\" (and put that line in your shell rc file)";
 }
 
 // ── process start and path intake ──────────────────────────────────────────────────────────────────────────

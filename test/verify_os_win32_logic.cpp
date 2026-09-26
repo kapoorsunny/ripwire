@@ -7,8 +7,6 @@
 #include <doctest/doctest.h>
 
 #include "infra/os_win32_logic.h"
-#include "infra/jsonesc.h"   // rw::shSingleQuote — os_win32_logic.h forward-declares it (avoids an include cycle,
-                              // see os_win32_logic.h's own comment); this TU needs the real definition to link.
 
 // A POSIX host's own W* and S_IS* macros are a second oracle for the encodings. This target also builds on Windows,
 // whose UCRT has neither header shape, so the host arm is feature-detected; the traditional-encoding oracle below
@@ -827,6 +825,21 @@ TEST_CASE( "doctor PATH remedy: a directory with $, a backtick, a quote and a sp
     // '/' -> '\\', then the whole (dir + ";") is single-quoted; an embedded ' doubles to ''.
     CHECK( h == "$env:Path = 'C:\\tools\\$env:UserProfile `whoami` it''is weird\\bin;' + $env:Path"
                 " in PowerShell (this window; add the directory to your user Path for new ones)" );
+}
+
+// PowerShell's tokenizer also closes a single-quoted literal on the typographic quotes U+2018..U+201B, so a directory
+// named with one (a curly apostrophe, as in O’Brien) must have it doubled like the ASCII quote, or the rest of the name
+// runs as code when the hint is pasted.
+TEST_CASE( "doctor PATH remedy: PowerShell's typographic single quotes are doubled too" )
+{
+    CHECK( powerShellPathPrependHint( "C:/O\xE2\x80\x99" "Brien/bin" )
+           == "$env:Path = 'C:\\O\xE2\x80\x99\xE2\x80\x99" "Brien\\bin;' + $env:Path"
+              " in PowerShell (this window; add the directory to your user Path for new ones)" );
+    CHECK( powerShellSingleQuote( "\xE2\x80\x98|\xE2\x80\x9A|\xE2\x80\x9B" )
+           == "'\xE2\x80\x98\xE2\x80\x98|\xE2\x80\x9A\xE2\x80\x9A|\xE2\x80\x9B\xE2\x80\x9B'" );
+    // neighbours of the range, and a truncated sequence at the end, are not quotes and pass through once
+    CHECK( powerShellSingleQuote( "\xE2\x80\x97\xE2\x80\x9C\xE2\x80" ) == "'\xE2\x80\x97\xE2\x80\x9C\xE2\x80'" );
+    CHECK( powerShellSingleQuote( "it's" ) == "'it''s'" );
 }
 
 TEST_CASE( "executables: extension detection and PATHEXT membership" )

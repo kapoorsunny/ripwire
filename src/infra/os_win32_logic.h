@@ -38,13 +38,6 @@
 #include <string>
 #include <string_view>
 
-// shSingleQuote (jsonesc.h) is used below (as PowerShell's own quoting, via its escapedQuote= argument) to quote
-// the PATH-remedy hint's directory as a shell literal (CodeRabbit 4109273959). jsonesc.h cannot be #included
-// here for the same reason os.h forward-declares it instead of including it (see os.h's own copy of this
-// comment): jsonesc.h needs emit.h's formatTo, and emit.h #includes os.h, which #includes this file — a cycle.
-// No default argument here (see os.h): every call below passes both arguments explicitly.
-namespace rw { std::string shSingleQuote( const std::string& s, std::string_view escapedQuote ); }
-
 namespace rw::oswin
 {
 
@@ -1140,18 +1133,50 @@ constexpr bool extensionInList( std::string_view path, std::string_view pathext 
 }
 
 // ── 8. The PATH remedy, in PowerShell's spelling ──────────────────────────────────────────────────────────────────
+// powerShellSingleQuote: `s` as ONE PowerShell single-quoted string literal, in which nothing expands (no `$`, no
+// backtick escape, no `$(...)`). PowerShell's grammar is not POSIX's: an embedded quote is escaped by doubling it
+// (`''`, not `'\''`), and its tokenizer accepts FIVE characters as a single quote — the ASCII `'` and the typographic
+// U+2018..U+201B (‘ ’ ‚ ‛; UTF-8 E2 80 98..9B), any of which closes the literal. A directory named with a
+// typographic apostrophe ("O’Brien") would otherwise end the literal early and let the rest of the name run as
+// code. So each of the five is doubled, itself twice, which the tokenizer reads back as that one character. `s` is
+// UTF-8; any other byte is copied through unchanged.
+inline std::string powerShellSingleQuote( std::string_view s ) noexcept
+{
+    std::string out = "'";
+    for( std::size_t i = 0; i < s.size(); ++i )
+    {
+        const bool typographic = i + 2 < s.size() && static_cast<unsigned char>( s[i] ) == 0xE2
+                              && static_cast<unsigned char>( s[i + 1] ) == 0x80 && static_cast<unsigned char>( s[i + 2] ) >= 0x98
+                              && static_cast<unsigned char>( s[i + 2] ) <= 0x9B;
+        if( typographic )
+        {
+            out.append( s.substr( i, 3 ) ).append( s.substr( i, 3 ) );
+            i += 2;
+        }
+        else if( s[i] == '\'' )
+        {
+            out += "''";
+        }
+        else
+        {
+            out += s[i];
+        }
+    }
+    out += '\'';
+    return out;
+}
+
 // --doctor's binary-path row says how to put this binary's directory on PATH when no copy of this program resolves from it. The POSIX
 // remedy is a shell `export PATH=` line; both Windows testers on #334 read that line in PowerShell, where it does
 // nothing. Here it is PowerShell's own assignment, with the directory in native '\' separators (a program path is '/'-
 // separated), for this window, and the pointer to the user Path that new windows read (README's Windows install sets it).
-// The directory (plus the trailing ';') is single-quoted as a literal via the shared shSingleQuote (jsonesc.h),
-// with PowerShell's own doubled-quote escape (`''`, not POSIX's `'\''`); `$env:Path` is appended outside the
-// quotes so it still expands to the existing Path.
+// The directory (plus the trailing ';') is one PowerShell single-quoted literal (powerShellSingleQuote, above);
+// `$env:Path` is appended outside the quotes so it still expands to the existing Path.
 inline std::string powerShellPathPrependHint( std::string_view programDir ) noexcept
 {
     std::string dir( programDir );
     std::replace( dir.begin(), dir.end(), '/', '\\' );
-    return "$env:Path = " + rw::shSingleQuote( dir + ";", "''" ) + " + $env:Path"
+    return "$env:Path = " + powerShellSingleQuote( dir + ";" ) + " + $env:Path"
            " in PowerShell (this window; add the directory to your user Path for new ones)";
 }
 
