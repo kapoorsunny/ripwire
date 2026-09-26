@@ -7570,7 +7570,7 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
                       std::string_view rootArg = {},    // R-E (2026-08-17): same single-root-only root
                                                         // argument serialize() takes — see its comment.
                       // #220 part 1: in-repo TS/JS imports that drew no edge (graph.h StructuralIncludeAdj). > 0 ⇒ the
-                      // root carries imports_unresolved= counts_floor="1" and the legend defines them; 0 ⇒ byte-identical.
+                      // root carries imports_unresolved= graph_partial="1" and the legend defines them; 0 ⇒ byte-identical.
                       std::uint64_t importsUnresolved = 0 )
 {
     const std::size_t F = ing.files.size();
@@ -7643,7 +7643,7 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
         // R-E: root= is unbounded (a deep absolute path), so it is NOT folded into the fixed `db` buffer above
         // (the V1-1 truncation class main.cpp's own history warns about) — written separately.
         if( !rootArg.empty() ) { w.write( " root=\"" );  w.write( escapeXml( rootArg, esc ) );  w.write( "\"" ); }
-        w.write( rw::importsUnresolvedFloorAttrXml( importsUnresolved ) );   // #220: absent at 0 — see graphlegend.h
+        w.write( rw::importsUnresolvedPartialAttrXml( importsUnresolved ) );   // #220: absent at 0; partial, not a floor — see graphlegend.h
         w.write( ">" );
     }
 

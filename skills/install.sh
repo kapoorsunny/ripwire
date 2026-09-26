@@ -314,20 +314,75 @@ mkdir -p "$dst"
 #    empty directories. So a link is now checked by its RESULT (a symlink whose SKILL.md reads back); when it
 #    did not take, the skill is COPIED (`cp -R`) and reported as `copied`; when the copy fails too, it is
 #    reported as `FAILED`, left out of the count and the manifest, and the run exits 1.
-#    A copy is a real directory, so the prune below must recognise it as ours without ever touching a user's
-#    own skill that happens to share the ripwire- prefix. A real directory is ours when it carries the copy
-#    marker, when it is EMPTY (the failed link an older installer left behind), or when the manifest this
-#    installer wrote last time lists it (a deep copy Git Bash made on its own). Anything else is left alone.
-#    test/skillinstallcheck.sh section (F) drives all of it with an `ln` that behaves like that Git Bash.
+#    A copy is a real directory, so the prune/install paths below must recognise it as ours without ever
+#    touching a user's own directory that happens to share a shipped ripwire-* name.
+#
+#    CODERABBIT C4 (train 20, reproduced 2026-09-25): the first cut of this clause trusted the PREVIOUS
+#    MANIFEST alone — any name that installer had once written was "ours" forever after, even once the user
+#    had deleted the link and dropped their own directory of files there. `rm -rf`, no message, rc 0. A
+#    manifest entry records what THIS installer once put at a path; it is not evidence about what is at that
+#    path NOW, so it must never by itself justify removing a real directory.
+#
+#    A real directory is ours ONLY when it is provably ours, checked in this order:
+#    1. MARKED: it carries the copy marker this installer writes at copy time, and the marker NAMES THIS
+#       DIRECTORY (B2, train 20 review). The marker holds the skill name it was copied as, so a marked copy the
+#       user renamed to another ripwire-* name to keep their edits (the marker then names a different skill) is
+#       theirs and is kept; before, an empty marker proved "some ripwire copy", not "this path", and the renamed
+#       copy was pruned as stale with the edits in it. The contract: a copied skill is ours (edits made inside it
+#       are replaced on re-run); edit your own copy under a different name.
+#       A NAMELESS (empty) marker, written by 0.6.4 candidates before B2, proves nothing about the path: such a
+#       directory is ours only when its name is a shipped skill and its contents, the marker aside, are
+#       byte-identical to that skill. Otherwise it is kept.
+#    2. EMPTY TREE: it holds no non-directory entry at ANY depth (B1). This is #334's actual shape. On Windows
+#       without symlink privilege every 0.6.0-0.6.3 installer's unverified `ln -sfn DIR DEST` left an empty
+#       directory, and on the SECOND run DEST was already a real directory, so coreutils/MSYS `ln` resolved the
+#       target to DEST/basename(DIR) and left an empty ripwire-x/ripwire-x inside it. A tree of empty
+#       directories holds no user bytes. `find` failing anywhere (an unreadable subdirectory, no find at all)
+#       means the tree is NOT provably empty, so its errors are handled explicitly and never read as "empty".
+#    3. BYTE-IDENTICAL: its contents are identical (`diff -rq`) to the skill this checkout ships under that name
+#       right now: an unmarked deep copy holding nothing but ripwire's own bytes. Residual gap, deliberately on
+#       the safe side: an unmarked copy of a skill whose bytes have changed since is kept as the user's.
+#    Byte comparison needs no extra bookkeeping and degrades safely (no shipped skill left under that name =>
+#    no match => left alone). Anything that fails every check is left untouched, reported with a one-line
+#    `kept` note, and never added to the manifest's ours set: the manifest is written from what this run
+#    itself verified, never from what a past run once claimed.
+#    test/skillinstallcheck.sh sections (F)-(I) drive all of it with an `ln` that behaves like that Git Bash.
 copyMarker=".ripwire-installed-copy"
-prevManifest="$dst/.ripwire-manifest-v1"
-in_prev_manifest() { [ -f "$prevManifest" ] && grep -qx "skill=$1" "$prevManifest"; }
+# shipped_src_for NAME — the skill directory this checkout would install under NAME right now, or nothing if
+# this checkout ships no such skill (a stale/renamed name, or a Hermes-native one outside non-hermes modes).
+shipped_src_for()
+{
+    if [ -d "$src/$1" ]; then
+        printf '%s\n' "$src/$1"
+    elif [ "$mode" = "hermes" ] && [ -d "$src/hermes/$1" ]; then
+        printf '%s\n' "$src/hermes/$1"
+    fi
+}
+# tree_holds_no_files DIR: true only when `find` read the WHOLE tree cleanly and found no non-directory entry
+# in it. find's own failure (rc != 0: an unreadable subdirectory, find missing) returns false: not provably
+# empty, so the directory is kept rather than removed.
+tree_holds_no_files()
+{
+    _files="$( find "$1" ! -type d 2>/dev/null )" || return 1
+    [ -z "$_files" ]
+}
 dir_is_ours()
 {
-    [ -f "$1/$copyMarker" ] || [ -z "$( ls -A "$1" 2>/dev/null )" ] || in_prev_manifest "$( basename "$1" )"
+    # $1 = the real directory found at the destination; $2 = the shipped skill dir to byte-compare it
+    # against, or "" when this checkout ships nothing under that name.
+    if [ -f "$1/$copyMarker" ]; then
+        _marked="$( cat "$1/$copyMarker" 2>/dev/null )" || return 1
+        [ "$_marked" = "$( basename "$1" )" ] && return 0           # our copy, of this very skill
+        [ -z "$_marked" ] || return 1                                 # a copy of ANOTHER skill: the user's
+        # a nameless marker (pre-B2 candidate): ours only if byte-identical to the skill shipped under this name
+        [ -n "${2:-}" ] && [ -d "$2" ] && diff -rq -x "$copyMarker" "$2" "$1" >/dev/null 2>&1
+        return
+    fi
+    tree_holds_no_files "$1" \
+        || { [ -n "${2:-}" ] && [ -d "$2" ] && diff -rq "$2" "$1" >/dev/null 2>&1; }
 }
-# a real directory this installer did not create — the one shape it must never remove
-foreign_dir() { [ -d "$1" ] && [ ! -L "$1" ] && ! dir_is_ours "$1"; }
+# a real directory this installer cannot prove it created — the one shape it must never remove
+foreign_dir() { [ -d "$1" ] && [ ! -L "$1" ] && ! dir_is_ours "$1" "${2:-}"; }
 remove_ours() { if [ -d "$1" ] && [ ! -L "$1" ]; then rm -rf "$1"; else rm -f "$1"; fi; }
 
 # PRUNE first: remove any installed ripwire-* skill that this repo no longer ships (deleted or renamed) —
@@ -344,6 +399,7 @@ is_contributor_skill() { grep -q '^audience: contributor' "$1/SKILL.md" 2>/dev/n
 wanted_skill() { [ "$wantContributor" -eq 1 ] || ! is_contributor_skill "$1"; }
 
 pruned=0
+kept=0
 for existing in "$dst"/ripwire-*; do
     [ -e "$existing" ] || [ -L "$existing" ] || continue      # skip the literal glob when nothing matches
     name="$( basename "$existing" )"
@@ -360,9 +416,12 @@ for existing in "$dst"/ripwire-*; do
         why="$name (contributor-only; pass --contributor to activate it)"
     fi
     [ -n "$why" ] || continue
-    if foreign_dir "$existing"; then
+    if foreign_dir "$existing" "$( shipped_src_for "$name" )"; then
         # Before #334 this was `rm -f` on a directory, which failed and aborted the whole install under set -e.
-        echo "kept $name (a directory this installer did not create; remove it yourself if it is stale)"
+        # C4: a name this run once wrote to the manifest is not by itself proof this directory is still ours —
+        # it may now be the user's own, so it is kept, never removed, on a manifest entry alone.
+        echo "kept $name: not installed by ripwire (your own directory) — remove it yourself if it is stale"
+        kept=$(( kept + 1 ))
         continue
     fi
     remove_ours "$existing"
@@ -379,11 +438,13 @@ installedNames=""
 install_skill()
 {
     target="$dst/$2"
-    if foreign_dir "$target"; then
-        # `ln -sfn` onto a real directory links INSIDE it and reports success; refuse instead of guessing.
-        echo "FAILED $2: $target is a directory this installer did not create; move it aside and re-run" >&2
-        failed=$(( failed + 1 ))
-        return 1
+    if foreign_dir "$target" "$1"; then
+        # `ln -sfn` onto a real directory links INSIDE it and reports success, so this is checked before
+        # attempting either. It is not a FAILURE (nothing this run was asked to do went wrong) — it is the
+        # user's own directory (C4), so it is left exactly as it is and not counted as installed.
+        echo "kept $2: not installed by ripwire (your own directory)"
+        kept=$(( kept + 1 ))
+        return 0
     fi
     if [ -e "$target" ] || [ -L "$target" ]; then
         remove_ours "$target"
@@ -393,7 +454,7 @@ install_skill()
     else
         [ -e "$target" ] || [ -L "$target" ] && remove_ours "$target"
         if cp -R "${1%/}" "$target" 2>/dev/null && cmp -s "$1/SKILL.md" "$target/SKILL.md" \
-           && : >"$target/$copyMarker" 2>/dev/null; then
+           && printf '%s\n' "$2" >"$target/$copyMarker" 2>/dev/null; then
             echo "copied $2 -> $target${3:-} (a symlink did not take here, e.g. Windows without Developer Mode; re-run after updating ripwire to refresh the copy)"
             copied=$(( copied + 1 ))
         else
@@ -455,9 +516,9 @@ manifestTmp="$( mktemp "$dst/.ripwire-manifest-v1.tmp.XXXXXX" )"
 mv "$manifestTmp" "$dst/.ripwire-manifest-v1"
 if [ "$failed" -gt 0 ]; then
     # Not `exit 1` here: a requested --hook is still registered below, and the status is set at the very end.
-    echo "skills/install.sh: $failed ripwire skill(s) FAILED to install into $dst (listed above); $count usable, ${copied} of them copied." >&2
+    echo "skills/install.sh: $failed ripwire skill(s) FAILED to install into $dst (listed above); $count usable, ${copied} of them copied, ${kept} kept as yours." >&2
 else
-    echo "done. $count ripwire skills active in every session (${copied} copied, ${pruned} pruned, ${skipped} contributor-only skipped) — every ripwire-* installed above."
+    echo "done. $count ripwire skills active in every session (${copied} copied, ${pruned} pruned, ${skipped} contributor-only skipped, ${kept} kept as yours) — every ripwire-* installed above."
 fi
 
 if [ "$wantHook" -eq 1 ]; then

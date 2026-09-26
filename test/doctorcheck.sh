@@ -274,6 +274,39 @@ echo "$GOUT" | grep -q '<doctor checks="[0-9]*" passed="[0-9]*"' \
     && ok "(G) passed= is below checks= when ripwire is not on PATH" \
     || no "(G) passed= still equals checks= with ripwire off PATH"
 
+# ── (G2) CodeRabbit 4109273959: the not-on-PATH hint's export line must quote the directory as a shell LITERAL
+#     — unquoted or double-quoted, a `$`, a backtick or `$(...)` inside it would expand or run when the user
+#     pastes the hint. Copy the binary into a directory whose name has all four (`$`, a backtick, a `'`, a
+#     space), extract the pasted line from the (XML-unescaped) hint, actually EVAL it, and check PATH's first
+#     entry is that directory byte for byte — proof the paste stayed inert, not just that it "looks quoted". ──
+WEIRDNAME='w $eird `date` name'\''s dir'
+WEIRDDIR="$TMP/$WEIRDNAME"
+mkdir -p "$WEIRDDIR"
+WEIRDDIR_REAL="$( cd "$WEIRDDIR" && pwd -P )"   # macOS: /var/folders/... resolves through the /private symlink
+cp "$BIN" "$WEIRDDIR/ripwire"
+chmod +x "$WEIRDDIR/ripwire"
+WEIRDCACHE="$TMP/weirdcache"; mkdir -p "$WEIRDCACHE"
+WOUT="$( PATH="/usr/bin:/bin" TMPDIR="$WEIRDCACHE" "$WEIRDDIR/ripwire" "$REPO" --doctor --no-cache 2>/dev/null )"
+WHINT="$( echo "$WOUT" | grep -oE 'hint="NOT ON PATH:[^"]*"' )"
+WHINT_UNESC="$( printf '%s' "$WHINT" | sed -e 's/&quot;/"/g' -e "s/&apos;/'/g" -e 's/&lt;/</g' -e 's/&gt;/>/g' -e 's/\&amp;/\&/g' )"
+WLINE="$( printf '%s' "$WHINT_UNESC" | grep -oE 'export PATH=.*:"\$PATH"' )"
+[ -n "$WLINE" ] \
+    && ok "(G2) not-on-PATH hint for a \$/\`/'/space directory still carries an export line" \
+    || no "(G2) not-on-PATH hint has no export line for the weird directory: $WHINT"
+MARKER="$TMP/g2-marker-must-not-exist"
+WEVALSCRIPT="$TMP/g2-eval.sh"
+{
+    printf '%s\n' "$WLINE"                              # the pasted line, verbatim
+    echo 'printf "%s" "${PATH%%:*}"'
+} >"$WEVALSCRIPT"
+WGOTPATH="$( PATH="/usr/bin:/bin" bash "$WEVALSCRIPT" 2>/dev/null )"
+[ "$WGOTPATH" = "$WEIRDDIR_REAL" ] \
+    && ok "(G2) evaluating the pasted export line puts the \$/\`/'/space directory on PATH literally" \
+    || no "(G2) pasted export line did not literally prepend the directory: got [$WGOTPATH] want [$WEIRDDIR_REAL]"
+[ ! -e "$MARKER" ] \
+    && ok "(G2) no side effect from evaluating the pasted line (a broken quote would let \` or \$() run)" \
+    || no "(G2) a marker file exists — the pasted line ran something"
+
 # §P11 doctor item: binary-path's ok="0" row names which of self=/which= is the STALE (older) one.
 echo "$SOUT" | grep -oE '<c n="binary-path" ok="0"[^<]*/>' | grep -q 'hint="STALE:' \
     && ok "genuine-stale binary -> binary-path row carries hint=\"STALE: ...\"" \
