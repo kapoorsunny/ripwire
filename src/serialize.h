@@ -7567,8 +7567,11 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
                       // M files of the sorted order. The health/godfiles/stabledeps/cycles PREAMBLE is unpaginated
                       // (it's a small fixed summary). Default args keep every existing caller byte-identical.
                       int pageLimit = 0, int pageOffset = 0,
-                      std::string_view rootArg = {} )   // R-E (2026-08-17): same single-root-only root
+                      std::string_view rootArg = {},    // R-E (2026-08-17): same single-root-only root
                                                         // argument serialize() takes — see its comment.
+                      // #220 part 1: in-repo TS/JS imports that drew no edge (graph.h StructuralIncludeAdj). > 0 ⇒ the
+                      // root carries imports_unresolved= graph_partial="1" and the legend defines them; 0 ⇒ byte-identical.
+                      std::uint64_t importsUnresolved = 0 )
 {
     const std::size_t F = ing.files.size();
     const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
@@ -7624,8 +7627,9 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
              "closure (a Ruby method/lambda/block, a TS/JS function body) or is a Ruby autoload or rescue class — is a USE, not a load-time "
              "dependency: it is in the impact verb's importer tier (lazy=1) and in this row's inc t= list, and it is NOT in "
              "afferent=/instab=/transitive=/godfiles/stabledeps/cycles/ccd/acd/nccd/shape=; health lazy_edges= counts the "
-             "pairs left out and a row's lazy_edges= its own — both absent when 0. "
-             "raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). -->" );
+             "pairs left out and a row's lazy_edges= its own — both absent when 0. " );
+    w.write( rw::depsImportsUnresolvedLegend( importsUnresolved > 0 ) );   // #220: exactly when the root carries the pair
+    w.write( "raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). -->" );
 
     // discloseCap=TRUE, and this is the one un-paginated byte-shape change here: --deps caps the listing at
     // --pack-top-n (default 40) while files= counted every file with an include — 40 rows under files="179"
@@ -7639,6 +7643,7 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
         // R-E: root= is unbounded (a deep absolute path), so it is NOT folded into the fixed `db` buffer above
         // (the V1-1 truncation class main.cpp's own history warns about) — written separately.
         if( !rootArg.empty() ) { w.write( " root=\"" );  w.write( escapeXml( rootArg, esc ) );  w.write( "\"" ); }
+        w.write( rw::importsUnresolvedPartialAttrXml( importsUnresolved ) );   // #220: absent at 0; partial, not a floor — see graphlegend.h
         w.write( ">" );
     }
 

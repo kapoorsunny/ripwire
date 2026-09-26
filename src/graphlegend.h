@@ -565,9 +565,19 @@ inline const char* declinedCallsLegend( bool on ) noexcept { return on ? kDeclin
 // ONE absent-at-zero count attribute: ` name="N"`, or nothing at all when count is 0. declined_calls= below and
 // --skipped's extent_suspect_files=/macro_blanked_files= (root) and extent_suspect_syms=/macro_blanked= (<h> rows)
 // all spell through it, so the shape has one definition instead of a copy per verb.
+// `json` spells the same count as a key instead: `,"name":N` (imports_unresolved= is the one caller today).
+inline std::string countFieldOrEmpty( std::string_view name, std::size_t count, bool json )
+{
+    if( count == 0 )
+    {
+        return {};
+    }
+    const std::string n = std::to_string( count );
+    return json ? ",\"" + std::string( name ) + "\":" + n : " " + std::string( name ) + "=\"" + n + "\"";
+}
 inline std::string countAttrXmlOrEmpty( std::string_view name, std::size_t count )
 {
-    return count > 0 ? " " + std::string( name ) + "=\"" + std::to_string( count ) + "\"" : std::string();
+    return countFieldOrEmpty( name, count, /*json=*/false );
 }
 
 // The attribute and the key, one spelling each, absent at zero like bodyless_defs= and graph_unindexed=.
@@ -579,6 +589,44 @@ inline std::string declinedCallsKeyJson( std::size_t declinedCalls )
 {
     return declinedCalls > 0 ? ",\"declined_calls\":" + std::to_string( declinedCalls ) : std::string();
 }
+
+// ── #220 part 1 — imports_unresolved=, the FILE graph's own gauge (test/depsprecisecheck.sh, the #220 arms) ─────────
+// graph_unresolved= above is the CALL graph's resolver gauge; this is the include/import graph's. It counts the TS/JS
+// import directives that drew no edge although the project's own config places their specifier in this tree — a
+// tsconfig/jsconfig `paths` alias, a `baseUrl` path, a workspace member's package name (resolve.h, namespace
+// tsimport, states the three rules). Absent at zero, like graph_unindexed=: a tree with no such import is byte-
+// identical. On --deps and --arch graph_partial="1" rides with it: the cause/reading pair of THE TRUNCATION
+// VOCABULARY's rule 4 (pageview.h), but the reading is NOT counts_floor. A missing edge only ADDS edges, yet adding one
+// can MERGE two reported cycles into one (cycles are SCCs, so the complete count can be LOWER) and moves every ratio
+// either way (instab = Ce/(Ca+Ce): a missing INCOMING edge leaves it too high), so "every count here is a floor"
+// would be false on both roots. graph_partial="1" says what is true: the values were measured over the resolved edges
+// only (the `<scope>_partial="1"` family of tier_partial=). --impact's root keeps counts_floor="1", which is true
+// there: importers= only rises as edges are added. Each legend clause below is emitted exactly when its attribute is
+// (the caller passes the count, never a re-derivation).
+inline std::string importsUnresolvedAttrXml( std::uint64_t importsUnresolved )
+{
+    return countAttrXmlOrEmpty( "imports_unresolved", std::size_t( importsUnresolved ) );
+}
+inline std::string importsUnresolvedKeyJson( std::uint64_t importsUnresolved )
+{
+    return countFieldOrEmpty( "imports_unresolved", std::size_t( importsUnresolved ), /*json=*/true );
+}
+inline constexpr const char* kGraphPartialAttrXml = " graph_partial=\"1\"";
+inline std::string importsUnresolvedPartialAttrXml( std::uint64_t importsUnresolved )
+{
+    return importsUnresolved > 0 ? importsUnresolvedAttrXml( importsUnresolved ) + kGraphPartialAttrXml : std::string();
+}
+// graph_partial='s reading is ONE sentence, spelled identically in both full legends below and in the compact term
+// (compactlegend.h); test/depsprecisecheck.sh's #220 (I) arms pin it in all three, so the wordings cannot fork.
+inline constexpr const char* kDepsImportsUnresolvedLegend =
+    "imports_unresolved=N graph_partial=1 (root, absent at 0): N TS/JS imports name this tree (a tsconfig/jsconfig paths alias, a baseUrl path, a workspace package) yet drew no edge, so every value here is measured over resolved edges; unresolved imports could add, merge or remove cycles and change ratios (an absent cycles element is no proof of none); afferent=/transitive=/ccd/acd/nccd can only rise. ";
+inline constexpr const char* kArchImportsUnresolvedLegend =
+    " imports_unresolved=N graph_partial=1 (absent at 0): N TS/JS imports name this tree (a paths alias, a baseUrl path, a workspace package) yet drew no edge, so an edge through one was never judged: violations= can only rise, and the metrics are measured over resolved edges; unresolved imports could add, merge or remove cycles and change ratios.";
+inline constexpr const char* kImpactImportsUnresolvedLegend =
+    "imports_unresolved=N (absent at 0): N TS/JS imports name this tree (a tsconfig/jsconfig paths alias, a baseUrl path, a workspace package) yet drew no edge, so importers= is a floor. ";
+inline const char* depsImportsUnresolvedLegend( bool on ) noexcept { return on ? kDepsImportsUnresolvedLegend : ""; }
+inline const char* archImportsUnresolvedLegend( bool on ) noexcept { return on ? kArchImportsUnresolvedLegend : ""; }
+inline const char* impactImportsUnresolvedLegend( bool on ) noexcept { return on ? kImpactImportsUnresolvedLegend : ""; }
 
 // ── THE DECL→DEF RESIDUE — unproven_defs= on the callers/callees answers (test/decltodefcheck.sh arm E2) ──
 // H1's fix (graph.h::declToDefFollowThrough) stopped a `file:name` selector from answering with same-named

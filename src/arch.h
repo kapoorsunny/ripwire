@@ -683,6 +683,64 @@ inline std::uint64_t fnv1a64( std::string_view s ) noexcept
     return h;
 }
 
+// The ONE `*`/`?` wildcard match over a whole string (`*` spans any run, '/' included; a failed suffix backtracks one
+// character). Hoisted here from quality.h's scopeGlobMatch when resolve.h's workspace-glob reader (#220) needed the
+// same loop, so both read one definition: quality's --quality-scope patterns and a workspace glob's segments.
+inline bool wildcardMatch( std::string_view s, std::string_view p ) noexcept
+{
+    std::size_t si = 0, pi = 0, starAt = std::string_view::npos, resumeAt = 0;
+    while( si < s.size() )
+    {
+        if( pi < p.size() && ( p[ pi ] == '?' || p[ pi ] == s[ si ] ) )
+        {
+            ++si;
+            ++pi;
+        }
+        else if( pi < p.size() && p[ pi ] == '*' )
+        {
+            starAt   = pi++;      // remember the last `*` and where its tail may resume, so a failed suffix
+            resumeAt = si;        // match backtracks by one character instead of giving up
+        }
+        else if( starAt != std::string_view::npos )
+        {
+            pi = starAt + 1;
+            si = ++resumeAt;
+        }
+        else
+        {
+            return false;
+        }
+    }
+    while( pi < p.size() && p[ pi ] == '*' )
+    {
+        ++pi;                     // trailing stars may still match the empty tail
+    }
+    return pi == p.size();
+}
+
+// Split a string on `delim` into its whole segments (no empties — a run of delimiters or a leading/trailing one never
+// yields an empty token). Hoisted here from workspace.h's wsdetail::segmentsOf (which now forwards) for the same reason
+// as wildcardMatch above: resolve.h's workspace-glob reader (#220) needed it and cannot include workspace.h.
+inline std::vector<std::string_view> splitSegments( std::string_view p, char delim = '/' )
+{
+    std::vector<std::string_view> segs;
+    std::size_t i = 0;
+    while( i < p.size() )
+    {
+        std::size_t j = p.find( delim, i );
+        if( j == std::string_view::npos )
+        {
+            j = p.size();
+        }
+        if( j > i )
+        {
+            segs.push_back( p.substr( i, j - i ) );
+        }
+        i = j + 1;
+    }
+    return segs;
+}
+
 // relForHash — the S2 root-relative path view — moved to model.h (beside rootRelPath and the disk-path seam) so every
 // header that reads ing.files can reach it without pulling in arch.h. Its contract is unchanged.
 

@@ -59,22 +59,7 @@ namespace wsdetail
     // their own delimiter instead of hand-rolling the same loop (the shared primitive behind BOTH).
     inline std::vector<std::string_view> segmentsOf( std::string_view p, char delim = '/' )
     {
-        std::vector<std::string_view> segs;
-        std::size_t i = 0;
-        while( i < p.size() )
-        {
-            std::size_t j = p.find( delim, i );
-            if( j == std::string_view::npos )
-            {
-                j = p.size();
-            }
-            if( j > i )
-            {
-                segs.push_back( p.substr( i, j - i ) );
-            }
-            i = j + 1;
-        }
-        return segs;
+        return splitSegments( p, delim );   // arch.h — the shared primitive (resolve.h's workspace globs read it too)
     }
 
     // the k-segment suffix of `segs`, joined with '/'. k is clamped to segs.size().

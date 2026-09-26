@@ -2653,7 +2653,13 @@ inline std::optional<std::string> impactText( const std::string& root, const std
     // exactly the §B4 echo-site divergence the shared-constant rule exists to stop.
     // LB-H: the import tier's clause rides here too — the CLI legend and this one are byte-identical by
     // rule, and an attribute the MCP root now carries has to be defined where the caller meets it.
-    rw::emitTo( mem, "{}{}. {}{}{}{}{}{}{}{}-->", kImpactLegendOpen, kPageRaiseCapClause, kImpactImportTierLegend,
+    // LB-H: ONE derivation, shared with the CLI arm (graph.h::impactImportTier) — mcpclidiffcheck compares
+    // the two surfaces' attribute sets, and an honesty marker that lands on one of them is the §B4 class.
+    // Measured before the legend (#220 part 1): its imports_unresolved= decides whether that clause rides.
+    ImportTier imports = impactImportTier( ing, seeds );
+    sizeImportTier( imports, page.limit, symbol );   // cut-fix C: limit sizes the tier, as on the CLI
+    rw::emitTo( mem, "{}{}. {}{}{}{}{}{}{}{}{}-->", kImpactLegendOpen, kPageRaiseCapClause, kImpactImportTierLegend,
+                  impactImportsUnresolvedLegend( imports.importsUnresolved > 0 ),   // #220: exactly when the root carries it, as on the CLI
                   kTestedRowLegend, kImpactTestedPartitionLegend,   // A6
                   kTestedLensBlindSpotLegend,                       // F-02: rides with the partition, byte-identical to the CLI twin
                   unprovenDefsVerbLegend( UnprovenDefsVerb::Impact, unprovenDefs > 0 ).c_str(),   // H1: exactly when the root carries unproven_defs=, as on the CLI
@@ -2673,10 +2679,6 @@ inline std::optional<std::string> impactText( const std::string& root, const std
     const bool         imSingleRoot = ing.realPaths.empty();
     const std::string  imRootPrefix = imSingleRoot ? sarif::rootPrefixOf( root ) : std::string();
     const std::string  imRootAttr   = imSingleRoot ? ( " root=\"" + ex( root ) + "\"" ) : std::string();
-    // LB-H: ONE derivation, shared with the CLI arm (graph.h::impactImportTier) — mcpclidiffcheck compares
-    // the two surfaces' attribute sets, and an honesty marker that lands on one of them is the §B4 class.
-    ImportTier imports = impactImportTier( ing, seeds );
-    sizeImportTier( imports, page.limit, symbol );   // cut-fix C: limit sizes the tier, as on the CLI
     rw::emitTo( mem, "<impact of=\"{}\" defs=\"{}\" reaches=\"{}\"{}{} radius_tested=\"{}\" radius_untested=\"{}\"{}{}{}{}{}{}>",
                   ex( symbol ).c_str(), seeds.size(), reach.size(), unprovenDefsAttrXml( unprovenDefs ).c_str(),   // H1: where the CLI root carries it
                   imports.xmlAttrs.c_str(), radiusTested, radiusUntested, declinedCallsAttrXml( declinedCalls ).c_str(), imRootAttr.c_str(),

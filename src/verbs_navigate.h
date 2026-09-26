@@ -2229,6 +2229,7 @@ int emitImpactColumnar( const ImpactView& v )
                                  + "\" reaches=\"" + std::to_string( v.reaches ) + "\""
                                  + rw::unprovenDefsAttrXml( v.unprovenDefs )                      // H1: where the XML root carries it
                                  + " importers=\"" + std::to_string( v.imports.files.size() ) + "\""
+                                 + rw::importsUnresolvedAttrXml( v.imports.importsUnresolved )   // #220: the XML root's, absent at 0
                                  + " radius_tested=\"" + std::to_string( v.radiusTested )       // A6
                                  + "\" radius_untested=\"" + std::to_string( v.radiusUntested ) + "\""
                                  + rw::declinedCallsAttrXml( v.declinedCalls )                    // tier-3 declines into the radius
@@ -2243,7 +2244,10 @@ int emitImpactColumnar( const ImpactView& v )
                                  // could only learn by running the other dialect. Naming it costs 44 bytes
                                  // and turns a silent difference into a stated one. Gate:
                                  // test/mcpattrparitycheck.sh (which also fails if a name here IS emitted).
-                                 + " lens=\"shown_importers,importers_capped\""
+                                 // importers_next= rides the XML root only on a cut tier (cut-fix E), so it is
+                                 // declared here exactly when the other forms carry it.
+                                 + ( v.imports.next.empty() ? " lens=\"shown_importers,importers_capped\""
+                                                            : " lens=\"shown_importers,importers_capped,importers_next\"" )
                                  + rw::renderDisclosure( v.prD, rw::DiscloseAs::XmlAttrs )   // W2-F
                                  + rw::nextAttrXml( rw::nextFlag( "--safe-delete=", v.sym ) );   // P3 (L7): the XML root's next=, same set
     emitColumnarSymbolRows( stdout, v.ing, "impact", attr.c_str(), rows, v.rootPrefix, v.testReach );
@@ -2270,6 +2274,7 @@ int emitImpactJson( const ImpactView& v )
     {
         rw::emitTo( stdout, ",\"importers_next\":\"{}\"", jsonStr( v.imports.next ).c_str() );
     }
+    rw::emitTo( stdout, "{}", rw::importsUnresolvedKeyJson( v.imports.importsUnresolved ) );   // #220: the XML root's, absent at 0
     rw::emitTo( stdout, ",\"radius_tested\":{},\"radius_untested\":{}{}", v.radiusTested, v.radiusUntested,
                  rw::declinedCallsKeyJson( v.declinedCalls ) );   // A6; then the XML root's declined_calls=
     if( v.singleRoot ) { rw::emitTo( stdout, ",\"root\":\"{}\"", jsonStr( v.rootRaw ).c_str() ); }   // R-E
@@ -2388,8 +2393,9 @@ std::optional<int> runImpact( const MainDispatch& d )
             // #60: exactly when a module-scope owner is one of the rows this answer prints — the PAGE, which
             // is what `anyModuleScopeRow`'s own contract asks for ("a page of rows, never the corpus").
             const bool imHasModScope = anyModuleScopeRow( ing, std::span<const NodeId>( show ).subspan( imPage.begin, imPage.end - imPage.begin ) );
-            rw::emitTo( stdout, "{}{}. {}{}{}{}{}{}{}{}{}-->", rw::kImpactLegendOpen, rw::kPageRaiseCapClause,
+            rw::emitTo( stdout, "{}{}. {}{}{}{}{}{}{}{}{}{}-->", rw::kImpactLegendOpen, rw::kPageRaiseCapClause,
                          cfg.columnar ? rw::kImpactImportTierColumnarLegend : rw::kImpactImportTierLegend,
+                         rw::impactImportsUnresolvedLegend( imports.importsUnresolved > 0 ),   // #220: exactly when the root carries it
                          rw::testedLensLegend( cfg.columnar ), rw::kImpactTestedPartitionLegend,   // A6: the columnar form reads its dense column
                          rw::kTestedLensBlindSpotLegend,                           // F-02: rides with the partition
                          rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::Impact, imUnprovenDefs > 0 ).c_str(),   // H1: exactly when the root carries unproven_defs=
