@@ -1479,7 +1479,8 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     const std::size_t sigsBudget = bundleBudget > fixedBytes ? bundleBudget - fixedBytes : 1;
 
     const JsonSigLens lens{ /*metrics=*/true, in.fanIn, in.impure, in.churnPerFile, in.cloneMember,
-                            in.tested, in.amp, /*rankAdaptivePayload=*/true, in.noteIndex, /*endLines=*/true, in.docsAfterCode };
+                            in.tested, in.amp, /*rankAdaptivePayload=*/true, in.noteIndex, /*endLines=*/true, in.docsAfterCode,
+                            /*chargeEndLines=*/in.tokenBudget > 0 };   // an explicit ceiling charges "e" (forLensRules)
     JsonSigNoteCounts noteCounts;
     const auto packSigs = [ & ]( std::FILE* dst, std::size_t budget, bool* outCapped, std::size_t* outDroppedPositive,
                                  std::vector<rw::NodeId>* outShownIds, rw::SigsCutReport* outCut )
@@ -2507,6 +2508,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // 2% of a 1550-token ceiling. Gate: test/budgetpolicycheck.sh arm (B).
         const bool forGateBudget  = cfg.tokenBudget > 0;
         const bool forBodyCeiling = cfg.maxTokens > 0 && cfg.detail > 0;   // the kShapingVerbs carve-out, read once
+        const bool forExplicitCeiling = forGateBudget || forBodyCeiling;   // e= is CHARGED under one (serialize.h forLensRules)
         if( forGateBudget )
         {
             forConf.attrs += " budget_tokens=\"" + std::to_string( cfg.tokenBudget ) + "\"";
@@ -2934,7 +2936,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         const std::size_t idRouteLegendEmitted = compactLegendOn ? idRouteParts.route.size() : idRouteParts.bytes();
         // e= (forsigspancheck): its legend clause is a disclosure on the same contract — exempt, so the ranked rows a ceiling
         // admits are the ones it admitted without it (owner ruling: e= is exempt from the row budget).
-        const std::size_t endLineLegendEmitted = !headerParts.endLinePresent ? 0u
+        const std::size_t endLineLegendEmitted = !headerParts.endLinePresent || forExplicitCeiling ? 0u   // charged under an explicit ceiling
                                                : ( compactLegendOn ? rw::kForCompactEndLineLegend.size() : rw::kForEndLineLegend.size() );
         const std::size_t exemptBytes = adaptiveNote.size() + autoLegendBytes + confidenceExemptBytes + tailLegendEmitted + idRouteLegendEmitted
                                       + endLineLegendEmitted;
@@ -2958,7 +2960,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             const std::size_t fullExempt      = adaptiveNote.size() + enrichmentLegendBytesEmitted( plan, false )
                                               + confidenceEarlyAttrsBytes + confidenceEarlyNoteBytes + forAtAttrStr.size()
                                               + rw::kForFileTailLegend.size() + idRouteParts.bytes()
-                                              + ( headerParts.endLinePresent ? rw::kForEndLineLegend.size() : 0u );
+                                              + ( headerParts.endLinePresent && !forExplicitCeiling ? rw::kForEndLineLegend.size() : 0u );
             const std::size_t fullCharged     = fullExempt > fullHeaderBytes ? fullHeaderBytes : fullHeaderBytes - fullExempt;
             chargedHeaderBytes = std::min( chargedHeaderBytes, fullCharged );
         }
@@ -3030,7 +3032,7 @@ std::optional<int> runForLens( const MainDispatch& d )
                                 sigsBudget,                                  // H1: global payload budget (trim ladder; payload="capped" marker)
                                 notesPtr,                                    // L3: field-notes surfacing (inert when null)
                                 flRootArg,                                   // R-E: root-relative p=
-                                rw::forLensRules( forDocsAfterCode ),       // LB-A floor, e= on every row, and the code-above-docs reorder
+                                rw::forLensRules( forDocsAfterCode, forExplicitCeiling ),   // LB-A floor, e= rows, docs reorder
                                 &forDroppedPositive,                         // A2: exact count, see droppedPositiveCount
                                 &shownSigIds,                                // lane 2: the rows actually emitted — the tail excludes THESE files
                                 &forSigsCapped,                              // did the ladder fire? — the budget_bytes= clause rides only then
@@ -3516,7 +3518,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         {
             packSignatures( stdout, ing, lensRank, forTopN, cfg.packBudgetBytes, true, fanInPtr, impurePtr, redactPtr,
                             &forChurn, &forClone, testedPtr, ampPtr, /*rankAdaptivePayload=*/true, sigsBudget, notesPtr, flRootArg,
-                            rw::forLensRules( forDocsAfterCode ), nullptr, nullptr, nullptr,   // LB-A + e= + docs reorder: the degrade path selects identically
+                            rw::forLensRules( forDocsAfterCode, forExplicitCeiling ), nullptr, nullptr, nullptr,   // the degrade path selects identically
                             forTopRowNext );                                         // L-W: same next= rule on the degrade path
         }
         if( legoPreRendered )

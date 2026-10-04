@@ -4282,9 +4282,23 @@ inline constexpr std::string_view kForEndLineLegend =
     "(extent_suspect, docs, config), never 0; l= is the line of the definition's name, so a definition can start above l=";
 
 // The " e=\"N\"" run, spliced into a rendered <d …> head right after its l= value (the head always opens `<d l="N"`,
-// sigRowHead). Kept OUT of the head the budget ledger measures, so the ranked set a row budget admits is the one it
-// admitted before e= existed (owner ruling: the attribute is exempt from the signature-row budget; its bytes are
-// reported, explain-or-fail, never traded for a row).
+// sigRowHead). At the default ceiling it is kept OUT of the head the budget ledger measures, so the ranked set a row
+// budget admits is the one it admitted before e= existed (owner ruling: exempt from the signature-row budget; its bytes
+// are reported, explain-or-fail, never traded for a row) — writeSigHeadWithEnd adds it at emission. Under an explicit
+// ceiling (SigLensRules::ChargeEndLine) spliceEndLine puts it INTO the head, where the ledger charges it.
+inline void spliceEndLine( std::string& head, std::uint32_t endLine )
+{
+    if( endLine == 0 )
+    {
+        return;
+    }
+    ASSUME( head.starts_with( "<d l=\"" ) );
+    const std::size_t lClose = head.find( '"', 6 );   // the closing quote of l="N"
+    ASSUME( lClose != std::string::npos );
+    char eAttr[ 24 ];
+    rw::formatTo( eAttr, sizeof( eAttr ), " e=\"{}\"", endLine );
+    head.insert( lClose + 1, eAttr );
+}
 inline void writeSigHeadWithEnd( XmlWriter& w, std::string_view head, std::uint32_t endLine )
 {
     if( endLine == 0 )
@@ -4313,16 +4327,22 @@ enum class SigLensRules : std::uint8_t
     EndLine        = 2,
     ForLens        = 3,
     DocsAfterCode  = 4,
+    ChargeEndLine  = 8,   // e= is CHARGED (inside the head the gate and ladder measure): an explicit ceiling's regime
 };
 inline constexpr bool hasSigLensRule( SigLensRules set, SigLensRules rule ) noexcept
 {
     return ( std::uint8_t( set ) & std::uint8_t( rule ) ) != 0;
 }
 // ForLens, plus the docs reorder when `docsAfterCode` (the caller's verdict: routed, and the question does not ask about
-// docs — filter.h taskAsksAboutDocs).
-inline constexpr SigLensRules forLensRules( bool docsAfterCode ) noexcept
+// docs — filter.h taskAsksAboutDocs), plus ChargeEndLine when `explicitCeiling`. THE TWO e= REGIMES: at the DEFAULT
+// ceiling e= is exempt from the row budget (owner ruling: the ranked set is the one it was without e=, explain-or-fail on
+// bytes); under an EXPLICIT ceiling the reader asked for (--token-budget, a body ceiling, MCP budget_tokens) the answer's
+// est_tokens <= that budget is a stated promise (fornotesbudgetcheck), so e= is charged like every other byte and the
+// ladder's usual disclosure (capped=/shown=/total=) covers any row it costs.
+inline constexpr SigLensRules forLensRules( bool docsAfterCode, bool explicitCeiling ) noexcept
 {
-    return SigLensRules( std::uint8_t( SigLensRules::ForLens ) | ( docsAfterCode ? std::uint8_t( SigLensRules::DocsAfterCode ) : 0u ) );
+    return SigLensRules( std::uint8_t( SigLensRules::ForLens ) | ( docsAfterCode ? std::uint8_t( SigLensRules::DocsAfterCode ) : 0u )
+                         | ( explicitCeiling ? std::uint8_t( SigLensRules::ChargeEndLine ) : 0u ) );
 }
 
 // ── CODE ABOVE DOCS, AS A REORDER OF THE SHOWN SET (filter.h CODE ABOVE DOCS; gate test/forsigspancheck.sh (R)) ─────────
@@ -4945,6 +4965,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                                                 //   the shown rows where this is true and `doc` is empty at emission
             std::uint32_t endLine    = 0;       // e= (defEndLine), 0 = not printed; spliced at emission, OUTSIDE `head` and so
                                                 //   outside every byte the gate and the ladder charge (writeSigHeadWithEnd)
+            bool          endCharged = false;   // e= already inside `head` (ChargeEndLine), so emission must not splice it again
             std::uint32_t displayRank = 0;      // the r= this row is SHOWN with: globalRank, unless reorderDocsAfterCode moved it
             NodeId        id          = 0;      // the row's symbol, and the head's other inputs — re-rendered when displayRank moves
             std::string   lensRun;              //   the churn/amp/clone/tested attribute run (qbuf)
@@ -5081,6 +5102,11 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                 e.positive   = rank[id] > 0.0f;   // A2: this symbol's own score, at collection time
                 e.hadDoc     = hadDoc;
                 e.endLine    = hasSigLensRule( lensRules, SigLensRules::EndLine ) ? defEndLine( s, lineBreaks, src.size() ) : 0u;
+                e.endCharged = hasSigLensRule( lensRules, SigLensRules::ChargeEndLine );
+                if( e.endCharged )
+                {
+                    spliceEndLine( e.head, e.endLine );   // an explicit ceiling: e= is part of the charged head
+                }
                 e.displayRank = globalRank;
                 e.id          = id;
                 e.lensRun     = qbuf;
@@ -5182,7 +5208,13 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             cut.docsAfterCode = reorderDocsAfterCode( entries,
                 [ & ]( const SigEntry& e ) { return ing.symbols[ e.id ].lang == Lang::Markdown; },
                 [ & ]( SigEntry& e, std::uint32_t newRank )
-                { e.head = sigRowHead( ing, e.id, SigRowFacts{ metrics, fanIn, e.lensRun.c_str(), e.pureSig ? " pure=\"1\"" : "", newRank, topRowNext }, esc, rootArg ); } );
+                {
+                    e.head = sigRowHead( ing, e.id, SigRowFacts{ metrics, fanIn, e.lensRun.c_str(), e.pureSig ? " pure=\"1\"" : "", newRank, topRowNext }, esc, rootArg );
+                    if( e.endCharged )
+                    {
+                        spliceEndLine( e.head, e.endLine );
+                    }
+                } );
         }
         if( cutOut )
         {
@@ -5211,7 +5243,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                 continue;
             }
             pushShownSigId( shownIdsOut, order, e.globalRank );   // lane 2
-            writeSigHeadWithEnd( w, e.head, e.endLine );            // e= after l=, when the lens asked and the extent is known
+            writeSigHeadWithEnd( w, e.head, e.endCharged ? 0u : e.endLine );   // e= after l= (already in the head when charged)
             if( !e.doc.empty() ) { w.write( "<doc>" );  w.write( escapeXml( e.doc, esc ) );  w.write( "</doc>" ); }
             w.write( escapeXml( e.sig, esc ) );
             w.write( e.notes );                                                // L3: symbol notes on this <d> (inert when null)
@@ -9225,7 +9257,24 @@ struct JsonSigLens
                                                                        // known — --for only; off ⇒ byte-identical.
     bool                              docsAfterCode       = false;     // the XML sibling's SigLensRules::DocsAfterCode
                                                                        // (reorderDocsAfterCode) — --for only.
+    bool                              chargeEndLines      = false;     // SigLensRules::ChargeEndLine: "e" inside the charged
+                                                                       // head (an explicit ceiling's regime, forLensRules).
 };
+
+// "e" right after "l" in a JSON row head (the XML sibling's spliceEndLine; the head always opens {"l":N). 0 ⇒ untouched.
+inline void spliceJsonEndLine( std::string& head, std::uint32_t endLine )
+{
+    if( endLine == 0 )
+    {
+        return;
+    }
+    ASSUME( head.starts_with( "{\"l\":" ) );
+    const std::size_t lEnd = head.find( ',' );
+    ASSUME( lEnd != std::string::npos );
+    char eKey[ 24 ];
+    rw::formatTo( eKey, sizeof( eKey ), ",\"e\":{}", endLine );
+    head.insert( lEnd, eKey );
+}
 
 // One row's `{"l":…` opening through its flag fields — everything EXCEPT doc/sig, which the ladder mutates
 // and phase 2 appends. Mirrors sigRowHead()'s role on the XML side.
@@ -9431,6 +9480,10 @@ inline std::size_t collectJsonSigEntries( const IngestResult& ing, const std::ve
             e.positive   = rank && (*rank)[id] > 0.0f;   // A2: the XML sibling's own field, same definition
             e.hadDoc     = hadDoc;
             e.endLine    = lens.endLines ? defEndLine( s, lineBreaks, src.size() ) : 0u;
+            if( lens.chargeEndLines )
+            {
+                spliceJsonEndLine( e.head, e.endLine );   // an explicit ceiling: "e" is part of the charged head
+            }
             e.displayRank = globalRank;
             e.id          = id;
             e.pureSig     = pureSig;
@@ -9586,7 +9639,13 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
             cut.docsAfterCode = reorderDocsAfterCode( entries,
                 [ & ]( const JsonSigEntry& e ) { return ing.symbols[ e.id ].lang == Lang::Markdown; },
                 [ & ]( JsonSigEntry& e, std::uint32_t newRank )
-                { e.head = jsonSigRowHead( ing, e.id, ing.symbols[ e.id ].fileId, lens, e.pureSig, rootArg, newRank ); } );
+                {
+                    e.head = jsonSigRowHead( ing, e.id, ing.symbols[ e.id ].fileId, lens, e.pureSig, rootArg, newRank );
+                    if( lens.chargeEndLines )
+                    {
+                        spliceJsonEndLine( e.head, e.endLine );
+                    }
+                } );
         }
         if( cutOut )
         {
@@ -9626,15 +9685,9 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
         }
         first = false;
         std::string row = e.head;
-        if( e.endLine > 0 )
+        if( !lens.chargeEndLines )
         {
-            // "e" right after "l" — the XML sibling's e= position (writeSigHeadWithEnd); the head always opens {"l":N
-            ASSUME( row.starts_with( "{\"l\":" ) );
-            const std::size_t lEnd = row.find( ',' );
-            ASSUME( lEnd != std::string::npos );
-            char eKey[ 24 ];
-            rw::formatTo( eKey, sizeof( eKey ), ",\"e\":{}", e.endLine );
-            row.insert( lEnd, eKey );
+            spliceJsonEndLine( row, e.endLine );   // the default ceiling: "e" added here, outside every charged byte
         }
         if( !e.doc.empty() )
         {
