@@ -35,7 +35,9 @@
 #            (`lib.Shape()` via example.com/vendored); a function passed as a value. Root gonomod/ has NO go.mod: its
 #            full-path import of an in-tree package keeps its edge (an unknown module path proves nothing outside).
 #            Root gomodcomment/: a `module x // c` line and a nested `module "y" // c` are x and y (near miss: cmx is
-#            not under cm); root goreplace/: a module only a local `replace` names (its directory has no go.mod).
+#            not under cm); root goreplace/: a module only a local `replace` names (its directory has no go.mod), also
+#            spelled quoted (goreplace/quoted/: `"x" => "./x"`, a raw-string path; near miss: a quoted module replaced by
+#            another quoted MODULE stays outside).
 #   (B) JS:  JSON.stringify, `const { stringify } = JSON`, `new URL()`, Buffer.from, `globalThis.fetch`, console/Math/
 #            Object/Array/Promise members, require('destroy'), require('supertest'), a receiver from require('qs')
 #            and a name destructured from require('cookie') never reach an in-repo function, getter, method or object
@@ -251,6 +253,13 @@ lacks gomodcomment callees app/near.go:Near "Shape lib/lib.go"
 # goreplace/ keeps the replace-only shape the go/ root had before it became buildable Go: legacy/ has no go.mod, so
 # the replace line is the only source of example.com/legacy (twin of the old UseVendored arm)
 exactly goreplace callees app/app.go:UseLegacy "fn Shape legacy/lib/lib.go"
+# goreplace/quoted/: the go.mod grammar lets either side of a replace be quoted — an interpreted string or a raw
+# (backquoted) one, single-line or grouped. Each is the same local replace as the bare spelling. Near miss: a quoted
+# module replaced by another quoted MODULE (not a directory) stays outside the tree — reading the quote itself as the
+# start of a local path would put it in.
+exactly goreplace callees quoted/app/app.go:UseQuoted "fn Quote quoted/qlegacy/lib/lib.go"
+exactly goreplace callees quoted/app/raw.go:UseRaw "fn Raw quoted/qraw/lib/lib.go"
+lacks goreplace callees quoted/app/remote.go:UseRemote "Quote quoted/qlegacy/lib/lib.go"
 
 echo "=== (B) JS: globals, required packages, accessors ==="
 lacks js callees lib/response.js:length "stringify lib/query.js"
@@ -372,6 +381,7 @@ externals tsimport src/remote.ts pull fetch
 externals js lib/selfalias.js onMessage process
 externals ts src/selfalias.ts onTick process
 externals gomodcomment app/near.go Near Shape
+externals goreplace quoted/app/remote.go UseRemote Quote
 # a Python name no import, local or module def binds and that is no builtin: no in-repo target, but nothing proves it is
 # outside the tree either (a closure variable, a star import of an unresolved module) — so it is no census row at all
 # (counted unresolved=), never a C external row and never a bound one

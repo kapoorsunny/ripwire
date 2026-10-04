@@ -3352,11 +3352,10 @@ inline std::string goModulePathOf( std::string_view text )
         while( !line.empty() && ( line.front() == ' ' || line.front() == '\t' ) ) { line.remove_prefix( 1 ); }
         if( !line.starts_with( "module" ) || line.size() < 7 || ( line[ 6 ] != ' ' && line[ 6 ] != '\t' ) ) { continue; }
         line.remove_prefix( 7 );
-        line = line.substr( 0, line.find( "//" ) );   // the comment goes FIRST: `module x // c` and `module "x" // c` are x
-        while( !line.empty() && ( line.front() == ' ' || line.front() == '\t' ) ) { line.remove_prefix( 1 ); }
-        while( !line.empty() && ( line.back() == ' ' || line.back() == '\t' || line.back() == '\r' ) ) { line.remove_suffix( 1 ); }
-        if( line.size() >= 2 && line.front() == '"' && line.back() == '"' ) { line = line.substr( 1, line.size() - 2 ); }
-        return std::string( line );
+        // The comment goes FIRST: `module x // c` and `module "x" // c` are x. goModToken (resolve.h) then reads the
+        // path as the go.mod grammar spells it — bare, an interpreted string or a raw (backquoted) one — the reader the
+        // replace lines below and resolve.h's replace aliases share, so the three spellings cannot drift apart.
+        return std::string( goModToken( line.substr( 0, line.find( "//" ) ) ) );
     }
     return {};
 }
@@ -3386,11 +3385,12 @@ inline std::vector<std::string> goModuleTreePaths( std::string_view text )
         {
             continue;
         }
-        const std::string_view left   = trimWs( line.substr( 0, arrow ) );
-        const std::string_view target = trimWs( line.substr( arrow + 2 ) );
+        // either side may be quoted (`"X" => "./x"`, a raw `X`); goModToken also drops a version: `X v1.2.3 => ./x`
+        const std::string_view left   = goModToken( line.substr( 0, arrow ) );
+        const std::string_view target = goModToken( line.substr( arrow + 2 ) );
         if( !left.empty() && !target.empty() && ( target.front() == '.' || target.front() == '/' ) )
         {
-            paths.emplace_back( left.substr( 0, left.find_first_of( " \t" ) ) );   // drop a version: `X v1.2.3 => ./x`
+            paths.emplace_back( left );
         }
     }
     return paths;
