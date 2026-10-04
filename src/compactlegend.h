@@ -566,8 +566,6 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // ctxRootOpen) rides a bundle whose task was routed to a ranker: --pack-task always, MCP explore unless no_route; it is
     // ELEMENT-qualified on <ctx>. compactlegendcheck (D36)/(D37).
     { "r",                 "<d r=N>: rank N in this ranking, rows in r= order", true, "d" },
-    // lean-answers lane (serialize.h, the map's callee rows): present only where a row joined its callees.
-    { "calls",             "<s calls=a,b>: its <c n=> rows, comma-joined", true, "s" },
     { "ccx",               "<d cx= ccx=>: cyclomatic/cognitive complexity", true, "d" },
     { "in",                "<d in=N>: N callers in the index (absent: not measured)", true, "d" },
     { "amp",               "<d amp=N>: direct callers + files sharing a commit with its file (absent at 0)", true, "d" },

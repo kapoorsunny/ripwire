@@ -288,11 +288,9 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # outside-import/use,super-past-the-tree;...)" (was "(builtin/stdlib-name-...,external-import,...)"), +106 B — and the
 # est_tokens= that prices them, 858 -> 901 (header and root). Checked: the new output differs from the pin by exactly
 # those two clauses and that figure; the six other pins are unchanged.
-# RE-ANCHORED BY HAND 2026-10-04 (lane/lean-answers-068), for.xml and map.xml: two lossless row spellings and the legend
-# sentences that define them. for.xml: a --for lens row omits a zero cx=/ccx=/in= and the v1 legend says "each absent when
-# 0;"; map.xml: a row whose callees are all bare carries them as calls="a,b" and the v1 header legend defines calls=.
-# Checked mechanically: restoring the zeros (on every r= row) and the <c n=> rows, and removing those two legend clauses,
-# gives the previous pins byte for byte with at= and est_tokens= masked (est_tokens= prices the shorter bytes). The five
+# RE-ANCHORED BY HAND 2026-10-04 (lane/lean-answers-068), for.xml only: a --for lens row omits a zero cx=/ccx=/in= and the
+# v1 legend says "each absent when 0;". Checked mechanically: restoring the zeros on every r= row and removing that clause
+# gives the previous pin byte for byte with at= and est_tokens= masked (est_tokens= prices the shorter bytes). The six
 # other pins are unchanged.
 PIN_DIR="$ROOT/test/compactlegendfix/pre_l1_full"
 # the one normalisation, in python on BOTH sides so no sed dialect decides it (BSD sed appends a final newline, GNU
@@ -516,21 +514,18 @@ probeFor()
 # its definition as two contracts — so the schema had no XML answer to pin. It now answers about the definition.
 # the pins follow the definitions, measured + 10 rounded up to 10.
 # schema                      pin  measured
-# RE-PINNED 2026-10-04 (lane/lean-answers-068), three new definitions, each measured on this gate's fixture against the
+# RE-PINNED 2026-10-04 (lane/lean-answers-068), two new definitions, each measured on this gate's fixture against the
 # base binary (255dc199) — no prose was added to any reading that already rode:
-#   the map family (map 892->935 at --top-k=3, map-diff 885->939, metrics 1021->1066, query 707->761, around 760->814,
-#   pack-top-n 745->799, pack-signatures 759->813): the present-only <s calls=a,b> reading (+49 B with its separator) — a
-#   map row whose callees are all bare now carries them as one comma-joined attribute (~11 B a callee less in the rows).
 #   ripwire.for/v1 738->761: " (absent cx/ccx/in = 0)" (+23 B) — the --for lens omits a zero cx=/ccx=/in=.
 #   ripwire.whereis/v1 611->887: the default listing's readings — listing=, the <refs count= next=> element (and the
 #   generic next= reading it pulls in), head_date= (the tip/date hoist) and complete='s "(of its listing=)" (+276 B). The
 #   answer they ride is the lean one: its rows shrink from every reference to the definitions alone.
 PIN_TABLE='
 ripwire.edit-check/v1             610   595
-ripwire.map/v1                   950   935
-ripwire.map-diff/v1              955   939
-ripwire.pack-signatures/v1       830   813
-ripwire.metrics/v1               1080  1066
+ripwire.map/v1                   910   892
+ripwire.map-diff/v1              900   885
+ripwire.pack-signatures/v1       770   759
+ripwire.metrics/v1               1040  1021
 ripwire.deps/v1                   780   764
 ripwire.hotspots/v1               530   518
 ripwire.clones/v1                 810   799
@@ -571,12 +566,12 @@ ripwire.mentions/v1               260   243
 ripwire.affected/v1               840   826
 ripwire.verify/v1                 440   421
 ripwire.help-task/v1              440   429
-ripwire.query/v1                 775   761
+ripwire.query/v1                 720   707
 ripwire.grep/v1                  1380  1368
 ripwire.match/v1                  370   355
 ripwire.lego/v1                  290   275
 ripwire.exemplar/v1               440   422
-ripwire.around/v1                830   814
+ripwire.around/v1                770   760
 ripwire.callers/v1               330   317
 ripwire.callees/v1                500   484
 ripwire.uses/v1                   510   500
@@ -590,7 +585,7 @@ ripwire.whereis/v1                900   887
 ripwire.community/v1             730   719
 ripwire.layout/v1                1220  1203
 ripwire.pack-task/v1             990   974
-ripwire.pack-top-n/v1            815   799
+ripwire.pack-top-n/v1            760   745
 ripwire.expand/v1                280   265
 ripwire.expand-file/v1            360   342
 ripwire.for/v1                    775   761
