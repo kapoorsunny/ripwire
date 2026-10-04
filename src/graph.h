@@ -4682,6 +4682,9 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // a QUALIFIED call (`A::m()`, `Storage<D, S>::reset()`) names its scope: that is the canonical tier's evidence axis,
         // not a receiver's, so a qualifier the canonical tier could not place keeps the ladder exactly as before
         const bool hedgeEligible = !scipPinned && !canonical && receiverHedgeLang( r.lang ) && r.role == RefRole::Call && r.qualifier.empty();
+        // A language's OWN method lookup that cut the candidates to what the receiver can reach (Ruby's RubySelfReach, PR #373)
+        // sets this: its survivors are proven by that lookup, never name-only. No language sets it on this branch yet.
+        bool languageLookupProved = false;
         memberRule3.clear();
         if( !scipPinned && !canonical && !narrowed && it != byName.end() )
         {
@@ -4820,7 +4823,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // candidate to the same rule, because one candidate is not evidence.
         bool nameOnly = false;
         bool nameOnlyAnyFile = false, nameOnlyAnyDir = false;   // which rung the classic ladder would have stopped at (rank weight)
-        if( hedgeEligible && !narrowed && !cand.empty() && r.lang != Lang::Elixir )
+        if( hedgeEligible && !narrowed && !languageLookupProved && !cand.empty() && r.lang != Lang::Elixir )
         {
             provedScratch.clear();
             if( !memberRule3.empty() && !isMemberCallRef( r ) )
