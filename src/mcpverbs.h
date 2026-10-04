@@ -2396,7 +2396,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
             mcpSectionsWillStub = mcpLegoWillStub || mcpComposeWillStub;
         }
     }
-    const bool mcpLegoCountAttrs = rw::legoCarriesCountAttrs( legoStr );   // false on a stub (its own attributes only)
+    const bool mcpLegoCountAttrs = legoStr.find( rw::kLegoCountAttrPrefix ) != std::string::npos;   // false on a stub (its own attributes only)
     std::fwrite( sigsStr.data(), 1, sigsStr.size(), mem );
     std::fwrite( legoStr.data(), 1, legoStr.size(), mem );
     std::fwrite( composeStr.data(), 1, composeStr.size(), mem );

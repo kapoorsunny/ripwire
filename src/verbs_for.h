@@ -3159,7 +3159,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         }
         // count-floor: the lego COUNT clause rides only on a document whose served <lego> carries its attributes (a short
         // list or a floor) — the same post-render, present-only splice, so an answer without them keeps every byte.
-        if( legoPreRendered && !legoWillStub && rw::legoCarriesCountAttrs( legoStr ) )
+        if( legoPreRendered && !legoWillStub && legoStr.find( rw::kLegoCountAttrPrefix ) != std::string::npos )
         {
             sectionsStubNote += rw::kForLegoCountLegend;
         }

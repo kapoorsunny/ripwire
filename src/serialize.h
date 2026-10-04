@@ -7255,12 +7255,9 @@ inline constexpr std::string_view kForLegoCountLegend =
     "listed: implementors_shown=K only K impl rows here, implementors_next= lists all; implementors_floor=1 an extends clause "
     "spelled like it bound nowhere, so N may be short (not proof of another), floor_next= lists every extends site";
 
-// Whether a rendered ranked <lego> block carries an attribute kForLegoCountLegend defines (attribute values are escaped,
-// so ` name="` can only open an attribute).
-inline bool legoCarriesCountAttrs( std::string_view legoXml ) noexcept
-{
-    return legoXml.find( " implementors_" ) != std::string_view::npos;   // _shown=/_next=/_floor=: every one is defined there
-}
+// The prefix every attribute kForLegoCountLegend defines starts with (implementors_shown=/_next=/_floor=): a rendered
+// ranked <lego> block holding it needs the clause. Attribute values are escaped, so ` implementors_` can only open one.
+inline constexpr std::string_view kLegoCountAttrPrefix = " implementors_";
 
 // L2 fault-injection fix (independent review, 2026-09-19): packLego/packCompose's out-params give the stub
 // its total= on the buffered (memstream) path, but the ranked --for lens's OPEN_MEMSTREAM DEGRADE PATH
