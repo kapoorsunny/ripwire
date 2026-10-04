@@ -37,7 +37,7 @@ definition beside them, plus near-miss calls whose receiver IS proven and whose 
   a constructed in-repo `Tool`.
 - `java/ kt/ cs/ cpp/ swift/ rb/` — a bare call inside a class whose base is outside the tree (or whose name
   comes from an outside import) beside an unrelated class's method of that name. Kept: own members (private
-  too), an in-repo superclass's member (and Java `super.flush()`), a free / top-level function, a Ruby included module, a Ruby top-level
-  def.
+  too), an in-repo superclass's member (and Java `super.flush()`), a free / top-level function, a Ruby top-level
+  def; a Ruby included module's method is resolved or hedged (the contract only: Ruby's own lookup is separate work).
 
 The names are paraphrases of graded false rows; the code is minimal and is never built.

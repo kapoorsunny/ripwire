@@ -83,7 +83,8 @@
 #   (I) implicit receiver: Java, Kotlin, C#, C++, Swift, Ruby — a bare call inside a class whose base is OUTSIDE
 #            the tree (or that imports the name from outside) never proves an unrelated class's method. Near
 #            misses: own members (private too), an in-repo superclass's member (the cone, and Java super.m()),
-#            a free / top-level function, a Ruby included module and a Ruby top-level def.
+#            a free / top-level function and a Ruby top-level def; a Ruby included module is contract-only (resolved
+#            or hedged, never a false proven row): Ruby's own lookup is separate work.
 #   (H) propagation and parity: the name-only witness `respondWith → reply.send()` is marked in --callees,
 #            --callers, --impact (d=1), --path, --connect, --expand <calls>, --for <calls>, MCP find_symbol and
 #            find_referencing_symbols; the false witness `respond → ctx.onerror()` is absent-or-marked on every
@@ -464,7 +465,11 @@ exactproven cpp callees src/logger.cpp:line "fn render src/logger.cpp"
 exactproven cpp callees src/logger.cpp:close "method flush src/logger.cpp;method reset src/logger.cpp"
 exactproven swift callees Sources/App/Logger.swift:line "fn render Sources/App/Logger.swift"
 exactproven swift callees Sources/App/Logger.swift:close "fn flush Sources/App/Logger.swift;fn reset Sources/App/Logger.swift"
-exactproven rb callees lib/app/logger.rb:line "method stamp lib/app/helpers.rb"
+# Ruby's own method lookup (mixins, typed and class receivers) is another lane's: these two arms state only the
+# contract — a mixin's method is RESOLVED or HEDGED, never dropped and never beside a false proven row — so they hold
+# whichever lands first
+visible   rb callees lib/app/logger.rb:line "stamp lib/app/helpers.rb"
+notproven rb callees lib/app/logger.rb:line "render lib/app/exporter.rb"
 exactproven rb callees lib/app/logger.rb:close "method flush lib/app/logger.rb;method reset lib/app/logger.rb;method top_level_note lib/app/notes.rb"
 
 echo "=== (O) graded false callees from an earlier binary (Go, TS, Python repros): red where still present, pinned clean otherwise ==="

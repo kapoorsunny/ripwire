@@ -10,7 +10,8 @@
 //      Go method receiver, a JS `new Foo()` / Python `Foo()` / Go `Foo{}` initializer), a constructed receiver
 //      (`new Foo().m()`), a class-name receiver (`Foo.m()`), and a chain of fields whose classes are stated
 //      (`this.bucket = new Schemas()`, Python `self.x = Foo()`, a Go struct field, a Go EMBEDDED field whose methods
-//      are promoted). A hit is the call's whole answer, exactly like Rule 2.
+//      are promoted). A hit is the call's whole answer, exactly like Rule 2. Ruby's own method lookup (mixins, typed and
+//      class receivers) is deliberately NOT modelled here: Ruby keeps only the language-neutral proof below.
 //   2. ReceiverEvidence::ladderProves — for a call the rules above did not answer, which name-ladder candidates the
 //      language's own lookup can PROVE: an implicit receiver's own class and its bases, a free function in scope, a
 //      definition in the module a receiver alias names. A call left with no proven candidate is NAME-ONLY: its rows
@@ -86,8 +87,7 @@ struct ReceiverEvidence
     std::vector<std::string>                              ownerClass;  // per symbol: the class that owns it, "" none
     HashMap<std::string, rw::SmallVec<NodeId, 2>>         methodsByType;   // "Class::name" → its callables
     HashMap<std::string, std::string>                     memberType;      // "Class#field" → field class ("" = tombstone)
-    HashMap<std::string, std::vector<std::string>>        embeds;          // "Class" → its other bases: Go embedded classes (promotion),
-                                                                           //   Ruby include/extend/prepend modules
+    HashMap<std::string, std::vector<std::string>>        embeds;          // "Class" → its other bases: Go embedded classes (promotion)
     HashMap<std::string, std::string>                     nameAlias;       // "<fileId>#local" → the class name it imports
     HashMap<std::string, std::string>                     localType;       // "<fromSymbol>#var" → class ("" = tombstone)
     HashMap<std::string, std::pair<std::string, std::string>> methodAlias; // "<fromSymbol>#var" → ( object var, method )
@@ -221,34 +221,9 @@ struct ReceiverEvidence
             std::sort( e.begin(), e.end() );
         }
     }
-    // Ruby: an include/extend/prepend directive inside a class body makes that module one more base of the class (the
-    // superclass directive at the open is already chaUp's). A symbolic, non-value directive is the only kind read.
-    void buildRubyMixins()
-    {
-        for( const Include& inc : ing.includes )
-        {
-            if( !inc.isSymbolic || inc.isValueUse || inc.fileId >= classesByFile.size() || inc.target.empty() )
-            {
-                continue;
-            }
-            const NodeId cls = classAt( inc.fileId, inc.byte, inc.byte + 1 );
-            if( cls == kNoNode || ing.symbols[ cls ].lang != Lang::Ruby || ing.symbols[ cls ].sigStartByte == inc.byte )
-            {
-                continue;   // outside a class body, or the open's own superclass directive
-            }
-            std::string_view target = inc.target;
-            if( const std::size_t cut = target.rfind( "::" ); cut != std::string_view::npos )
-            {
-                target = target.substr( cut + 2 );
-            }
-            addBase( ing.symbols[ cls ].name, target );
-        }
-    }
-
     void build()
     {
         buildOwners();
-        buildRubyMixins();
         for( const Symbol& s : ing.symbols )
         {
             // a BODIED callable only: an interface's or an abstract class's bodyless signature is the contract a call
