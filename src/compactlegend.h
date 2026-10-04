@@ -567,7 +567,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // ELEMENT-qualified on <ctx>. compactlegendcheck (D36)/(D37).
     { "r",                 "<d r=N>: rank N in this ranking, rows in r= order", true, "d" },
     // lean-answers lane (serialize.h, the map's callee rows): present only where a row joined its callees.
-    { "calls",             "<s calls=a,b>: its <c n=> callees, comma-joined", true, "s" },
+    { "calls",             "<s calls=a,b>: its <c n=> rows, comma-joined", true, "s" },
     { "ccx",               "<d cx= ccx=>: cyclomatic/cognitive complexity", true, "d" },
     { "in",                "<d in=N>: N callers in the index (absent: not measured)", true, "d" },
     { "amp",               "<d amp=N>: direct callers + files sharing a commit with its file (absent at 0)", true, "d" },
@@ -932,9 +932,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "worktree", "worktree=read|partial|unlisted: the checkout differs from HEAD (at= +dirty); each changed path is read from disk as ref=\"worktree\" rows replacing HEAD's, and on-head=/hits=/head_labels= count them; on-head= then reads the checkout, not HEAD's commit; partial = some changed path unreadable or a directory (nested repo, submodule), its HEAD rows may be stale; unlisted = git could not list the changes; either withholds complete=", false, "whereis", MapHeaderRead::No, {}, "whereis" },
     { "hits", "more hits=N: rows after this page; page on with offset=next_offset", true, "more", MapHeaderRead::No, {}, "whereis" },
     // lean-answers lane (crossref.h WhereisListing / the tip-date hoist): each rides only the answer that carries it.
-    { "listing", "listing=defs|refs: only those kind= rows listed (defs: refs counted in refs count=, its next= lists them); the window counts listed rows", false, "whereis", MapHeaderRead::No, {}, "whereis" },
+    { "listing", "listing=defs|refs: only those kind= rows listed; under defs <refs count=N next=> counts the kind=ref rows and next= lists them; the window counts listed rows", false, "whereis", MapHeaderRead::No, {}, "whereis" },
     { "head_date", "head_date=: a hit without tip= date= has tip= at=, date= this", false, "whereis", MapHeaderRead::No, {}, "whereis" },
-    { "count", "refs count=N: kind=ref rows not listed", true, "refs", MapHeaderRead::No, {}, "whereis" },
     // the GREY ZONE of the same sweep: attributes the compact prose named in passing ("in/out, cx/ccx", "<g> groups") but never
     // DEFINED as name= — legendcoveragecheck's default rows hold the definitional predicate, so each gets its reading here.
     // affected: src/verbs_change.h runAffected
