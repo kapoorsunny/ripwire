@@ -171,8 +171,48 @@ inline std::string valueRefsJson( const IngestResult& ing, const ValueRefRows& r
     return out;
 }
 
-inline std::string valueRefsCountAttrXml( std::size_t n ) { return countFieldOrEmpty( "value_refs", n, /*json=*/false ); }
-inline std::string valueRefsCountKeyJson( std::size_t n ) { return countFieldOrEmpty( "value_refs", n, /*json=*/true ); }
+// The depth cut over the answered definitions (ValueRefRows::depthCut, ingest_valuerefs.h kVrMaxDepth): files of their
+// language family whose value walk stopped at the cap — value_refs_depth_capped="N" — and the first cut, file:line —
+// value_refs_depth_at=. "" when there is none, so an answer over an uncut tree is byte-identical.
+inline std::string valueRefsDepthAttrXml( const IngestResult& ing, const ValueRefIndex::DepthCuts& cut, const VrRender& rr )
+{
+    if( cut.files == 0 )
+    {
+        return {};
+    }
+    EXPECTS( cut.first < ing.references.size(), "a depth cut counted over N > 0 files names its first record" );
+    const Reference&  r = ing.references[cut.first];
+    std::vector<char> esc;
+    return " value_refs_depth_capped=\"" + std::to_string( cut.files ) + "\" value_refs_depth_at=\""
+         + std::string( escapeXml( vrPath( ing, r.fileId, rr ) + ":" + std::to_string( r.line ), esc ) ) + "\"";
+}
+inline std::string valueRefsDepthKeyJson( const IngestResult& ing, const ValueRefIndex::DepthCuts& cut, const VrRender& rr )
+{
+    if( cut.files == 0 )
+    {
+        return {};
+    }
+    EXPECTS( cut.first < ing.references.size(), "a depth cut counted over N > 0 files names its first record" );
+    const Reference& r = ing.references[cut.first];
+    return ",\"value_refs_depth_capped\":" + std::to_string( cut.files ) + ",\"value_refs_depth_at\":\""
+         + jsonStr( vrPath( ing, r.fileId, rr ) + ":" + std::to_string( r.line ) ) + "\"";
+}
+
+// value_refs= beside the counts (absent at zero), then the depth cut that makes it a floor (absent when none) — present
+// even when value_refs= is absent: a zero there means "none found above the cut", never "none".
+inline std::string valueRefsCountAttrXml( const IngestResult& ing, const ValueRefRows& rows, const VrRender& rr )
+{
+    return countFieldOrEmpty( "value_refs", rows.rows.size(), /*json=*/false ) + valueRefsDepthAttrXml( ing, rows.depthCut, rr );
+}
+inline std::string valueRefsCountKeyJson( const IngestResult& ing, const ValueRefRows& rows, const VrRender& rr )
+{
+    return countFieldOrEmpty( "value_refs", rows.rows.size(), /*json=*/true ) + valueRefsDepthKeyJson( ing, rows.depthCut, rr );
+}
+// The legend clause for the depth attributes, exactly when an answer about these rows carries them.
+inline const char* valueRefsDepthLegendFor( const ValueRefRows& rows ) noexcept
+{
+    return valueRefsDepthLegend( rows.depthCut.files > 0 );
+}
 
 }   // namespace rw
 

@@ -227,7 +227,8 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                          ( std::string( rw::unprovenDefsLegend( chRows.unprovenDefs > 0 ) )      // H1: likewise, exactly when unproven_defs= is there
                            + rw::crossKindLegend( !chRows.crossKind.empty() ) ).c_str(),           // hono-07: likewise for cross_kind=
                          rw::modScopeLegend( chHasModScope ),                   // #60: likewise, exactly when a t="modscope" row is
-                         ( rw::graphCountDisclosure( rw::graphGaugeClauses( g ) ) + rw::valueRefsLegend( !chRows.valueRefs.rows.empty(), wantCallers ) ).c_str(),
+                         ( rw::graphCountDisclosure( rw::graphGaugeClauses( g ) ) + rw::valueRefsLegend( !chRows.valueRefs.rows.empty(), wantCallers )
+                           + rw::valueRefsDepthLegendFor( chRows.valueRefs ) ).c_str(),   // exactly when the root carries the depth disclosure
                          rw::rootRelPathsLegend( chSingleRoot ),
                          rw::multiRootTableLegend( ing.rootLabels.size() >= 2 ) );
         }
@@ -239,8 +240,8 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         // The tier-3 declines count= does not include (callhierarchy.h), on every dialect; absent at zero.
         const std::string chDeclinedAttr = rw::declinedCallsAttrXml( chRows.declinedCalls ) + rw::declinedIfaceAttrXml( chRows.declinedIface );
         // Reference-as-value round: value_refs= beside count= (never in it), absent at zero; the <vrs> window after the rows.
-        const std::string    chValueRefsAttr = rw::valueRefsCountAttrXml( chRows.valueRefs.rows.size() );
         const rw::VrRender   chVr { chSingleRoot, chRootPrefix };
+        const std::string    chValueRefsAttr = rw::valueRefsCountAttrXml( ing, chRows.valueRefs, chVr );   // + the depth cut that makes it a floor
         const std::string    chVrNext = "--uses=" + std::string( sym );
 
         // --format=columnar (RESEARCH lever 1): the same page window, re-encoded as a path-table + parallel
@@ -289,7 +290,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
             if( chSingleRoot ) { rw::emitTo( stdout, ",\"root\":\"{}\"", jsonStr( cfg.roots[0] ).c_str() ); }
             rw::emitTo( stdout, ",\"hop_tested\":{},\"hop_untested\":{}{}{}", chTested.tested, chTested.untested,
                          rw::declinedCallsKeyJson( chRows.declinedCalls ) + rw::declinedIfaceKeyJson( chRows.declinedIface ),   // A6; then the XML root's declined_calls=/declined_iface=
-                         rw::valueRefsCountKeyJson( chRows.valueRefs.rows.size() ) );
+                         rw::valueRefsCountKeyJson( ing, chRows.valueRefs, chVr ) );
             rw::emitTo( stdout, "{}{}", pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
                                         cfg.pageLimit, cfg.pageOffset, chDiscloseCap, kJsonPageSyntax ),
                          rw::graphCountFloorAttrJson( g ).c_str() );   // §H4 §3.4 — the JSON dialect's spelling of the same marker
@@ -847,6 +848,7 @@ struct SafeDeleteLegendFlags
     std::size_t declinedCalls = 0;       // declined_calls= on the root (graph.h declinedCallsNaming)
     bool        gateDeclined  = false;   // the builtin-method gate declined a call in this graph
     std::size_t valueRefs     = 0;       // value_refs= on the root (valuerefs.h): SYM is used as a value
+    bool        valueRefDepthCut = false;   // the depth disclosure is on the root: the value walk stopped at its depth cap
 };
 
 inline void emitSafeDeleteLegend( std::size_t defCount, std::size_t unprovenDefs, std::size_t ambiguousCallers, std::string_view risk,
@@ -864,6 +866,7 @@ inline void emitSafeDeleteLegend( std::size_t defCount, std::size_t unprovenDefs
         declinedClause += "none-found beside declined_calls= is not a safety reading: those calls may reach this definition. ";
     }
     declinedClause += rw::valueRefsSafeDeleteLegend( flags.valueRefs > 0 );   // exactly when the root carries value_refs=
+    declinedClause += rw::valueRefsDepthLegend( flags.valueRefDepthCut );      // exactly when it carries the depth disclosure
     rw::emitTo( stdout, "<!-- ripwire safe-delete: composes signals the tool already computes into one \"can I delete this?\" READ "
                 "— never a verdict. defs= is resolveAllByNameQualified's match count, exactly as the impact/uses/callers "
                 "verbs already disclose it. callers= is the 1-hop caller count (the callers verb's own walk over defs' "
@@ -1015,11 +1018,13 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
     // --edit-check's overload fold states) — so a multi-def selector withholds the claim rather than
     // guessing which definition it would apply to.
     // Reference-as-value round: a function a table, field or argument holds is not dead — its value sites are uses
-    // (sites above) and they keep dead_code_candidate at 0, exactly as --dead-code's value-ref-excluded= does.
+    // (sites above) and they keep dead_code_candidate at 0 by --dead-code's own rule (ValueRefIndex::isValueReferenced):
+    // a row made inside the function itself (`timer_set( tick )` in tick) or a wrapper decorator does not.
     const rw::ValueRefIndex sdVri( ing );
     const rw::ValueRefRows  sdValueRefs = rw::valueRefCallerRows( ing, sdVri, defs );
+    const rw::VrRender      sdVr { sdSingleRoot, sdRootPrefix };   // the <vrs> rows' and the depth cut's paths
     bool deadCodeCandidate = false;
-    if( defs.size() == 1 && callerIds.empty() && sdValueRefs.rows.empty() )
+    if( defs.size() == 1 && callerIds.empty() && !sdVri.isValueReferenced( defs[0] ) )
     {
         const Symbol& only = ing.symbols[ defs[0] ];
         if( deadCodeEligibleKind( ing, only ) )
@@ -1083,7 +1088,7 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
     emitSafeDeleteLegend( defs.size(), sdUnprovenDefs, ambiguousCallers, risk,
                           SafeDeleteLegendFlags{ sdSingleRoot, rw::graphGaugeClauses( g ),
                                                  anyModuleScopeRow( ing, std::span<const NodeId>( callerIds ).subspan( sdLw.begin, sdLw.end - sdLw.begin ) ),
-                                                 sdDeclinedCalls, g.gateDeclinedCalls > 0, sdValueRefs.rows.size() } );
+                                                 sdDeclinedCalls, g.gateDeclinedCalls > 0, sdValueRefs.rows.size(), sdValueRefs.depthCut.files > 0 } );
 
     const Symbol&      lead = ing.symbols[ defs[0] ];   // resolveAllByNameQualified walks ascending id — defs[0] is the
                                                         // lowest, same convention --impact/--uses/--callers's of=/defs=
@@ -1099,7 +1104,7 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
                 radiusTested, radiusUntested, deadCodeCandidate ? 1 : 0, risk,
                 rw::unprovenDefsAttrXml( sdUnprovenDefs ).c_str(),   // H1: beside the verdict it qualifies; absent at zero
                 rw::declinedCallsAttrXml( sdDeclinedCalls ).c_str(), // beside risk= too: declined calls that may reach it; absent at zero
-                rw::valueRefsCountAttrXml( sdValueRefs.rows.size() ), // value uses: in uses=, never in callers=/impact_reaches=; absent at zero
+                rw::valueRefsCountAttrXml( ing, sdValueRefs, sdVr ), // value uses: in uses=, never in callers=/impact_reaches=; absent at zero
                 pageDisclosure( cab, sizeof( cab ), cw.end - cw.begin, callerIds.size(), cw.end, cfg.pageLimit, cfg.pageOffset, true ),
                 rw::graphCountFloorAttrXml( g ).c_str(), sdRootAttr.c_str() );
     for( std::size_t i = cw.begin; i < cw.end; ++i )
@@ -1113,8 +1118,7 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
         }
         rw::emitTo( stdout, "/>" );
     }
-    const std::string sdVrPrefix = sdSingleRoot ? rw::sarif::rootPrefixOf( cfg.roots[0] ) : std::string();
-    rw::emitTo( stdout, "{}</safe-delete>", rw::valueRefsXml( ing, sdValueRefs, true, rw::VrRender{ sdSingleRoot, sdVrPrefix },
+    rw::emitTo( stdout, "{}</safe-delete>", rw::valueRefsXml( ing, sdValueRefs, true, sdVr,
                                                               "--uses=" + std::string( cfg.safeDeleteSym ) ) );
     return 0;
 }
@@ -2335,7 +2339,7 @@ int emitImpactColumnar( const ImpactView& v )
                                  + "\" radius_untested=\"" + std::to_string( v.radiusUntested ) + "\""
                                  + rw::declinedCallsAttrXml( v.declinedCalls )                    // tier-3 declines into the radius
                                  + rw::declinedIfaceAttrXml( v.declinedIface )
-                                 + rw::valueRefsCountAttrXml( v.valueRefs.rows.size() )           // value uses (rows: the XML form)
+                                 + rw::valueRefsCountAttrXml( v.ing, v.valueRefs, rw::VrRender{ v.singleRoot, v.rootPrefix } )   // value uses (rows: the XML form)
                                  + std::string( v.rootAttr )
                                  + pageDisclosure( ipab, sizeof( ipab ), shownRows, v.show.size(), v.page.end,
                                                    v.pageLimit, v.pageOffset, true )
@@ -2382,7 +2386,7 @@ int emitImpactJson( const ImpactView& v )
                  rw::countFieldOrEmpty( "tsconfig_unread", std::size_t( v.imports.tsconfigUnread ), /*json=*/true ) );
     rw::emitTo( stdout, ",\"radius_tested\":{},\"radius_untested\":{}{}{}", v.radiusTested, v.radiusUntested,
                  rw::declinedCallsKeyJson( v.declinedCalls ) + rw::declinedIfaceKeyJson( v.declinedIface ),   // A6; then the XML root's declined_calls=/declined_iface=
-                 rw::valueRefsCountKeyJson( v.valueRefs.rows.size() ) );
+                 rw::valueRefsCountKeyJson( v.ing, v.valueRefs, rw::VrRender{ v.singleRoot, v.rootPrefix } ) );
     if( v.singleRoot ) { rw::emitTo( stdout, ",\"root\":\"{}\"", jsonStr( v.rootRaw ).c_str() ); }   // R-E
     rw::emitTo( stdout, "{}{}{},\"impact\":[",
                  pageDisclosure( ipab, sizeof( ipab ), shownRows, v.show.size(), v.page.end,
@@ -2413,7 +2417,7 @@ int emitImpactXml( const ImpactView& v )
                  rw::byDepthAttrXml( v.byDepth ),                                                              // 0.6.5: partitions reaches= by hop depth
                  v.imports.xmlAttrs.c_str(), v.radiusTested, v.radiusUntested,
                  ( rw::declinedCallsAttrXml( v.declinedCalls ) + rw::declinedIfaceAttrXml( v.declinedIface ) ).c_str(),   // tier-3 declines into the radius
-                 rw::valueRefsCountAttrXml( v.valueRefs.rows.size() ),   // value uses: never in reaches=; absent at zero
+                 rw::valueRefsCountAttrXml( v.ing, v.valueRefs, rw::VrRender{ v.singleRoot, v.rootPrefix } ),   // value uses: never in reaches=; absent at zero
                  std::string( v.rootAttr ).c_str(),
                  pageDisclosure( ipab, sizeof( ipab ), shownRows, v.show.size(), v.page.end,
                                  v.pageLimit, v.pageOffset, true ),
@@ -2521,7 +2525,8 @@ std::optional<int> runImpact( const MainDispatch& d )
                          rw::declinedCallsLegendWithGate( imDeclinedCalls > 0, g.gateDeclinedCalls > 0 ),           // exactly when the root carries declined_calls=
                          rw::declinedIfaceLegend( imDeclinedIface > 0 ),                                             // likewise, exactly when declined_iface= is there
                          rw::modScopeLegend( imHasModScope ),                      // #60: likewise, exactly when a t="modscope" row is
-                         rw::valueRefsReachLegend( !imValueRefs.rows.empty() ),     // exactly when the root carries value_refs=
+                         ( std::string( rw::valueRefsReachLegend( !imValueRefs.rows.empty() ) )   // exactly when the root carries value_refs=
+                           + rw::valueRefsDepthLegendFor( imValueRefs ) ).c_str(),                 // ... and the depth disclosure
                          rw::graphCountDisclosure( rw::graphGaugeClauses( g ) ).c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
         }
         // P2.1 + §P8 G1: the rank-ordered listing's 40 is a DEFAULT now, not a ceiling — see the §P10.3 note

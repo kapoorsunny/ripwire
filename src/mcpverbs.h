@@ -812,7 +812,11 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
         const ValueRefRows&     callerSide = referencingOnly ? chRows.valueRefs : chCallers.valueRefs;
         if( referencingOnly )
         {
-            out += valueRefsCountKeyJson( callerSide.rows.size() );
+            out += valueRefsCountKeyJson( ing, callerSide, vr );   // + the depth cut that makes it a floor, as on the CLI
+        }
+        else
+        {
+            out += valueRefsDepthKeyJson( ing, callerSide.depthCut, vr );   // the --callers/--callees roots' depth cut (one defs set)
         }
         out += valueRefsJson( ing, callerSide, true, vr, "valueRefs", "--uses=" + name );
         if( !referencingOnly )
@@ -2743,7 +2747,8 @@ inline std::optional<std::string> impactText( const std::string& root, const std
                   unprovenDefsVerbLegend( UnprovenDefsVerb::Impact, unprovenDefs > 0 ).c_str(),   // H1: exactly when the root carries unproven_defs=, as on the CLI
                   declinedCallsLegendWithGate( declinedCalls > 0, g.gateDeclinedCalls > 0 ),         // exactly when the root carries declined_calls=, as on the CLI
                   declinedIfaceLegend( declinedIface > 0 ),                                          // likewise declined_iface=, as on the CLI
-                  valueRefsReachLegend( !imValueRefs.rows.empty() ),                                  // exactly when the root carries value_refs=, as on the CLI
+                  ( std::string( valueRefsReachLegend( !imValueRefs.rows.empty() ) )                  // exactly when the root carries value_refs=, as on the CLI
+                    + valueRefsDepthLegendFor( imValueRefs ) ).c_str(),                                // ... and the depth disclosure, as on the CLI
                   graphCountDisclosure( rw::graphGaugeClauses( g ) ).c_str(), renderDisclosure( prD, DiscloseAs::LegendClause ).c_str() );
     // r27-emitters §P2.1: the listing is capped at 40 by rank. Without shown=/capped= a 40-row answer to
     // "is it safe to change X?" reads as the WHOLE blast radius when it can be 3% of it. Same attributes,
@@ -2763,7 +2768,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
                   ex( symbol ).c_str(), seeds.size(), reach.size(), unprovenDefsAttrXml( unprovenDefs ).c_str(),   // H1: where the CLI root carries it
                   byDepthAttrXml( byDepth ),                                                                        // 0.6.5: the CLI root's by_depth=
                   imports.xmlAttrs.c_str(), radiusTested, radiusUntested, ( declinedCallsAttrXml( declinedCalls ) + declinedIfaceAttrXml( declinedIface ) ).c_str(),
-                  valueRefsCountAttrXml( imValueRefs.rows.size() ), imRootAttr.c_str(),
+                  valueRefsCountAttrXml( ing, imValueRefs, VrRender{ imSingleRoot, imRootPrefix } ), imRootAttr.c_str(),
                   pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end, page.limit, page.offset, true ),
                   graphCountFloorAttrXml( g ).c_str(), renderDisclosure( prD, DiscloseAs::XmlAttrs ).c_str(),   // M15: gauge + marker
                   nextAttrXml( nextFlag( "--safe-delete=", symbol ) ).c_str()  );   // P3 (L7): the CLI twin's next=, same root attribute set (mcpclidiffcheck)

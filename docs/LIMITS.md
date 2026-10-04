@@ -17,7 +17,7 @@ it once, marked `×N`.
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 236 | 94 | 135 | **101** |
+| 236 | 94 | 137 | **99** |
 
 Plus 7 ranking and apportionment parameters, in their own table below: they are not caps, they
 are not counted as caps, and 236 + 7 is the 243 constants this generator parses out of `src/`.
@@ -38,8 +38,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **130 of 236 caps are classified
-(45 INDEXING, 41 OUTPUT, 44 BOUNDARY); the remaining 106 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **131 of 236 caps are classified
+(46 INDEXING, 41 OUTPUT, 44 BOUNDARY); the remaining 105 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -505,11 +505,11 @@ Discloses: **none**
 
 ### `src/ingest_valuerefs.h`
 
-Discloses: **none**
+Discloses: `value_refs_depth_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
-| `kVrMaxDepth` | `512` | — | the value-uses pass's own depth guard (ingest_sidecap.h kSideDepthUses) |
+| `kVrMaxDepth` | `512` | INDEXING | the value-uses pass's own depth guard (ingest_sidecap.h kSideDepthUses); a cut is disclosed as value_refs_depth_capped= (valuerefs.h) |
 | `kVrTextCap` | `96` | — | a written slot / callee longer than this is cut with "…" |
 
 ### `src/jsrunner.h`
@@ -938,7 +938,7 @@ Discloses: `name_ladder_capped`
 
 ### `src/valuerefs.h`
 
-Discloses: `capped`
+Discloses: `capped`, `value_refs_depth_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |

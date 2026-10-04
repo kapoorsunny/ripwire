@@ -75,7 +75,11 @@ public:
         for( std::uint32_t i = 0; i < ing.references.size(); ++i )
         {
             const Reference& r = ing.references[i];
-            if( r.role == RefRole::Value )
+            if( r.role == RefRole::Value && scopeOf( r ) == kValueRefDepthCutScope )
+            {
+                m_depthCuts.push_back( i );   // the file's depth-cut record: no row, a disclosure (depthCutsFor)
+            }
+            else if( r.role == RefRole::Value )
             {
                 m_values.push_back( i );
                 if( !r.recvVar.empty() )
@@ -138,6 +142,9 @@ public:
     // `@property` or `@functools.wraps` hands the function back to the same name, so it is still reached only by a
     // call. A registering decorator (`@app.route`, `@register`) is the value use this exclusion exists for. The row
     // itself is still served (ruling 5); the wrapper FLOOR for rows is a follow-up.
+    // A reference made INSIDE `def` itself (`static void tick( void ) { timer_set( tick ); }`) does not count either: it
+    // can only run once something else reaches `def`, exactly as the call graph drops a recursive self-call (the CSR has
+    // no self-loops). The row is still served and is still a use site (--safe-delete's uses=).
     bool isValueReferenced( NodeId def ) const
     {
         const auto it = m_valuesByTarget.find( def );
@@ -147,8 +154,44 @@ public:
         }
         return std::ranges::any_of( it->second, [ & ]( std::uint32_t k )
         {
-            return !vrIsWrapperDecorator( m_ing.references[ m_values[k] ].fieldName );
+            const Reference& r = m_ing.references[ m_values[k] ];
+            return r.fromSymbol != def && !vrIsWrapperDecorator( r.fieldName );
         } );
+    }
+
+    // The value walk's depth cut (ingest_valuerefs.h kVrMaxDepth) as it bears on an answer about `defs`: how many files
+    // of the defs' language families stopped their walk at the cap (a value reference below it was never captured, so a
+    // value_refs= count is a FLOOR there), and the first such record by path then line (the clue, value_refs_depth_at=).
+    // `everyFamily` asks about every armed family (--dead-code's whole-tree answer). Only functions and methods have
+    // value references, so a def of another kind brings no family in, and no def brings none.
+    struct DepthCuts
+    {
+        std::uint32_t files = 0;
+        std::uint32_t first = UINT32_MAX;   // a reference index, UINT32_MAX when files == 0
+    };
+    DepthCuts depthCutsFor( std::span<const NodeId> defs, bool everyFamily = false ) const
+    {
+        DepthCuts out;
+        for( const std::uint32_t i : m_depthCuts )
+        {
+            const Reference&   c   = m_ing.references[i];
+            const VrLangFamily fam = valueRefFamily( c.lang );
+            const bool relevant = everyFamily || std::ranges::any_of( defs, [ & ]( NodeId d )
+            {
+                const Symbol& s = m_ing.symbols[d];
+                return ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && valueRefFamily( s.lang ) == fam;
+            } );
+            if( !relevant )
+            {
+                continue;
+            }
+            ++out.files;
+            if( out.first == UINT32_MAX || vrCutLess( c, m_ing.references[ out.first ] ) )
+            {
+                out.first = i;
+            }
+        }
+        return out;
     }
 
     // The resolved targets of value reference `refIdx` (an index into ing.references).
@@ -309,6 +352,11 @@ public:
     }
 
 private:
+    bool vrCutLess( const Reference& a, const Reference& b ) const
+    {
+        return a.fileId != b.fileId ? m_ing.files[a.fileId] < m_ing.files[b.fileId] : a.line < b.line;
+    }
+
     // A value key "#N" (an argument position) or "#name" (a keyword / a parameter default) against a parameter Through.
     static bool paramMatches( std::string_view valueKey, const Reference& through ) noexcept
     {
@@ -558,6 +606,7 @@ private:
     HashMap<std::string, std::vector<NodeId>>            m_fnByName;
     std::vector<std::uint8_t>                            m_pyMember;   // per symbol: 1 = a Python def directly in its class (empty: no Python)
     std::vector<std::uint32_t>                           m_values;            // Value reference indices, ascending
+    std::vector<std::uint32_t>                           m_depthCuts;         // the files' depth-cut records (no row), ascending
     std::vector<std::vector<NodeId>>                     m_targets;           // parallel to m_values
     HashMap<NodeId, std::vector<std::uint32_t>>          m_valuesByTarget;    // target def → positions in m_values
     HashMap<std::string, std::vector<std::uint32_t>>     m_valueByContainer;  // "file#container" → Value refs
@@ -584,6 +633,7 @@ struct ValueRefRow
 struct ValueRefRows
 {
     std::vector<ValueRefRow> rows;      // every row, served order; the window is the caller's
+    ValueRefIndex::DepthCuts depthCut;  // the walk's depth cut over the answered defs' families (value_refs_depth_capped=)
 };
 
 inline bool vrBindLess( const IngestResult& ing, const Reference& a, const Reference& b )
@@ -599,6 +649,7 @@ inline bool vrBindLess( const IngestResult& ing, const Reference& a, const Refer
 inline ValueRefRows valueRefCallerRows( const IngestResult& ing, const ValueRefIndex& idx, std::span<const NodeId> defs )
 {
     ValueRefRows out;
+    out.depthCut = idx.depthCutsFor( defs );
     for( const std::uint32_t r : idx.valueRefsTo( defs ) )
     {
         ValueRefRow row;
@@ -653,15 +704,22 @@ inline bool vrCalleeRowLess( const IngestResult& ing, const ValueRefRow& a, cons
     {
         return ing.files[ta.fileId] < ing.files[tb.fileId];
     }
-    return ta.line < tb.line;
+    if( ta.line != tb.line )
+    {
+        return ta.line < tb.line;
+    }
+    return a.to < b.to;   // two same-named definitions on one line (C++ overloads): their rows render alike, the order is still total
 }
 
 // --callees side: the functions `fns` store/pass as values (through= absent unless the same function also calls
 // through that very slot), and the functions they may call through a parameter or a container (through= the written
-// callee; one row per (to, through), bind= its first site, sites= the count).
+// callee; one row per (to, through), bind= its first site, sites= the number of distinct binding sites).
+// Rows are per BINDING SITE, never per call through it: two calls `tbl.k(); tbl.k();` through one slot are one row, and
+// `TABLE.k()` called twice through a slot one site fills is sites=1, not 2.
 inline ValueRefRows valueRefCalleeRows( const IngestResult& ing, const ValueRefIndex& idx, std::span<const NodeId> fns )
 {
     ValueRefRows out;
+    out.depthCut = idx.depthCutsFor( fns );
     for( const std::uint32_t v : idx.madeIn( fns, RefRole::Value ) )
     {
         for( const NodeId t : idx.targetsOf( v ) )
@@ -672,7 +730,8 @@ inline ValueRefRows valueRefCalleeRows( const IngestResult& ing, const ValueRefI
             out.rows.push_back( std::move( row ) );
         }
     }
-    std::vector<ValueRefRow> via;
+    std::vector<ValueRefRow>                 via;
+    std::vector<std::vector<std::uint32_t>>  viaSites;   // parallel to via: the distinct binding sites (Value refs) each row joins
     for( const std::uint32_t t : idx.madeIn( fns, RefRole::Through ) )
     {
         const Reference& tr = ing.references[t];
@@ -680,14 +739,18 @@ inline ValueRefRows valueRefCalleeRows( const IngestResult& ing, const ValueRefI
         {
             for( const NodeId target : idx.targetsOf( v ) )
             {
-                // the same function stores AND calls through the slot: the stored row carries through=
+                // the same function stores AND calls through the slot: the stored row carries through= (the first
+                // written callee); a second call through the same slot and callee is that row again, not a new one
                 auto same = std::find_if( out.rows.begin(), out.rows.end(), [ & ]( const ValueRefRow& r )
                 {
-                    return r.ref == v && r.to == target && r.through.empty();
+                    return r.ref == v && r.to == target && ( r.through.empty() || r.through == tr.fieldName );
                 } );
                 if( same != out.rows.end() )
                 {
-                    same->through = tr.fieldName;
+                    if( same->through.empty() )
+                    {
+                        same->through = tr.fieldName;
+                    }
                     continue;
                 }
                 auto grouped = std::find_if( via.begin(), via.end(), [ & ]( const ValueRefRow& r )
@@ -696,11 +759,16 @@ inline ValueRefRows valueRefCalleeRows( const IngestResult& ing, const ValueRefI
                 } );
                 if( grouped != via.end() )
                 {
+                    std::vector<std::uint32_t>& sites = viaSites[ static_cast<std::size_t>( grouped - via.begin() ) ];
+                    const auto at = std::ranges::lower_bound( sites, v );
+                    if( at == sites.end() || *at != v )
+                    {
+                        sites.insert( at, v );   // a NEW binding site for this (to, through): counted once, whatever the calls
+                    }
                     if( vrBindLess( ing, ing.references[v], ing.references[grouped->ref] ) )
                     {
                         grouped->ref = v;
                     }
-                    ++grouped->sites;
                     continue;
                 }
                 ValueRefRow row;
@@ -708,12 +776,14 @@ inline ValueRefRows valueRefCalleeRows( const IngestResult& ing, const ValueRefI
                 row.to      = target;
                 row.through = tr.fieldName;
                 via.push_back( std::move( row ) );
+                viaSites.push_back( { v } );
             }
         }
     }
-    for( ValueRefRow& r : via )
+    for( std::size_t i = 0; i < via.size(); ++i )
     {
-        out.rows.push_back( std::move( r ) );
+        via[i].sites = static_cast<std::uint32_t>( viaSites[i].size() );
+        out.rows.push_back( std::move( via[i] ) );
     }
     std::sort( out.rows.begin(), out.rows.end(), [ & ]( const ValueRefRow& a, const ValueRefRow& b ) { return vrCalleeRowLess( ing, a, b ); } );
     return out;
