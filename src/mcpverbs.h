@@ -812,7 +812,7 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
         const ValueRefRows&     callerSide = referencingOnly ? chRows.valueRefs : chCallers.valueRefs;
         if( referencingOnly )
         {
-            out += valueRefsCountKeyJson( ing, callerSide, vr );   // + the depth cut that makes it a floor, as on the CLI
+            out += ( valueRefsCountKeyJson( callerSide.rows.size() ) + valueRefsDepthKeyJson( ing, callerSide.depthCut, vr ) );   // + the depth cut that makes it a floor, as on the CLI
         }
         else
         {
@@ -2768,7 +2768,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
                   ex( symbol ).c_str(), seeds.size(), reach.size(), unprovenDefsAttrXml( unprovenDefs ).c_str(),   // H1: where the CLI root carries it
                   byDepthAttrXml( byDepth ),                                                                        // 0.6.5: the CLI root's by_depth=
                   imports.xmlAttrs.c_str(), radiusTested, radiusUntested, ( declinedCallsAttrXml( declinedCalls ) + declinedIfaceAttrXml( declinedIface ) ).c_str(),
-                  valueRefsCountAttrXml( ing, imValueRefs, VrRender{ imSingleRoot, imRootPrefix } ), imRootAttr.c_str(),
+                  ( valueRefsCountAttrXml( imValueRefs.rows.size() ) + valueRefsDepthAttrXml( ing, imValueRefs.depthCut, VrRender{ imSingleRoot, imRootPrefix } ) ), imRootAttr.c_str(),
                   pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end, page.limit, page.offset, true ),
                   graphCountFloorAttrXml( g ).c_str(), renderDisclosure( prD, DiscloseAs::XmlAttrs ).c_str(),   // M15: gauge + marker
                   nextAttrXml( nextFlag( "--safe-delete=", symbol ) ).c_str()  );   // P3 (L7): the CLI twin's next=, same root attribute set (mcpclidiffcheck)

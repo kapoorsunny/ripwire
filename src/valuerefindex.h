@@ -57,6 +57,16 @@ inline bool vrIsWrapperDecorator( std::string_view into ) noexcept
     return std::ranges::find( kWrappers, last ) != std::end( kWrappers );
 }
 
+// Two references in served order: by path, then by position in the file.
+inline bool vrBindLess( const IngestResult& ing, const Reference& a, const Reference& b )
+{
+    if( a.fileId != b.fileId )
+    {
+        return ing.files[a.fileId] < ing.files[b.fileId];
+    }
+    return a.startByte < b.startByte;
+}
+
 // The index every verb queries. Built from one IngestResult in O(refs + symbols); no graph needed.
 class ValueRefIndex
 {
@@ -186,7 +196,7 @@ public:
                 continue;
             }
             ++out.files;
-            if( out.first == UINT32_MAX || vrCutLess( c, m_ing.references[ out.first ] ) )
+            if( out.first == UINT32_MAX || vrBindLess( m_ing, c, m_ing.references[ out.first ] ) )
             {
                 out.first = i;
             }
@@ -352,10 +362,6 @@ public:
     }
 
 private:
-    bool vrCutLess( const Reference& a, const Reference& b ) const
-    {
-        return a.fileId != b.fileId ? m_ing.files[a.fileId] < m_ing.files[b.fileId] : a.line < b.line;
-    }
 
     // A value key "#N" (an argument position) or "#name" (a keyword / a parameter default) against a parameter Through.
     static bool paramMatches( std::string_view valueKey, const Reference& through ) noexcept
@@ -636,15 +642,6 @@ struct ValueRefRows
     ValueRefIndex::DepthCuts depthCut;  // the walk's depth cut over the answered defs' families (value_refs_depth_capped=)
 };
 
-inline bool vrBindLess( const IngestResult& ing, const Reference& a, const Reference& b )
-{
-    if( a.fileId != b.fileId )
-    {
-        return ing.files[a.fileId] < ing.files[b.fileId];
-    }
-    return a.startByte < b.startByte;
-}
-
 // --callers side: every value reference resolving to one of `defs`.
 inline ValueRefRows valueRefCallerRows( const IngestResult& ing, const ValueRefIndex& idx, std::span<const NodeId> defs )
 {
@@ -711,6 +708,67 @@ inline bool vrCalleeRowLess( const IngestResult& ing, const ValueRefRow& a, cons
     return a.to < b.to;   // two same-named definitions on one line (C++ overloads): their rows render alike, the order is still total
 }
 
+// The function stores AND calls through the slot: the stored row (binding site v, function target) carries through=, the
+// first written callee. A second call through the same slot and callee is that row again, never a new one. False when
+// no stored row joins (the call goes through a slot another function or the file filled).
+inline bool vrJoinStoredRow( std::vector<ValueRefRow>& rows, std::uint32_t v, NodeId target, const std::string& through )
+{
+    const auto same = std::ranges::find_if( rows, [ & ]( const ValueRefRow& r )
+    {
+        return r.ref == v && r.to == target && ( r.through.empty() || r.through == through );
+    } );
+    if( same == rows.end() )
+    {
+        return false;
+    }
+    if( same->through.empty() )
+    {
+        same->through = through;
+    }
+    return true;
+}
+
+// The rows a call THROUGH a slot reaches: one per (to, through), bind= its first binding site, sites= the number of
+// DISTINCT binding sites — two calls through one slot never count one site twice.
+struct VrViaRows
+{
+    std::vector<ValueRefRow>                rows;
+    std::vector<std::vector<std::uint32_t>> sites;   // parallel to rows, ascending Value refs
+
+    void add( const IngestResult& ing, std::uint32_t v, NodeId target, const std::string& through )
+    {
+        const auto grouped = std::ranges::find_if( rows, [ & ]( const ValueRefRow& r ) { return r.to == target && r.through == through; } );
+        if( grouped == rows.end() )
+        {
+            ValueRefRow row;
+            row.ref     = v;
+            row.to      = target;
+            row.through = through;
+            rows.push_back( std::move( row ) );
+            sites.push_back( { v } );
+            return;
+        }
+        std::vector<std::uint32_t>& s  = sites[ static_cast<std::size_t>( grouped - rows.begin() ) ];
+        const auto                  at = std::ranges::lower_bound( s, v );
+        if( at == s.end() || *at != v )
+        {
+            s.insert( at, v );
+        }
+        if( vrBindLess( ing, ing.references[v], ing.references[grouped->ref] ) )
+        {
+            grouped->ref = v;
+        }
+    }
+    void appendTo( std::vector<ValueRefRow>& out )
+    {
+        for( std::size_t i = 0; i < rows.size(); ++i )
+        {
+            rows[i].sites = static_cast<std::uint32_t>( sites[i].size() );
+            out.push_back( std::move( rows[i] ) );
+        }
+    }
+};
+
 // --callees side: the functions `fns` store/pass as values (through= absent unless the same function also calls
 // through that very slot), and the functions they may call through a parameter or a container (through= the written
 // callee; one row per (to, through), bind= its first site, sites= the number of distinct binding sites).
@@ -730,8 +788,7 @@ inline ValueRefRows valueRefCalleeRows( const IngestResult& ing, const ValueRefI
             out.rows.push_back( std::move( row ) );
         }
     }
-    std::vector<ValueRefRow>                 via;
-    std::vector<std::vector<std::uint32_t>>  viaSites;   // parallel to via: the distinct binding sites (Value refs) each row joins
+    VrViaRows via;
     for( const std::uint32_t t : idx.madeIn( fns, RefRole::Through ) )
     {
         const Reference& tr = ing.references[t];
@@ -739,52 +796,14 @@ inline ValueRefRows valueRefCalleeRows( const IngestResult& ing, const ValueRefI
         {
             for( const NodeId target : idx.targetsOf( v ) )
             {
-                // the same function stores AND calls through the slot: the stored row carries through= (the first
-                // written callee); a second call through the same slot and callee is that row again, not a new one
-                auto same = std::find_if( out.rows.begin(), out.rows.end(), [ & ]( const ValueRefRow& r )
+                if( !vrJoinStoredRow( out.rows, v, target, tr.fieldName ) )
                 {
-                    return r.ref == v && r.to == target && ( r.through.empty() || r.through == tr.fieldName );
-                } );
-                if( same != out.rows.end() )
-                {
-                    if( same->through.empty() )
-                    {
-                        same->through = tr.fieldName;
-                    }
-                    continue;
+                    via.add( ing, v, target, tr.fieldName );
                 }
-                auto grouped = std::find_if( via.begin(), via.end(), [ & ]( const ValueRefRow& r )
-                {
-                    return r.to == target && r.through == tr.fieldName;
-                } );
-                if( grouped != via.end() )
-                {
-                    std::vector<std::uint32_t>& sites = viaSites[ static_cast<std::size_t>( grouped - via.begin() ) ];
-                    const auto at = std::ranges::lower_bound( sites, v );
-                    if( at == sites.end() || *at != v )
-                    {
-                        sites.insert( at, v );   // a NEW binding site for this (to, through): counted once, whatever the calls
-                    }
-                    if( vrBindLess( ing, ing.references[v], ing.references[grouped->ref] ) )
-                    {
-                        grouped->ref = v;
-                    }
-                    continue;
-                }
-                ValueRefRow row;
-                row.ref     = v;
-                row.to      = target;
-                row.through = tr.fieldName;
-                via.push_back( std::move( row ) );
-                viaSites.push_back( { v } );
             }
         }
     }
-    for( std::size_t i = 0; i < via.size(); ++i )
-    {
-        via[i].sites = static_cast<std::uint32_t>( viaSites[i].size() );
-        out.rows.push_back( std::move( via[i] ) );
-    }
+    via.appendTo( out.rows );
     std::sort( out.rows.begin(), out.rows.end(), [ & ]( const ValueRefRow& a, const ValueRefRow& b ) { return vrCalleeRowLess( ing, a, b ); } );
     return out;
 }

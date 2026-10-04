@@ -623,7 +623,7 @@ inline constexpr const char* kToValueRefsLegend =
     "to_value_refs=N (absent when 0): to= is USED AS A VALUE N times (stored or passed, matched by name); a run through such a slot is not a proven call and is no hop here: the callers verb on to= lists the binding sites and called_by=. ";
 inline constexpr const char* kUsesValueRoleLegend =
     "role=\"value\" (reference-as-value round): the function is USED AS A VALUE there, stored into a table, field or variable or passed as an argument, matched by name with the callers verb's own visibility rules. It is not a proven call; the callers verb shows where the value lands and who may call through it. A decorator row is a fact about the definition, not a site: the callers verb lists it, this verb does not. ";
-// The value walk's depth cut (ingest_valuerefs.h kVrMaxDepth, valuerefs.h valueRefsCountAttrXml): rides EVERY answer
+// The value walk's depth cut (ingest_valuerefs.h kVrMaxDepth, valuerefs.h valueRefsDepthAttrXml): rides EVERY answer
 // that carries value_refs_depth_capped=, whether value_refs= is there or not — a zero beside it is the floor it names.
 inline constexpr const char* kValueRefsDepthLegend =
     "value_refs_depth_capped=N (absent when 0): N indexed files of this language nest deeper than the value-reference walk's 512-level cap (a long else-if chain, a deep expression), and a function used as a value below that depth is not seen: value_refs= (absent or not) is a floor there, and a reading built on it (dead_code_candidate=, risk=none-found, the dead-code list) may miss a table that holds the function. value_refs_depth_at= is the first cut, file:line: read the code there for value uses. ";

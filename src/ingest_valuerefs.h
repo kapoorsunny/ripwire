@@ -745,13 +745,14 @@ private:
     }
 
     // A C declarator wrapper between a parameter list and the node that owns the declarator chain.
+    static constexpr std::string_view kDeclaratorWrappers[] = {
+        "function_declarator", "abstract_function_declarator", "pointer_declarator", "abstract_pointer_declarator",
+        "reference_declarator", "abstract_reference_declarator", "parenthesized_declarator",
+        "abstract_parenthesized_declarator", "attributed_declarator", "array_declarator", "abstract_array_declarator",
+    };
     static bool isDeclaratorWrapper( const char* t ) noexcept
     {
-        return kindIs( t, "function_declarator" ) || kindIs( t, "abstract_function_declarator" ) || kindIs( t, "pointer_declarator" )
-            || kindIs( t, "abstract_pointer_declarator" ) || kindIs( t, "reference_declarator" )
-            || kindIs( t, "abstract_reference_declarator" ) || kindIs( t, "parenthesized_declarator" )
-            || kindIs( t, "abstract_parenthesized_declarator" ) || kindIs( t, "attributed_declarator" )
-            || kindIs( t, "array_declarator" ) || kindIs( t, "abstract_array_declarator" );
+        return std::ranges::find( kDeclaratorWrappers, std::string_view( t ) ) != std::ranges::end( kDeclaratorWrappers );
     }
 
     // Is node kind `t` (about to be entered; its parent is m_anc.back()) a parameter list, or a parameter of one, that

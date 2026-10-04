@@ -198,16 +198,8 @@ inline std::string valueRefsDepthKeyJson( const IngestResult& ing, const ValueRe
          + jsonStr( vrPath( ing, r.fileId, rr ) + ":" + std::to_string( r.line ) ) + "\"";
 }
 
-// value_refs= beside the counts (absent at zero), then the depth cut that makes it a floor (absent when none) — present
-// even when value_refs= is absent: a zero there means "none found above the cut", never "none".
-inline std::string valueRefsCountAttrXml( const IngestResult& ing, const ValueRefRows& rows, const VrRender& rr )
-{
-    return countFieldOrEmpty( "value_refs", rows.rows.size(), /*json=*/false ) + valueRefsDepthAttrXml( ing, rows.depthCut, rr );
-}
-inline std::string valueRefsCountKeyJson( const IngestResult& ing, const ValueRefRows& rows, const VrRender& rr )
-{
-    return countFieldOrEmpty( "value_refs", rows.rows.size(), /*json=*/true ) + valueRefsDepthKeyJson( ing, rows.depthCut, rr );
-}
+inline std::string valueRefsCountAttrXml( std::size_t n ) { return countFieldOrEmpty( "value_refs", n, /*json=*/false ); }
+inline std::string valueRefsCountKeyJson( std::size_t n ) { return countFieldOrEmpty( "value_refs", n, /*json=*/true ); }
 // The legend clause for the depth attributes, exactly when an answer about these rows carries them.
 inline const char* valueRefsDepthLegendFor( const ValueRefRows& rows ) noexcept
 {
