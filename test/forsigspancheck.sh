@@ -37,6 +37,9 @@
 #        non-blank line is indented no deeper than the def, or EOF). e= sits right after l=.
 #   (U)  unknown extent: Sampler_window and SampleWindow (extent_suspect="head") and every docs/*.md row carry NO
 #        e=; every other <d> row carries one (a present e= is never dropped silently either).
+#   (B)  an explicit --token-budget TIGHTER than the default signature budget (1200 tokens): no e= row and no e= clause,
+#        XML and JSON (the budget's rows and est_tokens promise stay what they were; charging e= there cost rows, exempting
+#        it broke the promise). Twin: --token-budget=8000 (above the default share) carries e= on its rows.
 #   (O)  outside --for: --pack-signatures <d> rows and the default map's rows carry no e=.
 #   (H)  hop slots: TS — contextHost (only callee: a name-only `bag.lookup()`) has no <h> row; createContext keeps
 #        one. Python — Downloader.pull (only callee: a name-only `source.fetch_entry()`) has no <h> row; fetch_entry
@@ -212,6 +215,22 @@ fi
 JE="$( ask js run 'How does a queued job get run?' )"
 if ran_ok "$JE" "E/JS"; then
     oracle "$JE" "E+U/JS" "$CORPUS/js"
+fi
+
+echo "(B) an explicit token budget: no e= at all (its rows and its est_tokens promise stay what they were)"
+for spec in "xml|" "json|--json"; do
+    tag="${spec%%|*}"; extra="${spec#*|}"; f="$TMP/ts.budget.$tag"
+    if [ -n "$extra" ]; then run ts "$f" "--for=How is a per-request context created?" --token-budget=1200 "$extra"; else run ts "$f" "--for=How is a per-request context created?" --token-budget=1200; fi
+    if ran_ok "$f" "B/$tag"; then
+        if ! grep -q -e '<d ' -e '"sigs"' "$f"; then no "B/$tag: no rows to check (premise)"
+        elif grep -Eq ' e="[0-9]+"|,"e":[0-9]+|e= on a d row|d e= its last line' "$f"; then no "B/$tag: a budgeted answer carries e= or its legend clause"
+        else ok "B/$tag: --token-budget=1200 answer carries no e= and no e= clause"; fi
+    fi
+done
+
+W8="$TMP/ts.budget8000"; run ts "$W8" "--for=How is a per-request context created?" --token-budget=8000
+if ran_ok "$W8" "B twin"; then
+    if grep -Eq '<d l="[0-9]+" e="[0-9]+"' "$W8"; then ok "B twin: --token-budget=8000 (at or above the default share) carries e="; else no "B twin: --token-budget=8000 carries no e="; fi
 fi
 
 echo "(O) outside --for: no e= on other verbs' rows"

@@ -2119,7 +2119,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     bool mcpForEndLinePresent = false;
     for( std::size_t i = 0; i < ing.symbols.size() && !mcpForEndLinePresent; ++i )
     {
-        mcpForEndLinePresent = lensRank[i] > 0 && rw::mayCarryEndLine( ing.symbols[i] );
+        mcpForEndLinePresent = rw::endLinesFitCeiling( budgetTokens, false ) && lensRank[i] > 0 && rw::mayCarryEndLine( ing.symbols[i] );
     }
     const std::string_view mcpEndLineLegend = mcpForEndLinePresent ? rw::kForEndLineLegend : std::string_view();
     // ONE decision, read twice below: appended into the header here, subtracted from the sigs charge there.
@@ -2191,7 +2191,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     const std::size_t mcpIdRouteExemptBytes = mcpIdRouteParts.bytes();
     const std::size_t mcpAtLegendExemptBytes = !flRootArg.empty() && !mcpForAtAttrStr.empty() ? rw::kForAtStampProse.size() : 0;   // r2-LO, above
     // e=: a disclosure on the same contract (the CLI twin exempts the same clause)
-    const std::size_t mcpEndLineExemptBytes = budgetTokens > 0 ? 0u : mcpEndLineLegend.size();   // charged under budget_tokens
+    const std::size_t mcpEndLineExemptBytes = mcpEndLineLegend.size();
     const std::size_t fixedBytes = headerStr.size() - rw::kForFileTailLegend.size() - mcpConfidenceExemptBytes - mcpIdRouteExemptBytes - mcpAtLegendExemptBytes
                                  - mcpEndLineExemptBytes + legoStr.size() + composeStr.size() + routeStr.size() + 6;   // + "</ctx>"
     const std::size_t sigsBudget = forBudgetBytes > fixedBytes ? forBudgetBytes - fixedBytes : 1;   // ≥1: 0 = "no budget"
@@ -2218,7 +2218,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
                         notesPtr,                             // L3: field-notes surfacing (inert when null)
                         flRootArg,                            // R-E: root-relative p=, same argument the CLI twin passes
                         rw::forLensRules( !noRoute && !taskAsksAboutDocs( task ) && !std::getenv( "RIPWIRE_NO_DOCS_AFTER_CODE" ),
-                                          /*explicitCeiling=*/budgetTokens > 0 ),   // LB-A, e=, docs reorder
+                                          rw::endLinesFitCeiling( budgetTokens, /*bodyCeiling=*/false ) ),   // LB-A, e=, docs reorder
                         &mcpDroppedPositive,                  // A2: exact count, see droppedPositiveCount (serialize.h)
                         &mcpShownIds,                         // lane 2: see verbs_for.h shownSigIds
                         &mcpSigsCapped,                       // the ladder's own verdict — see the budget_bytes= splice below
