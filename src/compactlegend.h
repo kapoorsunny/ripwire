@@ -60,7 +60,7 @@ struct CompactLegendSpec
 inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
 {
     // ── the ranked-map family (root <r>) — hinted by the map-shaping flag that rode along ──
-    { "r",   "map",        "ranked symbol map: <f p= layer=> groups <s t= n= sc= k= amb=> rows (k= rank), <c n=> resolved callees (or <s calls=a,b>); the header comment is data" },
+    { "r",   "map",        "ranked symbol map: <f p= layer=> groups <s t= n= sc= k= amb=> rows (k= rank), <c n=> resolved callees; the header comment is data" },
     { "r",   "map-diff",   "the ranked map anchored at at=: what the diff touched, the map's row vocabulary" },
     { "r",   "metrics",    "the ranked map with per-symbol metrics: in/out, cx/ccx, loc, params, nest, humps/deep, locals, cbo, amp, tested, ev" },
     { "r",   "around",     "call neighbourhood of of=: depth= hops, fanout= kept per hop; absent rows lie outside that boundary" },
@@ -567,7 +567,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // ELEMENT-qualified on <ctx>. compactlegendcheck (D36)/(D37).
     { "r",                 "<d r=N>: rank N in this ranking, rows in r= order", true, "d" },
     // lean-answers lane (serialize.h, the map's callee rows): present only where a row joined its callees.
-    { "calls",             "<s calls=a,b>: its resolved callees comma-joined in order, the <c n=> rows of a row none of whose calls carries an attribute", true, "s" },
+    { "calls",             "<s calls=a,b>: its <c n=> callees, comma-joined", true, "s" },
     { "ccx",               "<d cx= ccx=>: cyclomatic/cognitive complexity", true, "d" },
     { "in",                "<d in=N>: N callers in the index (absent: not measured)", true, "d" },
     { "amp",               "<d amp=N>: direct callers + files sharing a commit with its file (absent at 0)", true, "d" },
@@ -932,9 +932,9 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "worktree", "worktree=read|partial|unlisted: the checkout differs from HEAD (at= +dirty); each changed path is read from disk as ref=\"worktree\" rows replacing HEAD's, and on-head=/hits=/head_labels= count them; on-head= then reads the checkout, not HEAD's commit; partial = some changed path unreadable or a directory (nested repo, submodule), its HEAD rows may be stale; unlisted = git could not list the changes; either withholds complete=", false, "whereis", MapHeaderRead::No, {}, "whereis" },
     { "hits", "more hits=N: rows after this page; page on with offset=next_offset", true, "more", MapHeaderRead::No, {}, "whereis" },
     // lean-answers lane (crossref.h WhereisListing / the tip-date hoist): each rides only the answer that carries it.
-    { "listing", "listing=defs: kind=def rows only, the kind=ref rows counted by refs count= (next= lists them); refs: kind=ref rows only; the window counts listed rows, hits= all", false, "whereis", MapHeaderRead::No, {}, "whereis" },
-    { "head_date", "head_date=: a hit without tip= date= is on HEAD's commit: tip= is at=, date= is this", false, "whereis", MapHeaderRead::No, {}, "whereis" },
-    { "count", "refs count=N: the kind=ref rows not listed", true, "refs", MapHeaderRead::No, {}, "whereis" },
+    { "listing", "listing=defs|refs: only those kind= rows listed (defs: refs counted in refs count=, its next= lists them); the window counts listed rows", false, "whereis", MapHeaderRead::No, {}, "whereis" },
+    { "head_date", "head_date=: a hit without tip= date= has tip= at=, date= this", false, "whereis", MapHeaderRead::No, {}, "whereis" },
+    { "count", "refs count=N: kind=ref rows not listed", true, "refs", MapHeaderRead::No, {}, "whereis" },
     // the GREY ZONE of the same sweep: attributes the compact prose named in passing ("in/out, cx/ccx", "<g> groups") but never
     // DEFINED as name= — legendcoveragecheck's default rows hold the definitional predicate, so each gets its reading here.
     // affected: src/verbs_change.h runAffected
@@ -991,7 +991,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // doc-drift: src/docdrift.h
     { "filter", "filter=: the path filter this run was narrowed to; docs outside it were not checked", false, "doc-drift", MapHeaderRead::No, {}, "doc-drift" },
     // whereis: src/crossref.h (the exhaustiveness claim)
-    { "complete", "complete=1: the scan read every ref AND this page lists every hit of its listing (absent: one of the two is a floor)", false, "whereis", MapHeaderRead::No, {}, "whereis" },
+    { "complete", "complete=1: the scan read every ref AND this page lists every hit (of its listing=) (absent: one of the two is a floor)", false, "whereis", MapHeaderRead::No, {}, "whereis" },
     // plan-lint: src/planlint.h
     { "file", "file=/dialect=: the plan read and whether the PLAN dialect was detected (dialect=0: nothing to lint)", false, "plan-lint", MapHeaderRead::No, {}, "plan-lint" },   // also defines dialect=
     { "cards", "cards=/ledger=: card rows found / whether the doc carries a ledger (ledger_line= names its line)", false, "plan-lint", MapHeaderRead::No, {}, "plan-lint" },   // also defines ledger=

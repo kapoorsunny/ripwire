@@ -284,7 +284,11 @@ tools = json.loads( line )[ "result" ][ "tools" ]
 # description, so each says "value uses (tables, args), not a proven call" (+70 B and +71 B, 141 B in all, no schema
 # byte moved, no tool added). Headroom after this line: 28 B (the final review tightened a first 46,800 anchor to the
 # #214-sized margin: 78 B of unattributed headroom was wider than any re-anchor here has taken).
-CEILING = 46750
+# RE-ANCHORED 2026-10-04 (lane/lean-answers-068): 46,750 -> 46,850, measured 46,828 (from 46,732, 33 tools). ONE DECLARED
+# ARGUMENT, no prose: whereis takes `listing` (defs|refs|all, the CLI --whereis-listing= twin), whose default (defs) lists the
+# definitions and counts the references. Attributed: whereis schema 714 -> 810 B (+96 B, the field and its obliged
+# description), whereis description unchanged at 701 B, every other tool unchanged. Headroom after this line: 22 B.
+CEILING = 46850
 manifest = len( json.dumps( { "tools": tools }, separators = ( ",", ":" ) ) )
 descBytes   = sum( len( t[ "description" ] ) for t in tools )
 schemaBytes = sum( len( json.dumps( t[ "inputSchema" ], separators = ( ",", ":" ) ) ) for t in tools )
