@@ -72,7 +72,8 @@
 #   (F) propagation: --callers and --impact of the in-repo decoys no longer list the false callers.
 #   (G) disclosure: every call the arms above unbind is a `C external` census row (empty targets) — except a Python bare
 #            name nothing binds and no builtin table holds (run_all's `process`, siblings.py's `helper`), which has no
-#            in-repo target and no proof of an outside one: it is unresolved=, no census row at all; each root's map
+#            in-repo target and no proof of an outside one: it is unresolved=, no census row at all, and the py and c
+#            roots pin their census unresolved= to exactly the sites named (an omitted call cannot pass); each root's map
 #            header external= equals its census `# dispositions external=` and is at least the number of expected
 #            external rows; every root's dispositions still sum to calls= with unaccounted=0.
 #   (H) MCP twins (fresh TMPDIR cache): find_referencing_symbols / find_symbol name exactly the rows the CLI's
@@ -387,6 +388,7 @@ externals goreplace quoted/app/remote.go UseRemote Quote
 # (counted unresolved=), never a C external row and never a bound one
 unresolved_site(){
     local r="$1" file="$2" caller="$3" callee="$4"
+    printf '%s %s %s\n' "$file" "$caller" "$callee" >>"$TMP/$r.nunres"   # the pin below counts the sites named per root
     if python3 - "$TMP/$r.tsv" "$file" "$caller" "$callee" <<'PY'
 import sys
 census, path, caller, callee = sys.argv[ 1: ]
@@ -405,6 +407,20 @@ unresolved_site py src/ui/widget.py run_all process
 unresolved_site py src/ui/siblings.py run helper
 externals py src/ui/widget.py read_config open
 unresolved_site c copy.c classify find_type
+# unresolved_site reads an ABSENT census row, so a call extraction dropped would pass it too (CodeRabbit on #372). Each
+# root that names unresolved sites therefore pins its census `unresolved=` to exactly the number it names: a dropped call
+# lowers the count (red), and a new unresolved call in the fixture raises it (red until an arm names that site too).
+unresolved_pinned(){
+    local r="$1" want got
+    want="$( sort -u "$TMP/$r.nunres" 2>/dev/null | wc -l | tr -d ' ' )"
+    got="$( grep -m1 '^# dispositions ' "$TMP/$r.tsv" 2>/dev/null | grep -oE ' unresolved=[0-9]+' | grep -oE '[0-9]+$' )"
+    if [ -z "$got" ]; then no "(G) ($r) the census dispositions carry no unresolved= count — the pin cannot be read"
+    elif [ "$want" -lt 1 ]; then no "(G) ($r) no unresolved site is named for this root — the pin would be vacuous"
+    elif [ "$got" -ne "$want" ]; then no "(G) ($r) census unresolved=$got, but this gate names $want unresolved site(s): $( tr '\n' ';' <"$TMP/$r.nunres" )"
+    else ok "(G) ($r) census unresolved=$got == the $want site(s) named above: each was extracted and left unresolved"; fi
+}
+unresolved_pinned py
+unresolved_pinned c
 externals c window.c elapsed clock
 externals rs src/lib.rs draw render
 for r in $ROOTS; do
