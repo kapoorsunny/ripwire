@@ -102,22 +102,12 @@ void emitGrepHandleLegend( bool enabled )
                  "means no content hash could be proven. -->" );
 }
 
-void emitGrepEncRows( const rw::IngestResult& ing, const rw::Graph& g, std::span<const rw::GrepHit> hits,
-                      const GrepEncOptions& opt )
+void emitGrepEncRows( const rw::IngestResult& ing, const rw::Graph& g, std::span<const rw::GrepEncRow> rows,
+                      std::span<const rw::CallerFloor> floors, const GrepEncOptions& opt )
 {
     using namespace rw;
     GrepHandleAttrs handleAttrs( ing, g, opt.handles, opt.root );
-    const std::vector<GrepEncRow> rows = grepEnclosingRows( ing, g, hits );
-    // count-floor: callers= beside evidence of a miss for THAT row is a floor (countfloor.h); the MCP twin calls the same
-    // function over the same rows (mcpverbs.h grepEnclosingJson), so the two surfaces cannot disagree.
-    std::vector<std::vector<NodeId>> rowIds;
-    rowIds.reserve( rows.size() );
-    for( const GrepEncRow& row : rows )
-    {
-        rowIds.push_back( row.ids );
-    }
-    const std::vector<CallerFloor> floors = callerFloors( ing, g, rowIds );
-    ENSURES( floors.size() == rows.size() );
+    EXPECTS( floors.size() == rows.size() );   // emitGrepReport computes both from the same page (grepEncFloors)
     for( std::size_t r = 0; r < rows.size(); ++r )
     {
         const GrepEncRow& row = rows[r];
@@ -159,6 +149,28 @@ void emitGrepEncRows( const rw::IngestResult& ing, const rw::Graph& g, std::span
         rw::emitTo( stdout, "/>" );
     }
 }
+
+// count-floor: callers= beside evidence of a miss for THAT row is a floor (countfloor.h). Computed once per page, before
+// the legend, so the full dialect defines callers_floor= exactly when a row carries it; the MCP twin calls the same
+// function over the same rows (mcpverbs.h grepEnclosingJson), so the two surfaces cannot disagree.
+std::vector<rw::CallerFloor> grepEncFloors( const rw::IngestResult& ing, const rw::Graph& g, std::span<const rw::GrepEncRow> rows )
+{
+    std::vector<std::vector<rw::NodeId>> rowIds;
+    rowIds.reserve( rows.size() );
+    for( const rw::GrepEncRow& row : rows )
+    {
+        rowIds.push_back( row.ids );
+    }
+    return rw::callerFloors( ing, g, rowIds );
+}
+
+// count-floor (countfloor.h): the full dialect's reading of a row's own floor marker — no attribute=value literal (this
+// legend's rule) — spliced only when a row on the page carries it, so a page without one keeps every byte.
+inline constexpr const char* kGrepEncFloorClause =
+    "callers_floor= (value 1, present only on such a row) marks a count the index holds evidence of a miss for: a declined or "
+    "unbound call spelled like the name, a use as a value, or a kind used by reading or naming it (a variable, a class, an "
+    "interface); it is not proof more callers exist, and its absence means the index holds no such evidence. floor_next= is "
+    "the call that lists what that count could not see (the uses verb, or this literal scan where reads are never indexed); ";
 
 // R1a <suggest> emission, lifted out of emitGrepReport for the same reason. What to suggest is
 // search.h's grepZeroHitSuggestions (shared with the MCP twin); this is pure serialization.
@@ -684,6 +696,9 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     const PageWindow           grepPage = pageWindow( hitCount, rowCap, cfg.pageOffset );
     const std::vector<GrepHit> hits     = grepEnrich( ing, std::span<const GrepRawHit>( found.raw ).subspan( grepPage.begin, grepPage.end - grepPage.begin ),
                                                       cfg.grepBefore, cfg.grepAfter );
+    const std::vector<GrepEncRow>  encRows   = grepEnclosingRows( ing, g, std::span<const GrepHit>( hits ) );   // R1b, before the legend
+    const std::vector<CallerFloor> encFloors = grepEncFloors( ing, g, encRows );
+    const bool anyEncFloor = std::ranges::any_of( encFloors, []( const CallerFloor& f ) { return f.isFloor; } );
     std::vector<char> esc;
     const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
     // CDATA-safe a context block: split any ]]> (would prematurely close the CDATA) and scrub XML-illegal
@@ -831,11 +846,7 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
                  // parse this verb's header counters by grep, and a quoted numeric example here would be matched first — the quality-delta legend's rule.
                  "After the hit rows, <enc> rows list each DISTINCT enclosing symbol NAME of THIS page (first-appearance order, bounded by the page) with callers= its 1-hop DISTINCT-caller count, "
                  "unioned across same-named defs like the callers verb (a FLOOR — dynamic dispatch contributes no edge), defs= how many defs the name grouped (only when more than one), cx= complexity; "
-                 // count-floor (countfloor.h): the row's own marker, no attribute=value literal (this legend's rule).
-                 "callers_floor= (value 1, present only on such a row) marks a count the index holds evidence of a miss for: a declined or "
-                 "unbound call spelled like the name, a use as a value, or a kind used by reading or naming it (a variable, a class, an "
-                 "interface); it is not proof more callers exist, and its absence means the index holds no such evidence. floor_next= is "
-                 "the call that lists what that count could not see (the uses verb, or this literal scan where reads are never indexed); "
+                 "{}"   // count-floor: kGrepEncFloorClause, present-only (a row on this page carries callers_floor=)
                  "amp=/tested= join only when a metrics co-run already computed that lens. On a zero-hit answer a <suggest> element may follow: SUGGESTIONS, never matches — near= the nearest indexed "
                  "symbol name (did-you-mean), next= a ready-to-paste conceptual fallback; absent for regex/non-word-like patterns or when nothing plausible exists. "
                  // T1: the completeness claim, defined where it appears (no attribute=value literal in these
@@ -888,7 +899,7 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
                  // P3 (L7): next= on the root, defined where the reader meets it
                  "next= is the one pasteable follow-up: the at verb on the top hit; the next page (compact legend) when cut; "
                  "the conceptual lens on a zero-hit answer. "
-                 "{} -->", rw::kPageRaiseCapClause );
+                 "{} -->", anyEncFloor ? kGrepEncFloorClause : "", rw::kPageRaiseCapClause );
     }
     emitGrepHandleLegend( cfg.grepHandles );
     // G3: terms=/scope=/suppressed= — only when AND/NOT was actually given, so a plain --grep answer
@@ -1029,7 +1040,7 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     // ── R1b: the <enc> block — the map's context on the answer, no second call (helper above) ──────
     const GrepEncOptions encOpt{ amp, tested, cfg.grepHandles,
                                 cfg.roots.size() == 1 ? cfg.roots[0] : std::string_view(), esc };
-    emitGrepEncRows( ing, g, std::span<const GrepHit>( hits ), encOpt );
+    emitGrepEncRows( ing, g, encRows, encFloors, encOpt );
 
     // ── R1a: the zero-hit follow-up — suggestions, labeled as such, never matches (helper above) ───
     // §R-J: also suppressed when the AUX block found the pattern — a real hit in queries/cpp/tags.scm is not

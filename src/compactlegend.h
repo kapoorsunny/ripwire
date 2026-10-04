@@ -837,10 +837,10 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "callers_floor", "callers_floor=1: callers= may be short for this row: a declined or unbound call spelled like it, a value use, or a kind used by reading/naming it (var, class, struct, interface); not proof more callers exist; absent = no such evidence", true, "enc", MapHeaderRead::No, {}, "grep" },
     { "floor_next", "floor_next=: the call that lists what that count could not see (the uses verb; the literal scan where reads are not indexed)", true, "enc", MapHeaderRead::No, {}, "grep" },
     // count-floor + CALLSITE-LINE on safe-delete (src/verbs_navigate.h runSafeDelete): root markers beside the counts they qualify.
-    { "callers_floor", "callers_floor=1: callers= and impact_reaches= may be short: a declined or unbound call spelled like sym=, a value use, or a kind used by reading/naming it; not proof more exist", false, {}, MapHeaderRead::No, {}, "safe-delete" },
-    { "uses_floor", "uses_floor=1: uses= cannot see this kind's reads or type mentions in this run; a zero there is not a count of its uses", false, {}, MapHeaderRead::No, {}, "safe-delete" },
-    { "risk", "risk=unmodelled: nothing found, but the counts are blind to this kind's uses; no reading either way, next= lists them", false, "safe-delete", MapHeaderRead::No, "unmodelled", "safe-delete" },
-    { "sites_l", "c sites_l=: that caller's call-site LINES spelled like sym= (p= is where the caller is defined); not proof each binds here", true, "c", MapHeaderRead::No, {}, "safe-delete" },
+    { "callers_floor", "callers_floor=1: callers= and impact_reaches= may be short (a declined, unbound or value use, or a kind read not called); not proof of more", false, {}, MapHeaderRead::No, {}, "safe-delete" },
+    { "uses_floor", "uses_floor=1: this kind's reads and type mentions are not indexed in this run; uses= does not count them", false, {}, MapHeaderRead::No, {}, "safe-delete" },
+    { "risk", "risk=unmodelled: nothing found, but the counts cannot see this kind's uses; next= lists them", false, "safe-delete", MapHeaderRead::No, "unmodelled", "safe-delete" },
+    { "sites_l", "c sites_l=: its call-site lines (p= is the caller's def line); not proof each binds here", true, "c", MapHeaderRead::No, {}, "safe-delete" },
     // count-floor on the targeted lego verb (serialize.h packLego, countfloor.h implementorFloors): present-only.
     { "implementors_floor", "implementors_floor=1: an extends clause spelled like this interface bound nowhere; implementors= may be short (not proof of another)", true, "iface", MapHeaderRead::No, {}, "lego" },
     { "floor_next", "floor_next=: lists every extends site of the name, bound or not", true, "iface", MapHeaderRead::No, {}, "lego" },

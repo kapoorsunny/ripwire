@@ -500,6 +500,12 @@ probeFor()
 # --impact=distance probe; 797 on the base binary b343b988). The answer now carries by_depth= on the root and d= on its
 # first <s> row (the listing runs nearest first, graph.h orderByDepthThenRank), and the compact legend reads both: the
 # present-only <s d=N> row (+64 B with its separator) and by_depth= (+63 B). Both are absent at reaches="0". No other schema moved.
+# RE-PINNED 2026-10-04 (lane count-floor-068, CALLSITE-LINE): ripwire.safe-delete/v1 720 -> 820 (measured 805, the
+# --safe-delete=distance probe; 715 on the base binary 255dc199). Each caller row now carries sites_l=, its call-site LINES
+# beside p= (the caller's definition line): an edit decision needs the lines to open, and graded answers that named every
+# caller were scored wrong for printing only definition lines. The compact legend reads it (+90 B with its separator: what
+# it is, and that it is not proof each line binds to this definition). callers_floor=/uses_floor=/risk=unmodelled are
+# present-only and ride neither this probe nor any other pinned one. No other schema moved.
 # RE-PINNED BACK 2026-09-30 (train22 fixups, review M2): ripwire.scan-skills/v1 520 -> 380 (measured 369). An earlier commit on
 # this branch pinned 520 from the developer's own HOME (a Codex install's .py helpers made the answer carry
 # code_not_flow_scanned=); the gate now runs under an empty HOME of its own, so the probe measures the same bytes everywhere.
@@ -566,7 +572,7 @@ ripwire.callers/v1               330   317
 ripwire.callees/v1                500   484
 ripwire.uses/v1                   510   500
 ripwire.batch/v1                  250   238
-ripwire.safe-delete/v1           720   708
+ripwire.safe-delete/v1           820   805
 ripwire.at/v1                    180   161
 ripwire.from-trace/v1            1300  1281
 ripwire.plan-lint/v1              570   551
