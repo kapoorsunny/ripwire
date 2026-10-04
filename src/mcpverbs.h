@@ -2196,6 +2196,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     const std::size_t mcpIdRouteExemptBytes = mcpIdRouteParts.bytes();
     const std::size_t mcpAtLegendExemptBytes = !flRootArg.empty() && !mcpForAtAttrStr.empty() ? rw::kForAtStampProse.size() : 0;   // r2-LO, above
     const std::size_t fixedBytes = headerStr.size() - rw::kForFileTailLegend.size() - mcpConfidenceExemptBytes - mcpIdRouteExemptBytes - mcpAtLegendExemptBytes
+                                 - rw::forZeroNoteBytes( headerStr )   // lean-answers: the zero reading never costs a row
                                  + legoStr.size() + composeStr.size() + routeStr.size() + 6;   // + "</ctx>"
     const std::size_t sigsBudget = forBudgetBytes > fixedBytes ? forBudgetBytes - fixedBytes : 1;   // ≥1: 0 = "no budget"
 

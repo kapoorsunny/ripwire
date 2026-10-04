@@ -744,6 +744,9 @@ inline constexpr std::string_view kForCompactLegendRows =
 inline constexpr std::string_view kForCompactLegendRowsNoScope =
     "d: cx= ccx= complexity, in= callers (absent cx/ccx/in = 0), churn= amp= change, clone= tested= 1; "
     "total= shown= capped=1 if cut";
+static_assert( kForCompactLegendRows.find( rw::kForZeroAbsentCompactNote ) != std::string_view::npos
+               && kForCompactLegendRowsNoScope.find( rw::kForZeroAbsentCompactNote ) != std::string_view::npos,
+               "the compact zero reading is the exempt note, verbatim (graphlegend.h forZeroNoteBytes)" );
 // L1 fix round (2026-09-19, rv-r1-L1 HIGH-1): task= (the root's echo of the query), next= (the follow-up on a <d> row), pure=
 // (a <d> row flag) and the <compose><field> rows rode every default answer with no reading in either dialect;
 // legendcoveragecheck's default rows now fail on that. Charged like the rows clause; runForLens caps the compact charge at
@@ -1447,7 +1450,8 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     constexpr std::size_t kJsonSurfaceCountsBytes = 96;
     const std::size_t bundleBudget = in.tokenBudget > 0 ? budgetBytesForTokens( in.tokenBudget )
                                                         : kForPayloadBudgetBytes;
-    const std::size_t fixedBytes = header.size() + kJsonEnvelopeBytes + kJsonSurfaceCountsBytes
+    const std::size_t fixedBytes = header.size() - std::min( header.size(), rw::forZeroNoteBytes( header ) )   // lean-answers: exempt
+                                  + kJsonEnvelopeBytes + kJsonSurfaceCountsBytes
                                   + ( in.noteIndex ? kJsonNotesStanzaBytes : 0 );
     const std::size_t sigsBudget = bundleBudget > fixedBytes ? bundleBudget - fixedBytes : 1;
 
@@ -2899,6 +2903,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             DISCLOSE( "runForLens: header exemptions exceed the emitted header — the sig ledger would underflow; charging the header whole" );
         }
         std::size_t chargedHeaderBytes = exemptBytes > headerStr.size() ? headerStr.size() : headerStr.size() - exemptBytes;
+        chargedHeaderBytes -= std::min( chargedHeaderBytes, rw::forZeroNoteBytes( headerStr ) );   // lean-answers: the zero reading never costs a row
         // L1 fix round (rv-r1-L1 HIGH-1 / MED-5): THE DEFAULT NEVER CHARGES ITS SIGNATURES MORE HEADER THAN --legend=full WOULD.
         // The compact header now defines task=/next=/pure=/<field> (kForCompactLegendFacts), and charging those bytes cost the
         // default a signature row --legend=full carried (compactlegendcheck (P1): 19 vs 20 rows at --token-budget=3000); making
@@ -2910,11 +2915,13 @@ std::optional<int> runForLens( const MainDispatch& d )
         {
             ForLensHeaderParts fullParts = headerParts;
             fullParts.compactLegend = false;
-            const std::size_t fullHeaderBytes = forLensHeaderText( fullParts, /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} ).size();
+            const std::string fullHeader      = forLensHeaderText( fullParts, /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
+            const std::size_t fullHeaderBytes = fullHeader.size();
             const std::size_t fullExempt      = adaptiveNote.size() + enrichmentLegendBytesEmitted( plan, false )
                                               + confidenceEarlyAttrsBytes + confidenceEarlyNoteBytes + forAtAttrStr.size()
                                               + rw::kForFileTailLegend.size() + idRouteParts.bytes();
-            const std::size_t fullCharged     = fullExempt > fullHeaderBytes ? fullHeaderBytes : fullHeaderBytes - fullExempt;
+            std::size_t       fullCharged     = fullExempt > fullHeaderBytes ? fullHeaderBytes : fullHeaderBytes - fullExempt;
+            fullCharged -= std::min( fullCharged, rw::forZeroNoteBytes( fullHeader ) );   // lean-answers: exempt, as above
             chargedHeaderBytes = std::min( chargedHeaderBytes, fullCharged );
         }
         const std::size_t fixedBytes = chargedHeaderBytes + legoStr.size() + composeStr.size() + routeStr.size() + 6;   // + "</ctx>"
