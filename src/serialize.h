@@ -4192,6 +4192,36 @@ inline std::string lensRowPath( const IngestResult& ing, std::uint32_t fileId, s
                            : std::string( rw::sarif::rootRelativeUri( ing.files[ fileId ], rw::sarif::rootPrefixOf( rootArg ) ) );
 }
 
+// The descriptive tail of one "<d …>" row, after p=/layer= and through the closing '>': cx=/ccx=/in= under facts.metrics
+// (each omitted at 0 where sigRowElidesZero), the Q3 lens + pure, then r=. Split out of sigRowHead so the head stays a head.
+inline void sigRowTail( char* tail, std::size_t cap, const Symbol& s, const SigRowFacts& facts, NodeId id, const char* rankAttr )
+{
+    if( facts.metrics && sigRowElidesZero( facts, id ) )
+    {
+        // lean-answers lane: the same three facts, each omitted at 0 (the lens legend: absent = 0)
+        char cxAttr[ 24 ];  cxAttr[ 0 ] = '\0';
+        char ccxAttr[ 24 ]; ccxAttr[ 0 ] = '\0';
+        char inAttr[ 24 ];  inAttr[ 0 ] = '\0';
+        if( s.cx != 0 )                    { rw::formatTo( cxAttr, sizeof( cxAttr ), " cx=\"{}\"", s.cx ); }
+        if( s.ccx != 0 )                   { rw::formatTo( ccxAttr, sizeof( ccxAttr ), " ccx=\"{}\"", s.ccx ); }
+        if( ( *facts.fanIn )[ id ] != 0 )  { rw::formatTo( inAttr, sizeof( inAttr ), " in=\"{}\"", ( *facts.fanIn )[ id ] ); }
+        rw::formatTo( tail, cap, "{}{}{}{}{}{}>", rw::cstr( cxAttr ), rw::cstr( ccxAttr ), rw::cstr( inAttr ), facts.lens, facts.pure, rankAttr );
+    }
+    else if( facts.metrics )
+    {
+        char inAttr[ 24 ];  inAttr[ 0 ] = '\0';
+        if( facts.fanIn && id < facts.fanIn->size() )
+        {
+            rw::formatTo( inAttr, sizeof( inAttr ), " in=\"{}\"", ( *facts.fanIn )[ id ] );
+        }
+        rw::formatTo( tail, cap, " cx=\"{}\" ccx=\"{}\"{}{}{}{}>", s.cx, s.ccx, rw::cstr( inAttr ), facts.lens, facts.pure, rankAttr );
+    }
+    else
+    {
+        rw::formatTo( tail, cap, "{}{}{}>", facts.lens, facts.pure, rankAttr );
+    }
+}
+
 // P2.3/P2.4 — the exact "<d …>" opening tag of ONE signature row, defined once so the two-phase (globally
 // budgeted) emitter and the streaming emitter can never drift by a byte: the budget ledger measures exactly
 // the string this returns.
@@ -4237,30 +4267,7 @@ inline std::string sigRowHead( const IngestResult& ing, NodeId id, const SigRowF
         rw::formatTo( rankAttr, sizeof( rankAttr ), " r=\"{}\"", facts.rank );
     }
     char tail[ 224 ];
-    if( facts.metrics && sigRowElidesZero( facts, id ) )
-    {
-        // lean-answers lane: the same three facts, each omitted at 0 (the lens legend: absent = 0)
-        char cxAttr[ 24 ];  cxAttr[ 0 ] = '\0';
-        char ccxAttr[ 24 ]; ccxAttr[ 0 ] = '\0';
-        char inAttr[ 24 ];  inAttr[ 0 ] = '\0';
-        if( s.cx != 0 )                    { rw::formatTo( cxAttr, sizeof( cxAttr ), " cx=\"{}\"", s.cx ); }
-        if( s.ccx != 0 )                   { rw::formatTo( ccxAttr, sizeof( ccxAttr ), " ccx=\"{}\"", s.ccx ); }
-        if( ( *facts.fanIn )[ id ] != 0 )  { rw::formatTo( inAttr, sizeof( inAttr ), " in=\"{}\"", ( *facts.fanIn )[ id ] ); }
-        rw::formatTo( tail, sizeof( tail ), "{}{}{}{}{}{}>", rw::cstr( cxAttr ), rw::cstr( ccxAttr ), rw::cstr( inAttr ), facts.lens, facts.pure, rw::cstr( rankAttr ) );
-    }
-    else if( facts.metrics )
-    {
-        char inAttr[ 24 ];  inAttr[ 0 ] = '\0';
-        if( facts.fanIn && id < facts.fanIn->size() )
-        {
-            rw::formatTo( inAttr, sizeof( inAttr ), " in=\"{}\"", ( *facts.fanIn )[ id ] );
-        }
-        rw::formatTo( tail, sizeof( tail ), " cx=\"{}\" ccx=\"{}\"{}{}{}{}>", s.cx, s.ccx, rw::cstr( inAttr ), facts.lens, facts.pure, rw::cstr( rankAttr ) );
-    }
-    else
-    {
-        rw::formatTo( tail, sizeof( tail ), "{}{}{}>", facts.lens, facts.pure, rw::cstr( rankAttr ) );
-    }
+    sigRowTail( tail, sizeof( tail ), s, facts, id, rw::cstr( rankAttr ) );
     head += tail;
     // extent honesty (kExtentSuspectRowLegend): after r=, before next=, absent when every check held — so every
     // pre-existing adjacency on an unflagged row is byte-stable and the budget ledger still measures this string.

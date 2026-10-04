@@ -2905,6 +2905,111 @@ inline std::string whereisRefsNext( const WhereResult& res )
     return nextFlag( "--whereis=", res.sym ) + " --whereis-listing=refs";
 }
 
+// The page a --whereis answer prints: the listed rows and the window over them (writeWhereisPage's own reading of its
+// arguments, handed to the two writers below so neither re-derives it).
+struct WhereisPageView
+{
+    const ListedHits& listed;
+    PageWindow        page;
+    int               pageLimit  = 0;
+    int               pageOffset = 0;
+};
+
+// The <whereis …> open tag (writeWhereisPage).
+inline void writeWhereisRoot( std::FILE* out, const WhereResult& res, const WhereisPageView& v, const std::string& headDate,
+                              const XmlEscaper& ex )
+{
+    const ListedHits& listed      = v.listed;
+    const PageWindow& hitPage     = v.page;
+    const std::size_t listedCount = listed.rows.size();
+    const int         pageLimit   = v.pageLimit;
+    const int         pageOffset  = v.pageOffset;
+    char pab[ kPageDisclosureCap ];
+    // §A7(iii): refs_scanned=, not refs=. --stray-content and --abi both spell the MATCHED set refs=; this one
+    // counted every branch the sweep READ (73 here, matched or not) under the same attribute name — one noun,
+    // two meanings, across sibling verbs an agent reads together.
+    // T1: the claim is scan-exhaustiveness AND listing-wholeness — an uncut page over a clean scan. Appended
+    // LAST (after at=) so no existing attribute-adjacency assertion can break on it, the same placement rule
+    // the graph verbs' floor marker follows. When either half fails, NOTHING is added: the truncation
+    // vocabulary above already covers every partial shape, and complete-equals-zero would be noise.
+    // A dotted selector was searched as a literal the question did not mean: exhaustive over that literal, but not
+    // an answer to "where is Class.method", so it never claims (its selector-note below says why).
+    // listing= (WhereisListing): the claim reads the LISTED rows — under listing=defs every def row on this page (the
+    // ref rows are counted exactly by <refs count=>, never silently gone); under listing=refs every ref row.
+    const bool completeClaim = res.scanExhaustive && hitPage.begin == 0 && hitPage.end == listedCount && res.dottedRetry.empty();
+    // H14/M6: refs_scanned="80" under a ref-name filter is a total for the FILTER, not for the repo (the
+    // audit measured 80 filtered vs 189 unfiltered) — so the filter is named beside the number it bounds.
+    const std::string whFilterAttr = res.filter.empty() ? std::string() : ( " filter=\"" + ex( res.filter ) + "\"" );
+    // The overlay's two marks, both absent on a clean checkout (so its answer is byte-identical to before): +dirty
+    // on the stamp whenever a differing path was seen, and worktree= naming what the overlay managed.
+    static constexpr std::string_view kWorktreeAttr[] = { "", " worktree=\"read\"", " worktree=\"partial\"", " worktree=\"unlisted\"" };
+    const bool dirty = res.worktree == WorktreeOverlay::Read || res.worktree == WorktreeOverlay::Partial;
+    // THE HOIST (lossless): a checkout row on HEAD's own commit repeats tip= (= at= without +dirty) and date= (HEAD's
+    // committer date) on every row. Those rows omit both, and the root says the date ONCE (head_date=) — only when a
+    // printed row actually omitted it, so a page of branch rows alone is unchanged. Placed before at= so the at= /
+    // worktree= / complete= adjacency every existing assertion reads stays byte-stable.
+    bool              anyHoist  = false;
+    for( std::size_t k = hitPage.begin; k < hitPage.end; ++k )
+    {
+        anyHoist = anyHoist || whereisRowOnHeadCommit( res.hits[ listed.rows[ k ] ], res.headSha, headDate );
+    }
+    const std::string listingAttr  = listed.attr.empty() ? std::string() : ( " listing=\"" + std::string( listed.attr ) + "\"" );
+    const std::string headDateAttr = anyHoist ? ( " head_date=\"" + ex( headDate ) + "\"" ) : std::string();
+    rw::emitTo( out, "<whereis sym=\"{}\" on-head=\"{}\" refs_scanned=\"{}\" blobs=\"{}\" hits=\"{}\" head_labels=\"{}\"{}{}{}{} at=\"{:.9}{}\"{}{}>",
+                  ex( res.sym ).c_str(), res.onHead ? 1 : 0, res.refsScanned, res.distinctBlobs, res.hits.size(),
+                  res.headLabelsFromIndex ? "index" : "lexical", whFilterAttr.c_str(),
+                  pageDisclosure( pab, sizeof( pab ), hitPage.end - hitPage.begin, listedCount, hitPage.end,
+                                  pageLimit, pageOffset, true ),
+                  listingAttr.c_str(), headDateAttr.c_str(),
+                  res.headSha.c_str(), dirty ? "+dirty" : "",
+                  kWorktreeAttr[ std::size_t( res.worktree ) ],
+                  completeClaim ? " complete=\"1\"" : "" );
+
+}
+
+// The rows of the page, its <more hits=> remainder and the <refs count= next=> element (writeWhereisPage).
+inline void writeWhereisRows( std::FILE* out, const WhereResult& res, const ListedHits& listed, const PageWindow& hitPage,
+                              const std::string& headDate, const XmlEscaper& ex )
+{
+    const std::size_t listedCount = listed.rows.size();
+    // The <more/> contract, restated because it was false here: shown + dropped == the listed rows, ALWAYS. The
+    // count must be taken against the CAP, not against a loop variable `shown++ >= cap` has already pushed to
+    // cap+1 — that off-by-one under-reported every drop by exactly one row (81 hits, 60 shown, "20" dropped),
+    // and at exactly cap+1 hits `size > shown` went false, so the element vanished and a row disappeared
+    // unmarked. Nothing is dropped without a number is a headline claim; keep it arithmetically true.
+    std::size_t shownCount = 0;
+    for( std::size_t k = hitPage.begin; k < hitPage.end; ++k )
+    {
+        const WhereHit& h = res.hits[ listed.rows[ k ] ];
+        ++shownCount;
+        if( whereisRowOnHeadCommit( h, res.headSha, headDate ) )
+        {
+            rw::emitTo( out, "<hit ref=\"{}\" p=\"{}\" l=\"{}\" kind=\"{}\"{} t=\"{}\"/>",
+                          ex( h.ref ).c_str(), ex( h.path ).c_str(),
+                          h.line, h.isDef ? "def" : "ref", h.testLocal ? " test_local=\"1\"" : "", ex( h.text ).c_str() );
+            continue;
+        }
+        rw::emitTo( out, "<hit ref=\"{}\" tip=\"{:.9}\" date=\"{}\" p=\"{}\" l=\"{}\" kind=\"{}\"{} t=\"{}\"/>",
+                      ex( h.ref ).c_str(), h.tip.c_str(), ex( h.date ).c_str(), ex( h.path ).c_str(),
+                      h.line, h.isDef ? "def" : "ref", h.testLocal ? " test_local=\"1\"" : "", ex( h.text ).c_str() );
+    }
+    ASSUME( shownCount == hitPage.end - hitPage.begin );
+    // <more hits="N"/> = the LISTED rows AFTER this page, so shown + more == the listed rows from this page's offset
+    // on. Un-paginated that is the historic "listed rows minus the 60 printed"; paged it is what the NEXT page holds
+    // (and next_offset= on the root says where to ask for it).
+    if( hitPage.end < listedCount )
+    {
+        rw::emitTo( out, "<more hits=\"{}\"/>", listedCount - hitPage.end );
+    }
+    // The elided ref rows, COUNTED and one pasteable call away: count= is exact (every kind="ref" row of the hit list,
+    // whatever page this is), and next= lists exactly them. Not a <more> element: <more hits=> is this listing's own
+    // page remainder, and a reader (or a gate) that reads "<more" as "this page was cut" must not see one here.
+    if( listed.refsElided > 0 )
+    {
+        rw::emitTo( out, "<refs count=\"{}\"{}/>", listed.refsElided, nextAttrXml( whereisRefsNext( res ) ) );
+    }
+}
+
 // Contract-level defect: this verb said hits="2560" and printed 60, and
 // --limit/--offset were accepted and ignored, so a paging loop over it never advanced and never ended.
 // `pageLimit`/`pageOffset` (0 = un-paginated) window the hit list, which is already deterministically
@@ -3003,48 +3108,8 @@ inline void writeWhereisPage( std::FILE* out, const WhereResult& res, std::size_
                        "raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). " );
     writeWhereisLegendTail( out, res );
     std::fputs( "-->", out );
-    char pab[ kPageDisclosureCap ];
-    // §A7(iii): refs_scanned=, not refs=. --stray-content and --abi both spell the MATCHED set refs=; this one
-    // counted every branch the sweep READ (73 here, matched or not) under the same attribute name — one noun,
-    // two meanings, across sibling verbs an agent reads together.
-    // T1: the claim is scan-exhaustiveness AND listing-wholeness — an uncut page over a clean scan. Appended
-    // LAST (after at=) so no existing attribute-adjacency assertion can break on it, the same placement rule
-    // the graph verbs' floor marker follows. When either half fails, NOTHING is added: the truncation
-    // vocabulary above already covers every partial shape, and complete-equals-zero would be noise.
-    // A dotted selector was searched as a literal the question did not mean: exhaustive over that literal, but not
-    // an answer to "where is Class.method", so it never claims (its selector-note below says why).
-    // listing= (WhereisListing): the claim reads the LISTED rows — under listing=defs every def row on this page (the
-    // ref rows are counted exactly by <refs count=>, never silently gone); under listing=refs every ref row.
-    const bool completeClaim = res.scanExhaustive && hitPage.begin == 0 && hitPage.end == listedCount && res.dottedRetry.empty();
-    // H14/M6: refs_scanned="80" under a ref-name filter is a total for the FILTER, not for the repo (the
-    // audit measured 80 filtered vs 189 unfiltered) — so the filter is named beside the number it bounds.
-    const std::string whFilterAttr = res.filter.empty() ? std::string() : ( " filter=\"" + ex( res.filter ) + "\"" );
-    // The overlay's two marks, both absent on a clean checkout (so its answer is byte-identical to before): +dirty
-    // on the stamp whenever a differing path was seen, and worktree= naming what the overlay managed.
-    static constexpr std::string_view kWorktreeAttr[] = { "", " worktree=\"read\"", " worktree=\"partial\"", " worktree=\"unlisted\"" };
-    const bool dirty = res.worktree == WorktreeOverlay::Read || res.worktree == WorktreeOverlay::Partial;
-    // THE HOIST (lossless): a checkout row on HEAD's own commit repeats tip= (= at= without +dirty) and date= (HEAD's
-    // committer date) on every row. Those rows omit both, and the root says the date ONCE (head_date=) — only when a
-    // printed row actually omitted it, so a page of branch rows alone is unchanged. Placed before at= so the at= /
-    // worktree= / complete= adjacency every existing assertion reads stays byte-stable.
-    const std::string headDate  = whereisHeadDate( res );
-    bool              anyHoist  = false;
-    for( std::size_t k = hitPage.begin; k < hitPage.end; ++k )
-    {
-        anyHoist = anyHoist || whereisRowOnHeadCommit( res.hits[ listed.rows[ k ] ], res.headSha, headDate );
-    }
-    const std::string listingAttr  = listed.attr.empty() ? std::string() : ( " listing=\"" + std::string( listed.attr ) + "\"" );
-    const std::string headDateAttr = anyHoist ? ( " head_date=\"" + ex( headDate ) + "\"" ) : std::string();
-    rw::emitTo( out, "<whereis sym=\"{}\" on-head=\"{}\" refs_scanned=\"{}\" blobs=\"{}\" hits=\"{}\" head_labels=\"{}\"{}{}{}{} at=\"{:.9}{}\"{}{}>",
-                  ex( res.sym ).c_str(), res.onHead ? 1 : 0, res.refsScanned, res.distinctBlobs, res.hits.size(),
-                  res.headLabelsFromIndex ? "index" : "lexical", whFilterAttr.c_str(),
-                  pageDisclosure( pab, sizeof( pab ), hitPage.end - hitPage.begin, listedCount, hitPage.end,
-                                  pageLimit, pageOffset, true ),
-                  listingAttr.c_str(), headDateAttr.c_str(),
-                  res.headSha.c_str(), dirty ? "+dirty" : "",
-                  kWorktreeAttr[ std::size_t( res.worktree ) ],
-                  completeClaim ? " complete=\"1\"" : "" );
-
+    const std::string headDate = whereisHeadDate( res );
+    writeWhereisRoot( out, res, WhereisPageView{ listed, hitPage, pageLimit, pageOffset }, headDate, ex );
     writeWhereisSelectorNotes( out, res, ex );
 
     // The history lane, when it was asked for: what the probe did, then this symbol's own verdict.
@@ -3059,42 +3124,7 @@ inline void writeWhereisPage( std::FILE* out, const WhereResult& res, std::size_
     // row is printed unless the index itself already proved the symbol is defined on HEAD.
     writeWhereisFate( out, res, ex );
 
-    // The <more/> contract, restated because it was false here: shown + dropped == the listed rows, ALWAYS. The
-    // count must be taken against the CAP, not against a loop variable `shown++ >= cap` has already pushed to
-    // cap+1 — that off-by-one under-reported every drop by exactly one row (81 hits, 60 shown, "20" dropped),
-    // and at exactly cap+1 hits `size > shown` went false, so the element vanished and a row disappeared
-    // unmarked. Nothing is dropped without a number is a headline claim; keep it arithmetically true.
-    std::size_t shownCount = 0;
-    for( std::size_t k = hitPage.begin; k < hitPage.end; ++k )
-    {
-        const WhereHit& h = res.hits[ listed.rows[ k ] ];
-        ++shownCount;
-        if( whereisRowOnHeadCommit( h, res.headSha, headDate ) )
-        {
-            rw::emitTo( out, "<hit ref=\"{}\" p=\"{}\" l=\"{}\" kind=\"{}\"{} t=\"{}\"/>",
-                          ex( h.ref ).c_str(), ex( h.path ).c_str(),
-                          h.line, h.isDef ? "def" : "ref", h.testLocal ? " test_local=\"1\"" : "", ex( h.text ).c_str() );
-            continue;
-        }
-        rw::emitTo( out, "<hit ref=\"{}\" tip=\"{:.9}\" date=\"{}\" p=\"{}\" l=\"{}\" kind=\"{}\"{} t=\"{}\"/>",
-                      ex( h.ref ).c_str(), h.tip.c_str(), ex( h.date ).c_str(), ex( h.path ).c_str(),
-                      h.line, h.isDef ? "def" : "ref", h.testLocal ? " test_local=\"1\"" : "", ex( h.text ).c_str() );
-    }
-    ASSUME( shownCount == hitPage.end - hitPage.begin );
-    // <more hits="N"/> = the LISTED rows AFTER this page, so shown + more == the listed rows from this page's offset
-    // on. Un-paginated that is the historic "listed rows minus the 60 printed"; paged it is what the NEXT page holds
-    // (and next_offset= on the root says where to ask for it).
-    if( hitPage.end < listedCount )
-    {
-        rw::emitTo( out, "<more hits=\"{}\"/>", listedCount - hitPage.end );
-    }
-    // The elided ref rows, COUNTED and one pasteable call away: count= is exact (every kind="ref" row of the hit list,
-    // whatever page this is), and next= lists exactly them. Not a <more> element: <more hits=> is this listing's own
-    // page remainder, and a reader (or a gate) that reads "<more" as "this page was cut" must not see one here.
-    if( listed.refsElided > 0 )
-    {
-        rw::emitTo( out, "<refs count=\"{}\"{}/>", listed.refsElided, nextAttrXml( whereisRefsNext( res ) ) );
-    }
+    writeWhereisRows( out, res, listed, hitPage, headDate, ex );
     rw::emitRaw( out, "</whereis>" );
 }
 
