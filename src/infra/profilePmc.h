@@ -276,6 +276,8 @@ struct PerfState
     kpep_db*     db            = nullptr;
     kpep_config* cfg           = nullptr;
     uint32_t     classes       = 0;
+    int          prev_forced   = 0;     // kpc_force_all_ctrs_get() before we took the counters: what release() restores
+    bool         forced        = false; // we took the counters (force_all_ctrs_set succeeded): release() owes them back
     uint32_t     counter_count = 0;     // raw counters per thread read
     unsigned     event_count   = 0;     // logical events we configured
 
@@ -287,11 +289,32 @@ struct PerfState
 inline PerfState     g_perf;
 inline std::once_flag g_once;
 
+// Frees the kpep db/config when the arming sequence ends, however it ends: the kpc words and slot map it needs
+// were copied out into g_perf by then.
+struct ConfigFreer
+{
+    ~ConfigFreer()
+    {
+        if( g_perf.cfg )
+        {
+            g_api.kpep_config_free( g_perf.cfg );
+            g_perf.cfg = nullptr;
+        }
+        if( g_perf.db )
+        {
+            g_api.kpep_db_free( g_perf.db );
+            g_perf.db = nullptr;
+        }
+    }
+};
+
 // global, one-time: load the ABI, build the config, arm the counters
 inline void ensure_global_init() noexcept
 {
     std::call_once( g_once, []() noexcept
     {
+        const ConfigFreer freeConfig;   // every `return` below is a degrade or the end of arming: the kpep objects are dead weight either way
+
         PMC_DIAG( "init: euid={} (root needed unless entitled)\n", unsigned( geteuid() ) );
 
         if( !load_api() )
@@ -383,13 +406,13 @@ inline void ensure_global_init() noexcept
         // arm: take ownership of all counters, push the config, start counting.
         // The force/set calls are the privileged ones — they fail without root or
         // the entitlement, or if another tool (Instruments) holds the counters.
-        int prev = 0;
-        g_api.kpc_force_all_ctrs_get( &prev );
+        g_api.kpc_force_all_ctrs_get( &g_perf.prev_forced );
         if( g_api.kpc_force_all_ctrs_set( 1 ) != 0 )
         {
             PMC_DIAG( "FAIL kpc_force_all_ctrs_set (privilege? counters busy?)\n" );
             return;
         }
+        g_perf.forced = true;   // from here release() must hand the counters back, whichever later step fails
 
         if( g_api.kpc_set_config( g_perf.classes, regs ) != 0 )
         {
@@ -406,6 +429,25 @@ inline void ensure_global_init() noexcept
         g_perf.ok = true;
         PMC_DIAG( "OK: {} events armed, {} raw counters\n", g_perf.event_count, g_perf.counter_count );
     } );
+}
+
+// Teardown: stop counting and hand the counters back (kpc_force_all_ctrs_set to what it was before we took
+// them), so a privileged run does not leave the PMU forced and armed after exit. Called once, after the exit
+// report has rendered (profileScope.h Reporter); counting for the calling thread stops with it, every other
+// thread's flag dies with the thread. active() is false afterwards, so a late read() returns zeros.
+inline void release() noexcept
+{
+    if( g_perf.ok )
+    {
+        g_perf.ok = false;
+        g_api.kpc_set_counting( 0 );
+        g_api.kpc_set_thread_counting( 0 );
+    }
+    if( g_perf.forced )
+    {
+        g_perf.forced = false;
+        g_api.kpc_force_all_ctrs_set( g_perf.prev_forced );
+    }
 }
 
 // per-thread: enable counting for the calling thread (each profiled thread does
@@ -807,6 +849,15 @@ inline void ensure_thread_counting() noexcept
     }
 }
 
+// Teardown. The group's fds are the whole of this backend's footprint and ThreadCounters closes them when its
+// thread exits; this closes the CALLING thread's now (the main thread's thread_local is destroyed before the
+// exit report's static destructor runs), and ends the "active" claim so a late read() returns zeros.
+inline void release() noexcept
+{
+    t_counters.close_all();
+    g_perf.ok = false;
+}
+
 // hot path: one grouped read() syscall returns every counter for the calling thread
 ALWAYS_INLINE Snapshot read() noexcept
 {
@@ -842,6 +893,7 @@ namespace pmc
 {
 
 inline void        ensure_thread_counting() noexcept {}
+inline void        release() noexcept {}
 ALWAYS_INLINE Snapshot read() noexcept { return {}; }
 inline bool        active()      noexcept { return false; }
 inline unsigned    event_count() noexcept { return 0; }

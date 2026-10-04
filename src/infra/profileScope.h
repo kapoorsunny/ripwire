@@ -521,6 +521,9 @@ struct Reporter
 #if PROFILE_AUTO_REPORT
         report();
 #endif
+#if PROFILE_PMC
+        prof::pmc::release();                        // after the report: hand the HW counters back
+#endif
         registry().teardown();
     }
 };
