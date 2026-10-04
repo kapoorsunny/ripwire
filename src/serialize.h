@@ -6813,7 +6813,10 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
                       RedactCounts* redact = nullptr,
                       std::size_t* outShown = nullptr,          // rows actually emitted; nullptr ⇒ not recorded
                       const std::vector<float>* rank = nullptr, // query relevance, for ordering a CUT callee listing
-                      std::string_view rootArg = {} )           // R-E: same single-root-only root= every verb takes
+                      std::string_view rootArg = {},            // R-E: same single-root-only root= every verb takes
+                      const std::vector<std::uint8_t>* outNameOnly = nullptr )   // hop-slot rule: FE-B's per-edge hedge bit,
+                                                                // parallel to outTargets (graph.h graphNameOnlyBits); nullptr ⇒
+                                                                // every edge counts as proven (byte-identical)
 {
     if( budgetBytes == 0 )                                      // 0 ⇒ UNLIMITED, packBodies' own convention
     {
@@ -6876,7 +6879,14 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
         // WHY a candidate has no row, and folding "has no edges" into "the budget stopped" would make
         // a fact about the graph look like a fact about the budget.
         const std::uint32_t outDeg = ( id + 1 < outOff.size() ) ? outOff[ id + 1 ] - outOff[ id ] : 0u;
-        if( outDeg == 0 )
+        // THE HOP-SLOT RULE (gate test/forsigspancheck.sh (H)): a slot needs at least one PROVEN callee edge. A candidate
+        // whose every out-edge was bound by name alone (an off-topic getter whose one callee row was `bag.lookup()` on an
+        // untyped local, measured on a graded answer) spent the slot on a hedged edge; it now counts with noedge=, whose
+        // reading is "no RESOLVED callee found" — a name-only binding is a hedge, not a resolution.
+        const bool noProvenEdge = outDeg > 0 && outNameOnly != nullptr
+                               && std::all_of( outNameOnly->begin() + outOff[ id ], outNameOnly->begin() + outOff[ id + 1 ],
+                                               []( std::uint8_t bit ) { return bit != 0; } );
+        if( outDeg == 0 || noProvenEdge )
         {
             ++noEdgeCount;
             continue;

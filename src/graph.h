@@ -2899,6 +2899,26 @@ struct DispositionTally
 // changes NOTHING else — no candidate is admitted, dropped or reordered by it, so the emitted map is
 // byte-identical armed or not (test/pincensuscheck.sh arm (E) is the executable form of that sentence).
 
+// THE HOP-SLOT RULE'S EDGE PROOF (verbs_for.h buildForCompactHops; gate test/forsigspancheck.sh (H)). The receiver-evidence
+// lane (FE-B) adds a per-out-edge HEDGE bit, Graph::outNameOnly (parallel to outTargets: 1 = every call site that bound the
+// edge did so by NAME ALONE). This hook reads it when the Graph has it and returns nullptr when it does not, so the rule
+// is written against FE-B's bit and is byte-identical on a build without it. ASSUMES FE-B: the train orders FE-B first;
+// FE-B's packHops then takes the bit itself (a reference after outTargets), so the merge keeps FE-B's parameter, drops
+// this hook and the trailing pointer, and keeps the noProvenEdge test (reference resolution: the lane report).
+// nullptr also when the bit is EMPTY (no name-only edge in the corpus).
+template< class G >
+inline const std::vector<std::uint8_t>* graphNameOnlyBits( const G& g ) noexcept
+{
+    if constexpr( requires { g.outNameOnly; } )
+    {
+        return g.outNameOnly.empty() ? nullptr : &g.outNameOnly;
+    }
+    else
+    {
+        return nullptr;
+    }
+}
+
 // ── FE-A: FALSE-EDGE RULES (test/falseedgecheck.sh) ────────────────────────────────────────────────────────────────────────
 // The name ladder binds a call to the in-repo definitions of its SPELLING. Three call shapes have no in-repo target by
 // the language's own name-lookup rules and still got one — each a confident false row in a graded answer:

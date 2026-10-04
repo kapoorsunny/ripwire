@@ -2146,7 +2146,8 @@ ForAutoBodiesResult buildForCompactHops( const rw::Config& cfg, const rw::Ingest
                                                                         : std::size_t( 1 ) );
 
     out.section = rw::chargeSection( [ & ]( std::FILE* f )
-        { rw::packHops( f, ing, hopIds, hopBudget, g.outOff, g.outTargets, redactPtr, /*outShown=*/nullptr, &lensRank, fcRootArg ); },
+        { rw::packHops( f, ing, hopIds, hopBudget, g.outOff, g.outTargets, redactPtr, /*outShown=*/nullptr, &lensRank, fcRootArg,
+                        rw::graphNameOnlyBits( g ) ); },   // hop-slot rule: FE-B's hedge bit (nullptr without FE-B)
         // MARKUP rate, not the body rate — and this is an honesty choice, not a copy-paste slip. The body
         // rate (3.80 B/tok) prices SOURCE TEXT; the compact section contains none, only tags, identifiers
         // and line numbers, which tokenize like the rest of the bundle. Charging structured markup at the
