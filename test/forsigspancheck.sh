@@ -43,11 +43,13 @@
 #        keeps one. C near miss — Sampler_collectAll keeps its <h> row. <h> rows follow the <d> rows' r= order.
 #        The two "no <h> row" arms need the receiver-evidence hedge (a name-only row marked via="name"); on a binary
 #        without it they SKIP by name ("expects FE-B"), detected on this fixture — never a silent PASS.
-#   (R)  code over docs: TS "How is a per-request context created?" — createContext and the class Context, and every
-#        other code row, rank above every docs/context.md row; md rows <= 25% of the shown rows unless no code row was
-#        displaced (the window holds fewer than 40 rows and <sigs> is not cut); the answer carries the
-#        " [docs after code: N …]" note. Twin: "Where do the docs describe the context lifecycle?" keeps a docs row in
-#        its top five.
+#   (R)  code above docs as a REORDER of the shown set (coordinator rule: it reorders, never shrinks the doc rows shown):
+#        the TS questions answered with the rule and with RIPWIRE_NO_DOCS_AFTER_CODE=1 (plain score order) show the
+#        same row SET and r= multiset; with the rule every code row precedes every doc row, rows stay in r= order, and
+#        <sigs docs_after_code="N"> counts the doc rows that moved (with its reading). Near misses: the same at a
+#        --token-budget that cuts <sigs> (a demotion would evict docs there: red on the score-demotion build), and a
+#        question whose topic ("dropped after the response") only a docs row names keeps that row. Twin: "Where do the
+#        docs describe the context lifecycle?" keeps a docs row in its top five.
 #   (J)  dialect parity: --for --json "sigs" entries carry "e" equal to the XML rows' e= (and none where XML has none).
 #   (M)  the MCP `for` twin: the same e= on the C rows, none on the extent_suspect rows, and a legend clause for e=.
 #   (L)  legend: --legend=full defines e= and says what it does NOT mean (absent = unknown, not 0; l= is the name's
@@ -283,34 +285,72 @@ if ran_ok "$CH" "H/C"; then
     hopcheck "$CH" "H/C near miss" hop Sampler_collectAll
 fi
 
-echo "(R) the defining code outranks the docs that describe it"
-if ran_ok "$TE" "R"; then
-    python3 - "$TMP/rows.py" "$TE" <<'PY'
+echo "(R) code above docs: the SHOWN set reordered, never shrunk"
+# rset ANSWER — the shown <d> rows as sorted "n|p|l" lines (the SET), and a line "DOCS k" with the doc-row count
+# rcheck LABEL ON OFF [premise_doc_row] — ON (the rule) and OFF (RIPWIRE_NO_DOCS_AFTER_CODE=1, plain score order) show the
+#   same row SET and the same doc rows; in ON every code row precedes every doc row; the r= values are the same multiset;
+#   ON carries docs_after_code=N exactly when it moved N doc rows above which OFF had a code row below; the reading rides.
+rcheck(){
+    python3 - "$TMP/rows.py" "$@" <<'PY'
 import re, sys
 exec( open( sys.argv[ 1 ] ).read() )
-doc = load( sys.argv[ 2 ] )
-rows = [ a for _, a in drows( doc ) if a.get( "r", "" ).isdigit() ]
-code = [ int( a[ "r" ] ) for a in rows if ( a.get( "n" ), a.get( "p" ) ) in ( ( "createContext", "src/application.ts" ), ( "Context", "src/context.ts" ) ) ]
-docs = [ int( a[ "r" ] ) for a in rows if is_doc_row( a ) ]
+label, on, off = sys.argv[ 2: 5 ]
+need = sys.argv[ 5 ] if len( sys.argv ) > 5 else None
+don, doff = load( on ), load( off )
+if not ctx_ok( don ) or not ctx_ok( doff ):
+    print( "  FAIL  %s: NOROOT" % label ); sys.exit( 1 )
+ron = [ a for _, a in drows( don ) ]
+roff = [ a for _, a in drows( doff ) ]
+key = lambda a: ( a.get( "n" ), a.get( "p" ), a.get( "l" ) )
 bad = []
-if len( code ) != 2: bad.append( "premise: createContext and class Context are not both shown (%s)" % code )
-elif docs and max( code ) > min( docs ): bad.append( "a docs row r=%d ranks above defining code r=%d" % ( min( docs ), max( code ) ) )
-# docs <= 25% of the shown rows — unless no code row could have been displaced: the window is not full (fewer rows than
-# the 40-row lens head) and <sigs> is not cut, so every positive code row is already shown ABOVE the docs (rule 5: a doc
-# row filling a slot no code row competes for is information, never a cut).
-sigs = re.search( r"<sigs[^>]*>", doc )
-windowOpen = len( rows ) < 40 and sigs is not None and 'capped="1"' not in sigs.group( 0 )
-if code and docs and min( docs ) < max( r for r in ( int( a[ "r" ] ) for a in rows if not is_doc_row( a ) ) ):
-    bad.append( "a docs row r=%d ranks above a code row" % min( docs ) )
-if rows and 4 * len( docs ) > len( rows ) and not windowOpen: bad.append( "%d of %d shown rows are docs (> 25%%) in a full or cut window" % ( len( docs ), len( rows ) ) )
-if docs and " [docs after code: " not in doc: bad.append( "the docs moved below code but the answer has no [docs after code: N] note" )
+if sorted( map( key, ron ) ) != sorted( map( key, roff ) ):
+    lost = sorted( set( map( key, roff ) ) - set( map( key, ron ) ) )
+    bad.append( "the shown set changed (rows only in plain score order: %s)" % lost[ :4 ] )
+if sorted( a.get( "r" ) for a in ron ) != sorted( a.get( "r" ) for a in roff ):
+    bad.append( "the r= values are not the same multiset" )
+kinds = [ is_doc_row( a ) for a in ron ]
+if True in kinds and False in kinds and kinds.index( True ) < len( kinds ) - 1 - kinds[ ::-1 ].index( False ):
+    bad.append( "a doc row precedes a code row in the reordered answer" )
+rs = [ int( a[ "r" ] ) for a in ron if a.get( "r", "" ).isdigit() ]
+if rs != sorted( rs ):
+    bad.append( "rows are not in r= order" )
+koff = [ is_doc_row( a ) for a in roff ]
+lastCode = max( ( i for i, d in enumerate( koff ) if not d ), default=-1 )
+moved = sum( 1 for i, d in enumerate( koff ) if d and i < lastCode )
+sig = re.search( r"<sigs[^>]*>", strip_comments( don ) )
+attr = re.search( r' docs_after_code="([0-9]+)"', sig.group( 0 ) ) if sig else None
+if moved and ( not attr or int( attr.group( 1 ) ) != moved ):
+    bad.append( "docs_after_code= is %s, expected %d" % ( attr.group( 1 ) if attr else "absent", moved ) )
+if not moved and attr:
+    bad.append( "docs_after_code= present though nothing moved" )
+if moved and "docs_after_code=N:" not in don:
+    bad.append( "the answer carries docs_after_code= without its reading" )
+if need and not [ a for a in ron if a.get( "n" ) == need and is_doc_row( a ) ]:
+    bad.append( "premise: the doc row %r is not shown" % need )
 if bad:
-    for b in bad: print( "  FAIL  R: %s" % b )
+    for b in bad: print( "  FAIL  %s: %s" % ( label, b ) )
     sys.exit( 1 )
-print( "  PASS  R: code r=%s above docs r=%s; docs %d of %d rows" % ( code, docs, len( docs ), len( rows ) ) )
+print( "  PASS  %s: same %d rows (%d docs), code first, docs_after_code=%s" % ( label, len( ron ), kinds.count( True ), attr.group( 1 ) if attr else "-" ) )
 PY
-    [ $? -eq 0 ] || fail=1
-fi
+    [ $? -eq 0 ] || { fail=1; return 1; }
+}
+# offr ROOT TAG QUESTION [ARGS…] — the same question in plain score order (the A/B handle)
+offr(){ local r="$1" t="$2" q="$3"; shift 3; local f="$TMP/$r.$t.off.xml"; ( cd "$CORPUS/$r" && RIPWIRE_NO_DOCS_AFTER_CODE=1 "$BIN" . --no-cache "--for=$q" "$@" >"$f" 2>"$f.err" ); printf '%s' "$?" >"$f.rc"; printf '%s' "$f"; }
+onr(){ local r="$1" t="$2" q="$3"; shift 3; local f="$TMP/$r.$t.on.xml"; run "$r" "$f" "--for=$q" "$@"; printf '%s' "$f"; }
+Q1='How is a per-request context created?'
+Q2='How is a per-request context created and dropped after the response?'   # only the docs lifecycle section names "dropped after the response"
+for spec in "r1|$Q1|" "r1b|$Q1|--token-budget=700" "r2|$Q2|" "r2b|$Q2|--token-budget=700"; do
+    tag="${spec%%|*}"; rest="${spec#*|}"; q="${rest%%|*}"; extra="${rest#*|}"
+    if [ -n "$extra" ]; then ON="$( onr ts "$tag" "$q" "$extra" )"; OFF="$( offr ts "$tag" "$q" "$extra" )"; else ON="$( onr ts "$tag" "$q" )"; OFF="$( offr ts "$tag" "$q" )"; fi
+    if ran_ok "$ON" "R/$tag" && ran_ok "$OFF" "R/$tag (plain order)"; then
+        case "$tag" in
+            r2) rcheck "R/$tag only a docs row names the topic: it stays" "$ON" "$OFF" "Context lifecycle" ;;
+            *)  rcheck "R/$tag${extra:+ ($extra)}" "$ON" "$OFF" ;;
+        esac
+    fi
+done
+# the cut premise: the tight budget really cuts (else the arm above proves nothing about eviction)
+if grep -q '<sigs [^>]*capped="1"' "$TMP/ts.r1b.on.xml" 2>/dev/null; then ok "R/r1b premise: --token-budget=700 cuts the <sigs> block"; else no "R/r1b premise: --token-budget=700 does not cut <sigs> — pick a tighter budget"; fi
 TD="$( ask ts docs 'Where do the docs describe the context lifecycle?' )"
 if ran_ok "$TD" "R twin"; then
     python3 - "$TMP/rows.py" "$TD" <<'PY'
@@ -404,6 +444,10 @@ printf '<ctx task="t"><sigs><d l="7" n="contextHost" p="src/request.ts" r="1">x<
 if ( hopcheck "$K" "K4 (expected FAIL)" nohop contextHost ) >/dev/null 2>&1; then no "K4: a name-only hop row not caught"; else ok "K4: a name-only hop row is caught"; fi
 printf '<callers of="x" found="0"/>' >"$K"
 if ( oracle "$K" "K5 (expected FAIL)" "$CORPUS/ts" ) >/dev/null 2>&1; then no "K5: NOROOT passed"; else ok "K5: a document with no --for root is never a pass"; fi
+K6ON="$TMP/k6on.xml"; K6OFF="$TMP/k6off.xml"
+printf '<ctx task="t"><sigs><d l="11" n="createContext" p="src/application.ts" r="1">x</d></sigs></ctx>' >"$K6ON"
+printf '<ctx task="t"><sigs><d l="17" n="Context lifecycle" p="docs/context.md" r="1">x</d><d l="11" n="createContext" p="src/application.ts" r="2">x</d></sigs></ctx>' >"$K6OFF"
+if ( rcheck "K6 (expected FAIL)" "$K6ON" "$K6OFF" ) >/dev/null 2>&1; then no "K6: an evicted doc row not caught"; else ok "K6: a doc row the reorder evicted is caught"; fi
 
 if [ "$fail" -ne 0 ]; then
     echo "forsigspancheck: FAIL"

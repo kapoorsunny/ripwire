@@ -1945,9 +1945,6 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
         }
         absorbCapDisclosure( docMentionInfo.caps, docMentionNote, capAttrs );
     }
-    // code above docs — the CLI twin's rule on the final rank (filter.h applyCodeAboveDocs); its note is sig-charge exempt below
-    const std::string mcpDocsAfterCode = noRoute ? std::string() : docsAfterCodeNote( applyCodeAboveDocs( ing, task, lensRank ) );
-    docMentionNote += mcpDocsAfterCode;
 
     // LB-A (r10 §5) — THE RELEVANCE FLOOR, the CLI --for's own call (serialize.h relevanceFloorCut): one
     // bundle-composition contract may not have two behaviours. lensRank is final at this point.
@@ -2193,8 +2190,8 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     // (the CLI twin's own idRouteParts ledger, verbs_for.h, for the identical reason).
     const std::size_t mcpIdRouteExemptBytes = mcpIdRouteParts.bytes();
     const std::size_t mcpAtLegendExemptBytes = !flRootArg.empty() && !mcpForAtAttrStr.empty() ? rw::kForAtStampProse.size() : 0;   // r2-LO, above
-    // e= and docs-after-code: disclosures on the same contract (the CLI twin exempts the same two)
-    const std::size_t mcpEndLineExemptBytes = mcpEndLineLegend.size() + mcpDocsAfterCode.size();
+    // e=: a disclosure on the same contract (the CLI twin exempts the same clause)
+    const std::size_t mcpEndLineExemptBytes = mcpEndLineLegend.size();
     const std::size_t fixedBytes = headerStr.size() - rw::kForFileTailLegend.size() - mcpConfidenceExemptBytes - mcpIdRouteExemptBytes - mcpAtLegendExemptBytes
                                  - mcpEndLineExemptBytes + legoStr.size() + composeStr.size() + routeStr.size() + 6;   // + "</ctx>"
     const std::size_t sigsBudget = forBudgetBytes > fixedBytes ? forBudgetBytes - fixedBytes : 1;   // ≥1: 0 = "no budget"
@@ -2220,7 +2217,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
                         sigsBudget,                           // H1: global payload budget (trim ladder; payload="capped" marker)
                         notesPtr,                             // L3: field-notes surfacing (inert when null)
                         flRootArg,                            // R-E: root-relative p=, same argument the CLI twin passes
-                        rw::SigLensRules::ForLens,            // LB-A: shrink past the zero-score tail, never pad; e= rows
+                        rw::forLensRules( !noRoute && !taskAsksAboutDocs( task ) && !std::getenv( "RIPWIRE_NO_DOCS_AFTER_CODE" ) ),   // LB-A, e=, docs reorder
                         &mcpDroppedPositive,                  // A2: exact count, see droppedPositiveCount (serialize.h)
                         &mcpShownIds,                         // lane 2: see verbs_for.h shownSigIds
                         &mcpSigsCapped,                       // the ladder's own verdict — see the budget_bytes= splice below
@@ -2265,7 +2262,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     }
     // cut-fix lane A: the <sigs> tag's cut readings (docs_dropped=, shrunk-not-dropped) — the CLI twin's clauses, same
     // text, same splice point, present only when the tag carries the case (serialize.h sigsCutLegendNotes).
-    if( const std::string cutNotes = rw::sigsCutLegendNotes( mcpSigsCut.isCapped, mcpSigsCut.shown, mcpSigsCut.total, mcpSigsCut.docsDropped );
+    if( const std::string cutNotes = rw::sigsCutLegendNotes( mcpSigsCut );
         !cutNotes.empty() )
     {
         const std::size_t closeAt = headerStr.rfind( " -->" );

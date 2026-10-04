@@ -26,12 +26,13 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
   definition can start above `l=` (a return type on the line before, a decorator). The attribute is exempt from the
   signature-row byte budget, so a ceiling admits the same rows it admitted before; it costs about 8 bytes per row.
   `--pack-signatures`, `--pack-task`, `--from-trace` and the map keep their bytes.
-- **Code above docs.** On a question that does not ask about docs, every scored markdown row now ranks after every
-  scored code row (the doc rows keep their own order and stay in the answer; they fill only slots no code row
-  competes for). A question that names docs (`doc…`, `readme`, `guide`, `tutorial`, `manual`, `markdown`, `wiki`,
-  `faq`, `howto`, a change or translation cue, or a named `.md`/`.rst` file) keeps the plain score order. The answer
-  says when the rule moved anything: ` [docs after code: N doc rows ranked below every code row; …]`. Routed path
-  only (`--no-route` restores the old order); `--for` and MCP `for` only.
+- **Code above docs.** On a question that does not ask about docs, the code rows of the SHOWN signature set now come
+  first and its markdown rows after them. It is a reorder of the same rows: the score order and the byte budget still
+  choose which rows are shown, so no doc row is ever evicted by it; the shown rows keep their own `r=` values,
+  reassigned in the new order, and `<sigs docs_after_code="N">` (JSON `"docs_after_code"`) says how many doc rows moved.
+  A question that names docs (`doc…`, `readme`, `guide`, `tutorial`, `manual`, `markdown`, `wiki`, `faq`, `howto`, a
+  change or translation cue, or a named `.md`/`.rst` file) keeps the plain score order, and so does `--no-route`;
+  `RIPWIRE_NO_DOCS_AFTER_CODE=1` turns the reorder off everywhere (CLI and MCP `for`).
 
 Gate: `forsigspancheck` (fixture `test/forcompletefix`, C/JS/Python/TS).
 

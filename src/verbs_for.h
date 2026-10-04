@@ -422,6 +422,8 @@ struct ForLensJsonInputs
     // MainDispatch) — REQUIRED like fileTail above, for the same reason: a defaulted bool is how a degrade
     // silently drops off this dialect while the XML twin keeps carrying it.
     bool                               notesDegraded;
+    // code above docs (serialize.h reorderDocsAfterCode): the XML twin's verdict, REQUIRED for the same reason
+    bool                               docsAfterCode;
 };
 
 // The lens bundle's opening keys. Every note is absent-unless-present — the same silence-means-nothing-
@@ -819,8 +821,8 @@ inline std::string compactOneForNote( std::string_view note )
     return std::string( note );
 }
 
-// A note channel can carry SEVERAL notes back to back (the doc-mention channel also carries its cap note and the
-// docs-after-code note, filter.h docsAfterCodeNote). Each " [...]" is compacted on its own, so a later note is never
+// A note channel can carry SEVERAL notes back to back (the doc-mention channel also carries its cap note,
+// mention.h absorbCapDisclosure). Each " [...]" is compacted on its own, so a later note is never
 // swallowed by an earlier note's rewrite (which keeps only the first note's numbers).
 inline std::string compactForNote( std::string_view note )
 {
@@ -1477,7 +1479,7 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     const std::size_t sigsBudget = bundleBudget > fixedBytes ? bundleBudget - fixedBytes : 1;
 
     const JsonSigLens lens{ /*metrics=*/true, in.fanIn, in.impure, in.churnPerFile, in.cloneMember,
-                            in.tested, in.amp, /*rankAdaptivePayload=*/true, in.noteIndex, /*endLines=*/true };
+                            in.tested, in.amp, /*rankAdaptivePayload=*/true, in.noteIndex, /*endLines=*/true, in.docsAfterCode };
     JsonSigNoteCounts noteCounts;
     const auto packSigs = [ & ]( std::FILE* dst, std::size_t budget, bool* outCapped, std::size_t* outDroppedPositive,
                                  std::vector<rw::NodeId>* outShownIds, rw::SigsCutReport* outCut )
@@ -1579,6 +1581,10 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     if( sigsCut.docsDropped > 0 )
     {
         sigsCutStanza += ",\"docs_dropped\":" + std::to_string( sigsCut.docsDropped );
+    }
+    if( sigsCut.docsAfterCode > 0 )   // the XML tag's docs_after_code= (the reorder's disclosure; uncharged, like the XML attribute)
+    {
+        sigsCutStanza += ",\"docs_after_code\":" + std::to_string( sigsCut.docsAfterCode );
     }
     const bool sigsCappedKey = sigsCut.isCapped;   // "capped": the XML tag's capped="1" (the ladder's verdict OR a gate cut)
 
@@ -2285,11 +2291,9 @@ std::optional<int> runForLens( const MainDispatch& d )
         // --anchor: ROUTE picks the base lens rank, then ANCHOR expands it; mention/co-change run after.
         LensRanking        lr        = computeLensRanking( d, cfg.forTask, forCompactPosture( cfg ),
                                                            /*fullDistribution=*/!cfg.candidates );   // deep-tail: the bundle serves the file-grain tail; candidates has no tail and keeps the H2 pruning
-        // code above docs (filter.h applyCodeAboveDocs): --for's own rule, routed path only, on the final rank. Its note rides
-        // the doc-mention channel and is exempt from the sig charge below (a disclosure never costs a row).
-        const std::string docsAfterCode = cfg.noRoute ? std::string() : docsAfterCodeNote( applyCodeAboveDocs( ing, cfg.forTask, lr.rank ) );
-        lr.docMentionNote += docsAfterCode;
         std::vector<float> lensRank  = std::move( lr.rank );
+        // code above docs (filter.h): the routed path on a question that does not ask about docs — the shown set's REORDER
+        const bool         forDocsAfterCode = !cfg.noRoute && !taskAsksAboutDocs( cfg.forTask ) && !std::getenv( "RIPWIRE_NO_DOCS_AFTER_CODE" );
         const std::string  routeNoteRaw = std::move( lr.routeNote ); // verbatim; lands ONLY in route= (attribute-escaped) + the JSON twin — L1: the comment no longer echoes it
         const std::string  mentionNote( std::move( lr.mentionNote ) );
         const std::string  boostNote( std::move( lr.boostNote ) );
@@ -2782,7 +2786,7 @@ std::optional<int> runForLens( const MainDispatch& d )
                                                                    &forClone, testedPtr, ampPtr, redactPtr,
                                                                    cfg.packBudgetBytes, cfg.tokenBudget, notesPtr,
                                                                    legoTotal, composeTotal, routesTotal, flRootArg,
-                                                                   &forFileTail, d.notesDegraded } );
+                                                                   &forFileTail, d.notesDegraded, forDocsAfterCode } );
             // §B0: this early return skipped the end-of-function tally below, so a --for --json run redacted
             // SILENTLY — the one stderr line that tells the user a secret was in their tree never appeared.
             reportRedactions( stderr, redactCounts );
@@ -2928,12 +2932,12 @@ std::optional<int> runForLens( const MainDispatch& d )
         const rw::ForIdRouteLegendParts idRouteParts =
             rw::forIdRouteLegendParts( headerParts.idRouteLegend, headerParts.scPresent, !routeNoteRaw.empty() );
         const std::size_t idRouteLegendEmitted = compactLegendOn ? idRouteParts.route.size() : idRouteParts.bytes();
-        // e= (forsigspancheck): its legend clause and the docs-after-code note are disclosures on the same contract — exempt,
-        // so the ranked rows a ceiling admits are the ones it admitted without them (owner ruling: e= is exempt from the row budget).
+        // e= (forsigspancheck): its legend clause is a disclosure on the same contract — exempt, so the ranked rows a ceiling
+        // admits are the ones it admitted without it (owner ruling: e= is exempt from the row budget).
         const std::size_t endLineLegendEmitted = !headerParts.endLinePresent ? 0u
                                                : ( compactLegendOn ? rw::kForCompactEndLineLegend.size() : rw::kForEndLineLegend.size() );
         const std::size_t exemptBytes = adaptiveNote.size() + autoLegendBytes + confidenceExemptBytes + tailLegendEmitted + idRouteLegendEmitted
-                                      + endLineLegendEmitted + docsAfterCode.size();
+                                      + endLineLegendEmitted;
         if( exemptBytes > headerStr.size() )
         {
             DISCLOSE( "runForLens: header exemptions exceed the emitted header — the sig ledger would underflow; charging the header whole" );
@@ -2954,7 +2958,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             const std::size_t fullExempt      = adaptiveNote.size() + enrichmentLegendBytesEmitted( plan, false )
                                               + confidenceEarlyAttrsBytes + confidenceEarlyNoteBytes + forAtAttrStr.size()
                                               + rw::kForFileTailLegend.size() + idRouteParts.bytes()
-                                              + ( headerParts.endLinePresent ? rw::kForEndLineLegend.size() : 0u ) + docsAfterCode.size();
+                                              + ( headerParts.endLinePresent ? rw::kForEndLineLegend.size() : 0u );
             const std::size_t fullCharged     = fullExempt > fullHeaderBytes ? fullHeaderBytes : fullHeaderBytes - fullExempt;
             chargedHeaderBytes = std::min( chargedHeaderBytes, fullCharged );
         }
@@ -3026,7 +3030,7 @@ std::optional<int> runForLens( const MainDispatch& d )
                                 sigsBudget,                                  // H1: global payload budget (trim ladder; payload="capped" marker)
                                 notesPtr,                                    // L3: field-notes surfacing (inert when null)
                                 flRootArg,                                   // R-E: root-relative p=
-                                rw::SigLensRules::ForLens,                   // LB-A: shrink past the zero-score tail, never pad; e= on every row
+                                rw::forLensRules( forDocsAfterCode ),       // LB-A floor, e= on every row, and the code-above-docs reorder
                                 &forDroppedPositive,                         // A2: exact count, see droppedPositiveCount
                                 &shownSigIds,                                // lane 2: the rows actually emitted — the tail excludes THESE files
                                 &forSigsCapped,                              // did the ladder fire? — the budget_bytes= clause rides only then
@@ -3110,7 +3114,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // cut-fix lane A: the <sigs> tag's two cut readings (docs_dropped=, shrunk-not-dropped) ride the same splice, present
         // only when the tag carries the case (serialize.h sigsCutLegendNotes), so the reserve below already covers them.
         const std::string sigsCeilingNote   = ( forDefaultCeiling ? std::string( rw::kForBudgetBytesNote ) : std::string() )
-            + rw::sigsCutLegendNotes( forSigsCut.isCapped, forSigsCut.shown, forSigsCut.total, forSigsCut.docsDropped );
+            + rw::sigsCutLegendNotes( forSigsCut );   // + the docs reorder's reading (docs_after_code=)
         // ── the INDEXING-cap disclosure (mention.h CapDisclosure), at the same splice point and for the
         // same reason: a --for header is charged against the payload ceiling, so a disclosure folded into
         // the notes above is paid for in ranked rows. Measured on sixteen real invocations, that cost three
@@ -3512,7 +3516,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         {
             packSignatures( stdout, ing, lensRank, forTopN, cfg.packBudgetBytes, true, fanInPtr, impurePtr, redactPtr,
                             &forChurn, &forClone, testedPtr, ampPtr, /*rankAdaptivePayload=*/true, sigsBudget, notesPtr, flRootArg,
-                            rw::SigLensRules::ForLens, nullptr, nullptr, nullptr,   // LB-A + e=: the direct-emission degrade path selects identically
+                            rw::forLensRules( forDocsAfterCode ), nullptr, nullptr, nullptr,   // LB-A + e= + docs reorder: the degrade path selects identically
                             forTopRowNext );                                         // L-W: same next= rule on the degrade path
         }
         if( legoPreRendered )

@@ -865,6 +865,12 @@ inline constexpr std::string_view kForSigsShrunkNote =
 static_assert( kForDocExcerptRankCount == 24 && kForDocFullRankCount == 12,
                "kForDocsDroppedNote spells the tier thresholds (r>24; the ladder's r5..24): re-word it with these constants" );
 
+// The docs reorder's reading (reorderDocsAfterCode), present-only on a tag that carries docs_after_code=. Says what it is
+// NOT: no row was added or removed. No "--" (it rides inside an XML comment, G4).
+inline constexpr std::string_view kForDocsAfterCodeNote =
+    " [docs_after_code=N: N doc rows of the shown set moved below its code rows; same rows, reordered, none added or removed; "
+    "a question naming docs keeps score order]";
+
 // The clauses a <sigs> cut report owes, concatenated in a fixed order ("" when it owes none).
 inline std::string sigsCutLegendNotes( bool isCapped, std::size_t shown, std::size_t total, std::size_t docsDropped )
 {
@@ -4270,7 +4276,7 @@ inline std::uint32_t defEndLine( const Symbol& s, const std::vector<std::uint32_
 // twin; gate test/forsigspancheck.sh (L). Each says what the attribute does NOT mean: absent is unknown (never a 0), and
 // l= stays the NAME's line.
 inline constexpr std::string_view kForCompactEndLineLegend =
-    "; d e= last line of the definition (absent = extent unknown, never 0; l= is its name's line)";
+    "; d e= its last line (absent=unknown, never 0; l= the name's line)";
 inline constexpr std::string_view kForEndLineLegend =
     "; e= on a d row: the 1-based line where that definition ends, body-inclusive; absent when the extent is not known "
     "(extent_suspect, docs, config), never 0; l= is the line of the definition's name, so a definition can start above l=";
@@ -4297,18 +4303,96 @@ inline void writeSigHeadWithEnd( XmlWriter& w, std::string_view head, std::uint3
 }
 
 // The --for lens's own serving rules on the rank-adaptive path, one flags value so a caller states which it wants:
-// LB-A's relevance floor, and e= on every row. --for (CLI) and MCP `for` pass ForLens; --pack-task and --from-trace
-// pass None (their rows keep their bytes).
+// LB-A's relevance floor, e= on every row, and the code-above-docs reorder (reorderDocsAfterCode). --for (CLI) and MCP
+// `for` pass ForLens, plus DocsAfterCode when the question does not ask about docs (forLensRules); --pack-task and
+// --from-trace pass None (their rows keep their bytes).
 enum class SigLensRules : std::uint8_t
 {
     None           = 0,
     RelevanceFloor = 1,
     EndLine        = 2,
     ForLens        = 3,
+    DocsAfterCode  = 4,
 };
 inline constexpr bool hasSigLensRule( SigLensRules set, SigLensRules rule ) noexcept
 {
     return ( std::uint8_t( set ) & std::uint8_t( rule ) ) != 0;
+}
+// ForLens, plus the docs reorder when `docsAfterCode` (the caller's verdict: routed, and the question does not ask about
+// docs — filter.h taskAsksAboutDocs).
+inline constexpr SigLensRules forLensRules( bool docsAfterCode ) noexcept
+{
+    return SigLensRules( std::uint8_t( SigLensRules::ForLens ) | ( docsAfterCode ? std::uint8_t( SigLensRules::DocsAfterCode ) : 0u ) );
+}
+
+// ── CODE ABOVE DOCS, AS A REORDER OF THE SHOWN SET (filter.h CODE ABOVE DOCS; gate test/forsigspancheck.sh (R)) ─────────
+// Runs AFTER the score order and the byte ladder have chosen which rows are shown, so it can never evict a row: the shown
+// set is exactly the one plain score order shows, and only its order changes — every code row first, every doc row
+// after, each group in its own score order. The rank numbers are the shown rows' OWN r= values, reassigned in the new
+// order, so a gap still marks a budget-trimmed row and r=1 (with its next=) goes to the first row shown. `entries` is in
+// globalRank order; EntryT has globalRank (kept: it maps the row back to its symbol), displayRank (the r= it is shown
+// with) and dropped. `isDoc(e)` says which rows are docs; `rehead(e, newRank)` re-renders a row whose r= changed.
+// Returns how many doc rows moved below a code row (0 ⇒ nothing changed; the caller discloses a non-zero count).
+template< class EntryT, class IsDoc, class Rehead >
+inline std::size_t reorderDocsAfterCode( std::vector<EntryT>& entries, IsDoc&& isDoc, Rehead&& rehead )
+{
+    std::vector<std::size_t> live;
+    for( std::size_t i = 0; i < entries.size(); ++i )
+    {
+        if( !entries[i].dropped )
+        {
+            live.push_back( i );
+        }
+    }
+    std::size_t lastCode = live.size();
+    for( std::size_t k = 0; k < live.size(); ++k )
+    {
+        if( !isDoc( entries[ live[k] ] ) )
+        {
+            lastCode = k;
+        }
+    }
+    std::size_t moved = 0;
+    for( std::size_t k = 0; lastCode < live.size() && k < lastCode; ++k )
+    {
+        moved += isDoc( entries[ live[k] ] ) ? 1u : 0u;
+    }
+    if( moved == 0 )
+    {
+        return 0;   // no doc row above a code row (or no code row shown at all): byte-identical
+    }
+    std::vector<std::uint32_t> ranks;   // the shown rows' own r= values, ascending (entries is in globalRank order)
+    std::vector<std::size_t>   newOrder;
+    for( const std::size_t i : live )
+    {
+        ranks.push_back( entries[i].globalRank );
+        if( !isDoc( entries[i] ) )
+        {
+            newOrder.push_back( i );
+        }
+    }
+    for( const std::size_t i : live )
+    {
+        if( isDoc( entries[i] ) )
+        {
+            newOrder.push_back( i );
+        }
+    }
+    ASSUME( newOrder.size() == ranks.size() );
+    for( std::size_t k = 0; k < newOrder.size(); ++k )
+    {
+        EntryT& e = entries[ newOrder[k] ];
+        if( e.displayRank != ranks[k] )
+        {
+            rehead( e, ranks[k] );
+            e.displayRank = ranks[k];
+        }
+    }
+    // dropped rows keep their globalRank as displayRank; the shown rows hold a permutation of their own ranks, so the
+    // display ranks stay unique and the sort is total (deterministic)
+    std::stable_sort( entries.begin(), entries.end(), []( const EntryT& a, const EntryT& b ) { return a.displayRank < b.displayRank; } );
+    ENSURES( moved > 0, "a moved count is only returned when the order changed" );
+    return moved;
 }
 
 // ── LB-A (r10 GitNexus round) — THE RELEVANCE FLOOR ──────────────────────────────────────────────────
@@ -4562,11 +4646,23 @@ inline std::size_t gateSigRowsRankFirst( std::vector<EntryT>& entries, std::vect
 // comment the rank tiers or the ladder removed (the tag's docs_dropped=). isCapped mirrors the tag's capped="1".
 struct SigsCutReport
 {
-    std::size_t shown       = 0;
-    std::size_t total       = 0;
-    std::size_t docsDropped = 0;
-    bool        isCapped    = false;
+    std::size_t shown         = 0;
+    std::size_t total         = 0;
+    std::size_t docsDropped   = 0;
+    bool        isCapped      = false;
+    std::size_t docsAfterCode = 0;   // reorderDocsAfterCode's moved count: docs_after_code= (0 ⇒ absent)
 };
+
+// …the same clauses from a whole report, plus the docs reorder's reading (the --for and MCP `for` splices).
+inline std::string sigsCutLegendNotes( const SigsCutReport& cut )
+{
+    std::string notes = sigsCutLegendNotes( cut.isCapped, cut.shown, cut.total, cut.docsDropped );
+    if( cut.docsAfterCode > 0 )
+    {
+        notes += kForDocsAfterCodeNote;
+    }
+    return notes;
+}
 
 inline std::size_t sigsDecimalDigits( std::size_t n ) noexcept
 {
@@ -4642,6 +4738,11 @@ inline std::string sigsOpenTag( const SigsCutReport& cut )
     if( cut.docsDropped > 0 )
     {
         rw::formatTo( nb, sizeof( nb ), " docs_dropped=\"{}\"", cut.docsDropped );
+        tag += nb;
+    }
+    if( cut.docsAfterCode > 0 )   // the docs reorder (reorderDocsAfterCode): uncharged, like e= — a disclosure never costs a row
+    {
+        rw::formatTo( nb, sizeof( nb ), " docs_after_code=\"{}\"", cut.docsAfterCode );
         tag += nb;
     }
     tag += ">";
@@ -4844,6 +4945,10 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                                                 //   the shown rows where this is true and `doc` is empty at emission
             std::uint32_t endLine    = 0;       // e= (defEndLine), 0 = not printed; spliced at emission, OUTSIDE `head` and so
                                                 //   outside every byte the gate and the ladder charge (writeSigHeadWithEnd)
+            std::uint32_t displayRank = 0;      // the r= this row is SHOWN with: globalRank, unless reorderDocsAfterCode moved it
+            NodeId        id          = 0;      // the row's symbol, and the head's other inputs — re-rendered when displayRank moves
+            std::string   lensRun;              //   the churn/amp/clone/tested attribute run (qbuf)
+            bool          pureSig     = false;
         };
         std::vector<SigFile>  sigFiles;
         std::vector<SigEntry> entries;
@@ -4976,6 +5081,10 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                 e.positive   = rank[id] > 0.0f;   // A2: this symbol's own score, at collection time
                 e.hadDoc     = hadDoc;
                 e.endLine    = hasSigLensRule( lensRules, SigLensRules::EndLine ) ? defEndLine( s, lineBreaks, src.size() ) : 0u;
+                e.displayRank = globalRank;
+                e.id          = id;
+                e.lensRun     = qbuf;
+                e.pureSig     = pureSig;
                 entries.push_back( std::move( e ) );
                 ++sf.liveCount;
             }
@@ -5066,7 +5175,15 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
         {
             *cappedOut = plan.ladderFires;
         }
-        const SigsCutReport cut = sigsCutReportOf( entries, totalRows, plan );
+        SigsCutReport cut = sigsCutReportOf( entries, totalRows, plan );
+        // CODE ABOVE DOCS: the shown set is final here (the ladder ran on score order); only its order may change
+        if( hasSigLensRule( lensRules, SigLensRules::DocsAfterCode ) )
+        {
+            cut.docsAfterCode = reorderDocsAfterCode( entries,
+                [ & ]( const SigEntry& e ) { return ing.symbols[ e.id ].lang == Lang::Markdown; },
+                [ & ]( SigEntry& e, std::uint32_t newRank )
+                { e.head = sigRowHead( ing, e.id, SigRowFacts{ metrics, fanIn, e.lensRun.c_str(), e.pureSig ? " pure=\"1\"" : "", newRank, topRowNext }, esc, rootArg ); } );
+        }
         if( cutOut )
         {
             *cutOut = cut;
@@ -9031,6 +9148,9 @@ struct JsonSigEntry
     bool          hadDoc     = false;   // the source has a doc comment here (before the rank tiers) — the XML sibling's field
     std::uint32_t endLine    = 0;       // "e" (defEndLine), 0 = no key; spliced at emission, outside `head` and every charged
                                         //   byte (the XML sibling's SigEntry::endLine, same exemption)
+    std::uint32_t displayRank = 0;      // the XML sibling's fields for the docs reorder: the "r" this row is shown with,
+    NodeId        id          = 0;      //   its symbol, and the head inputs a moved row is re-rendered from
+    bool          pureSig     = false;
 };
 
 // §B1.3: how many notes this array-emitter matched, and how many survived the ladder — the caller pairs
@@ -9103,6 +9223,8 @@ struct JsonSigLens
     bool                              endLines            = false;     // the XML sibling's SigLensRules::EndLine: an "e"
                                                                        // key (defEndLine) on every row whose extent is
                                                                        // known — --for only; off ⇒ byte-identical.
+    bool                              docsAfterCode       = false;     // the XML sibling's SigLensRules::DocsAfterCode
+                                                                       // (reorderDocsAfterCode) — --for only.
 };
 
 // One row's `{"l":…` opening through its flag fields — everything EXCEPT doc/sig, which the ladder mutates
@@ -9309,6 +9431,9 @@ inline std::size_t collectJsonSigEntries( const IngestResult& ing, const std::ve
             e.positive   = rank && (*rank)[id] > 0.0f;   // A2: the XML sibling's own field, same definition
             e.hadDoc     = hadDoc;
             e.endLine    = lens.endLines ? defEndLine( s, lineBreaks, src.size() ) : 0u;
+            e.displayRank = globalRank;
+            e.id          = id;
+            e.pureSig     = pureSig;
             outEntries.push_back( std::move( e ) );
             ++sf.liveCount;
         }
@@ -9454,9 +9579,19 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
     {
         *outCapped = plan.ladderFires;   // the LADDER's verdict (the budget_bytes= stanza names its ceiling); cutOut carries capped
     }
-    if( cutOut )
     {
-        *cutOut = sigsCutReportOf( entries, totalRows, plan );
+        SigsCutReport cut = sigsCutReportOf( entries, totalRows, plan );
+        if( lens.docsAfterCode )   // the XML twin's reorder, after the ladder: the shown set is final, only its order changes
+        {
+            cut.docsAfterCode = reorderDocsAfterCode( entries,
+                [ & ]( const JsonSigEntry& e ) { return ing.symbols[ e.id ].lang == Lang::Markdown; },
+                [ & ]( JsonSigEntry& e, std::uint32_t newRank )
+                { e.head = jsonSigRowHead( ing, e.id, ing.symbols[ e.id ].fileId, lens, e.pureSig, rootArg, newRank ); } );
+        }
+        if( cutOut )
+        {
+            *cutOut = cut;
+        }
     }
     if( droppedPositiveOut )
     {
