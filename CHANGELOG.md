@@ -28,7 +28,8 @@ in a Java class with an outside base drawn to an unrelated class's `flush`.
   (a TS/Python/Go annotation, a Go method receiver, a JS `new Foo()`, Python `Foo()` or Go `Foo{}` initializer, an
   import alias of the class); a constructed receiver (`new Foo().m()`); a class-name receiver; a chain of fields
   whose classes are stated (`this.bucket = new Schemas()`, Python `self.x = Foo()`, Go struct and embedded fields);
-  Python `feed = parser.feed`. Ruby keeps only the language-neutral proof below (its own method lookup is separate work).
+  Python `feed = parser.feed`. A JS/TS call on the class object reaches its `static` members only, and a call on an
+  instance never one. Ruby keeps only the language-neutral proof below (its own method lookup is separate work).
 - **A call nothing proves is NAME-ONLY.** Its candidates the language's own lookup proves are its answer (an
   implicit receiver's class and bases, a free function in scope, the module a receiver alias names). With none
   proven, every same-file and same-directory candidate is listed — a lone global one too, because one candidate is
@@ -42,7 +43,7 @@ in a Java class with an outside base drawn to an unrelated class's `flush`.
   are listed at edge weight zero, so a guess never moves PageRank.
 - Measured on the round-1 comparison-table calls for this tool: see the lane report; the gate is
   `test/receiverevidencecheck.sh` (every surface, CLI/MCP parity, census conservation, and near misses
-  for every evidence rule). Ingest records the receiver chain (`kParserVer` 145, `kCacheVersion` 29), so a cache
+  for every evidence rule). Ingest records the receiver chain (`kParserVer` 146, `kCacheVersion` 29), so a cache
   written by an earlier build is re-parsed.
 
 

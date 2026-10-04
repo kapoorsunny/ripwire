@@ -910,7 +910,7 @@ enum class LocalBindKind : std::uint8_t
                    //     var "." is a dot import. fromSymbol kNoNode, spans {0,0}. Read only by graph.h FalseEdgeRules;
                    //     every other binding consumer filters by kind or skips file-scope records. APPENDED (cache u8).
     // FE-B (test/receiverevidencecheck.sh): the receiver-evidence facts graph.h ReceiverEvidence reads, and NOTHING else.
-    //   Every other binding consumer filters by kind or skips these four by isReceiverEvidenceKind below — a field name
+    //   Every other binding consumer filters by kind or skips these five by isReceiverEvidenceKind below — a field name
     //   recorded here is not a local of the method that assigns it, and a type written on a parameter is not a class the
     //   file "names" for the builtin-method gate. APPENDED (cache u8).
     RecvType,      // a parameter or local whose class the source states: var = the name, typeName = the class's final
@@ -926,13 +926,17 @@ enum class LocalBindKind : std::uint8_t
                    //     importedName = the method (Python `feed = parser.feed`).
     NameAlias,     // a file's local spelling of an imported class: var = the local name, typeName = the name it imports
                    //     (Python `from m import Stylesheet as Sheet`; JS/TS read their JsImport records instead).
+    StaticMember,  // a JS/TS class member declared `static`: var = the member's name, typeName "static", recorded INSIDE its
+                   //     body so it attributes to the member. A call on the CLASS reaches only these, a call on an INSTANCE
+                   //     only the others (the two sides of the lookup; #373's Ruby class-object rule, here for JS/TS).
 };
 // The number of LocalBindKind enumerators — the bound readBind validates a cached kind byte against (see kSymKindCount).
-inline constexpr std::size_t kLocalBindKindCount = static_cast<std::size_t>( LocalBindKind::NameAlias ) + 1;
-// FE-B: the four kinds only graph.h ReceiverEvidence reads (see RecvType above).
+inline constexpr std::size_t kLocalBindKindCount = static_cast<std::size_t>( LocalBindKind::StaticMember ) + 1;
+// FE-B: the five kinds only graph.h ReceiverEvidence reads (see RecvType above).
 inline bool isReceiverEvidenceKind( LocalBindKind k ) noexcept
 {
-    return k == LocalBindKind::RecvType || k == LocalBindKind::MemberType || k == LocalBindKind::MethodAlias || k == LocalBindKind::NameAlias;
+    return k == LocalBindKind::RecvType || k == LocalBindKind::MemberType || k == LocalBindKind::MethodAlias || k == LocalBindKind::NameAlias
+        || k == LocalBindKind::StaticMember;
 }
 static_assert( enumCountIsExact<LocalBindKind, kLocalBindKindCount>(), "kLocalBindKindCount must name the LAST LocalBindKind enumerator — move it with the append" );
 

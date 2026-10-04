@@ -85,6 +85,10 @@
 #            misses: own members (private too), an in-repo superclass's member (the cone, and Java super.m()),
 #            a free / top-level function and a Ruby top-level def; a Ruby included module is contract-only (resolved
 #            or hedged, never a false proven row): Ruby's own lookup is separate work.
+#   (S) the two sides of a class lookup: a JS/TS call on the CLASS object (`Gauge.read()`, `this` in a static member)
+#            resolves to the static member only and an instance call never to it; a Kotlin companion member likewise;
+#            a class-name call naming an instance-only member is never proven. A Python `__getattr__` changes nothing
+#            for a member the class defines, and a name its lookup misses is never proven onto another class.
 #   (H) propagation and parity: the name-only witness `respondWith → reply.send()` is marked in --callees,
 #            --callers, --impact (d=1), --path, --connect, --expand <calls>, --for <calls>, the map's <c> rows, MCP
 #            find_symbol, find_referencing_symbols and analyze; the false witness `respond → ctx.onerror()` is absent-or-marked on every
@@ -504,6 +508,28 @@ hopnotproven ts "how does reply build a Response" reply getTime 5
 hopnotproven ts "how does stamped get the time" stamped getTime 5
 hopnotproven py "how does gather append nodes" gather append 5
 
+echo "=== (S) the two SIDES of a class lookup, and a fallback hook only after a miss (#373's Ruby class-object rule) ==="
+# JS: Gauge.read() is the static (line 3) and never the instance read (line 4); new Gauge().read() the reverse; `this` inside
+# a static member is the class. Plain.read() names an instance-only member on the CLASS: never proven (hedged or absent).
+proven    js callees lib/sides.js:onClass "method read lib/sides.js:3"
+notproven js callees lib/sides.js:onClass "read lib/sides.js:4"
+proven    js callees lib/sides.js:onInstance "method read lib/sides.js:4"
+notproven js callees lib/sides.js:onInstance "read lib/sides.js:3"
+proven    js callees lib/sides.js:make "method read lib/sides.js:3"
+notproven js callees lib/sides.js:make "read lib/sides.js:4"
+notproven js callees lib/sides.js:wrongSide "read lib/sides.js:8" "read lib/sides.js:4"
+# TS: the same through a class-name receiver and a typed parameter
+proven    ts callees src/sides.ts:onClass "method read src/sides.ts:3"
+notproven ts callees src/sides.ts:onClass "read src/sides.ts:4"
+proven    ts callees src/sides.ts:onTyped "method read src/sides.ts:4"
+notproven ts callees src/sides.ts:onTyped "read src/sides.ts:3"
+# Kotlin: Dial.read() is the companion's; Knob().read() never the companion's
+exactproven kt callees src/app/Sides.kt:onClass "fn read src/app/Sides.kt"
+notproven kt callees src/app/Sides.kt:onInstance "read src/app/Sides.kt:6"
+# Python __getattr__ runs only after a miss: run()'s self.real() resolves to Proxyish.real (the hook changes nothing for a
+# member the class defines); self.ghost() — a name the lookup misses — is never proven onto another class's ghost
+proven    py callees src/tui/ghost.py:run "fn real src/tui/ghost.py:7"
+notproven py callees src/tui/ghost.py:run "real src/tui/ghost.py:19" "ghost src/tui/ghost.py:16"
 echo "=== (H) propagation: one hedge, every surface ==="
 # the name-only TRUE witness respondWith → reply.send(): kept and marked everywhere
 marked js callers lib/reply.js:send "respondWith lib/reply.js"

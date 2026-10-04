@@ -4107,14 +4107,15 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 const std::string_view callerCls = recvEv.callerClass( ref.fromSymbol );
                 if( !callerCls.empty() )
                 {
-                    return !owner.empty() && recvEv.inCone( callerCls, owner );
+                    return !owner.empty() && recvEv.inCone( callerCls, owner ) && recvEv.onSide( ref, c, recvEv.callerIsStatic( ref.fromSymbol ) );
                 }
                 return owner.empty() && cs.fileId == ref.fileId && cs.kind == SymKind::Method;   // an object literal's own member
             }
             if( isSuperRoot( ch.root ) )
             {
                 const std::string_view callerCls = recvEv.callerClass( ref.fromSymbol );
-                return !callerCls.empty() && !owner.empty() && owner != callerCls && recvEv.inCone( callerCls, owner );
+                return !callerCls.empty() && !owner.empty() && owner != callerCls && recvEv.inCone( callerCls, owner )
+                    && recvEv.onSide( ref, c, recvEv.callerIsStatic( ref.fromSymbol ) );
             }
             if( recvEv.isLocalName( ref.fromSymbol, ch.root ) || externalVeto.hasLocal( ref, ch.root ) )
             {
@@ -4133,7 +4134,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 }
             }
             const std::string_view cls = recvEv.unalias( ref.fileId, ch.root );
-            return !owner.empty() && recvEv.namesClass( ref, ch.root, cls ) && recvEv.inCone( cls, owner );   // a class-name receiver: the class or a base
+            return !owner.empty() && recvEv.namesClass( ref, ch.root, cls ) && recvEv.inCone( cls, owner )   // a class-name receiver: the class or a base,
+                && recvEv.onSide( ref, c, /*classSide=*/true );                                                 // its CLASS side
         }
         if( implicitReceiverLang( ref.lang ) )
         {
