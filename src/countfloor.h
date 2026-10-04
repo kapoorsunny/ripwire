@@ -35,8 +35,10 @@
 #include "infra/Diagnostics.h"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <optional>
 #include <span>
 #include <string>
@@ -54,34 +56,36 @@ namespace rw
 //   NotCode  — a markdown heading or a file's module scope: no code calls or reads it, so a zero there is simply true.
 enum class UseForm : std::uint8_t { Calls, NotCalls, NotCode };
 
+// One reading per SymKind, in enum order (model.h's kRefRoleTagTable shape: a declarative table, and the static_assert
+// is the guard a -Werror=switch would be — a NEW kind without a reading is a build error, never a silent default).
+inline constexpr UseForm kUseFormOfKind[] = {
+    UseForm::Calls,      // Function
+    UseForm::Calls,      // Method
+    UseForm::NotCalls,   // Class: a constructor call is one use; a type mention, a base clause, an isinstance are the rest
+    UseForm::NotCalls,   // Struct
+    UseForm::NotCalls,   // Interface
+    UseForm::NotCalls,   // Var
+    UseForm::NotCode,    // Section (a markdown heading)
+    UseForm::Calls,      // Macro (a function-like invocation binds as a call)
+    UseForm::NotCalls,   // Field
+    UseForm::NotCalls,   // Other
+    UseForm::NotCode,    // ModuleScope
+};
+static_assert( std::size( kUseFormOfKind ) == kSymKindCount, "kUseFormOfKind: one reading per SymKind, in enum order" );
+
 inline UseForm useFormOf( const Symbol& s ) noexcept
 {
-    switch( s.kind )
-    {
-        case SymKind::Function:
-        case SymKind::Method:
-        case SymKind::Macro:
-            return UseForm::Calls;
-        case SymKind::Section:
-        case SymKind::ModuleScope:
-            return UseForm::NotCode;
-        case SymKind::Class:       // a constructor call is one use; a type mention, a base clause, an isinstance are the rest
-        case SymKind::Struct:
-        case SymKind::Interface:
-        case SymKind::Var:
-        case SymKind::Field:
-        case SymKind::Other:
-            return UseForm::NotCalls;
-    }
-    return UseForm::NotCalls;   // a byte past the enum: the conservative answer (a floor), never a silent total
+    return enumTableAt( kUseFormOfKind, s.kind, UseForm::NotCalls );   // past the enum: the conservative reading (a floor)
 }
 
-// Whether a read/write/type use of a symbol in `lang` reaches the use-site table in an ingest that captured value
-// uses (ingest_sidecap.h arms that pass for C++, ObjC and Python only). Outside those, `--uses` lists calls and value
-// references but never a read, so the honest follow-up for a NotCalls symbol is the literal scan.
+// The languages whose read/write/type uses reach the use-site table in an ingest that captured value uses
+// (ingest_sidecap.h arms that pass for C++, ObjC and Python only). Outside them `--uses` lists calls and value references
+// but never a read, so the honest follow-up for a NotCalls symbol is the literal scan.
+inline constexpr std::array<Lang, 3> kValueUsesArmedLangs = { Lang::Cpp, Lang::ObjC, Lang::Python };
+
 inline bool valueUsesArmedFor( Lang lang ) noexcept
 {
-    return lang == Lang::Cpp || lang == Lang::ObjC || lang == Lang::Python;
+    return std::ranges::find( kValueUsesArmedLangs, lang ) != kValueUsesArmedLangs.end();
 }
 
 // The follow-up that finds what a floored count could not: the uses verb lists every call, value and (where armed)
@@ -92,9 +96,8 @@ inline bool valueUsesArmedFor( Lang lang ) noexcept
 // uses verb never sees — so a header's NotCalls symbol gets the literal scan too (`struct cell` in a.h used in a.c).
 inline std::string countFloorNext( const IngestResult& ing, const Symbol& s )
 {
-    const std::string_view path     = s.fileId < ing.files.size() ? std::string_view( ing.files[ s.fileId ] ) : std::string_view();
-    const bool             cHeader  = path.ends_with( ".h" );
-    const bool             literal  = useFormOf( s ) == UseForm::NotCalls && ( !valueUsesArmedFor( s.lang ) || cHeader );
+    const std::string_view path    = s.fileId < ing.files.size() ? std::string_view( ing.files[ s.fileId ] ) : std::string_view();
+    const bool             literal = useFormOf( s ) == UseForm::NotCalls && ( !valueUsesArmedFor( s.lang ) || path.ends_with( ".h" ) );
     return nextFlag( literal ? "--grep=" : "--uses=", s.name );
 }
 
@@ -102,146 +105,156 @@ inline std::string countFloorNext( const IngestResult& ing, const Symbol& s )
 struct CallerFloor
 {
     bool        isFloor = false;
-    bool        unmodelled = false;   // the NotCalls reason (no call form): the safe-delete verdict reads it
     std::string next;
 };
+
+namespace countfloor
+{
+
+// Row indices by the NAME their definitions share — a name may head several rows (two <enc> chains `A::f` and `B::f`),
+// and the reference table is keyed by spelling, so every lookup below asks of the name.
+using RowsOfName = HashMap<std::string_view, std::vector<std::uint32_t>>;
+using IdsOfName  = HashMap<std::string_view, std::vector<NodeId>>;
+
+// The use form of a row: NotCalls if ANY definition is read/named (its count is blind to that one), else Calls if any is
+// called, else NotCode (headings and module scopes only).
+inline UseForm rowUseForm( const IngestResult& ing, std::span<const NodeId> ids ) noexcept
+{
+    bool anyCalls = false;
+    for( const NodeId id : ids )
+    {
+        const UseForm form = id < ing.symbols.size() ? useFormOf( ing.symbols[id] ) : UseForm::NotCode;
+        if( form == UseForm::NotCalls )
+        {
+            return UseForm::NotCalls;
+        }
+        anyCalls = anyCalls || form == UseForm::Calls;
+    }
+    return anyCalls ? UseForm::Calls : UseForm::NotCode;
+}
+
+// For every symbol whose name heads a row, `relatedOf( id )` appended under that name, then sorted and deduplicated so a
+// membership test is a binary search: the callers of every same-named definition, or every implementor of one.
+template<class RelatedOf>
+inline IdsOfName relatedByName( const IngestResult& ing, const RowsOfName& rowsOfName, std::size_t idLimit, RelatedOf&& relatedOf )
+{
+    IdsOfName out;
+    for( NodeId id = 0; id < ing.symbols.size() && id < idLimit; ++id )
+    {
+        const auto it = rowsOfName.find( std::string_view( ing.symbols[id].name ) );
+        if( it != rowsOfName.end() )
+        {
+            relatedOf( id, out[ it->first ] );
+        }
+    }
+    for( auto& [ name, ids ] : out )
+    {
+        std::sort( ids.begin(), ids.end() );
+        ids.erase( std::unique( ids.begin(), ids.end() ), ids.end() );
+    }
+    return out;
+}
+
+// ONE pass over the reference table: a reference `isKind` accepts, spelled like a row's name, from a symbol that is not
+// in that name's `bound` set (or from file scope), marks every row of the name. `mark( row )` is the caller's verdict.
+template<class IsKind, class Mark>
+inline void markUnboundSpellings( const IngestResult& ing, const RowsOfName& rowsOfName, const IdsOfName& bound, IsKind&& isKind, Mark&& mark )
+{
+    for( const Reference& r : ing.references )
+    {
+        if( !isKind( r ) )
+        {
+            continue;
+        }
+        const auto it = rowsOfName.find( std::string_view( r.calleeName ) );
+        if( it == rowsOfName.end() )
+        {
+            continue;
+        }
+        const auto boundIt = bound.find( it->first );
+        const bool isBound = r.fromSymbol != kNoNode && boundIt != bound.end()
+                             && std::binary_search( boundIt->second.begin(), boundIt->second.end(), r.fromSymbol );
+        if( !isBound )
+        {
+            for( const std::uint32_t row : it->second )
+            {
+                mark( row );
+            }
+        }
+    }
+}
+
+inline bool isCallSpelling( const Reference& r ) noexcept
+{
+    return ( r.role == RefRole::Call || r.role == RefRole::Macro ) && !r.isInherit && !r.isDocLink && !r.isCompose && r.lang != Lang::Markdown;
+}
+
+// The value evidence for one row: a non-decorator value reference (a decorator row, into="@name", is a fact about the
+// definition, not a path that calls it).
+inline bool hasValueUse( const IngestResult& ing, const ValueRefIndex& vri, std::span<const NodeId> ids )
+{
+    for( const ValueRefRow& vr : valueRefCallerRows( ing, vri, ids ).rows )
+    {
+        if( vr.ref < ing.references.size() && !ing.references[ vr.ref ].fieldName.starts_with( '@' ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+}   // namespace countfloor
 
 // callers= floors for a batch of rows: sets[i] is one row's definitions (all one NAME — a grep <enc> row's ids, a
 // safe-delete selector's defs). ONE pass over the symbols and ONE over the references, whatever the row count —
 // never a per-row rescan of the reference table (editcheck.h's rule). `vri` may be null: then it is built here, once,
-// and only when a Calls row is still undecided after the cheaper evidence.
+// and only when a Calls row is still undecided after the cheaper evidence. Evidence, cheapest first: the use form, the
+// declined calls, the unbound same-name calls, the value uses.
 inline std::vector<CallerFloor> callerFloors( const IngestResult& ing, const Graph& g, std::span<const std::vector<NodeId>> sets,
                                               const ValueRefIndex* vri = nullptr )
 {
     std::vector<CallerFloor> out( sets.size() );
-    if( sets.empty() )
-    {
-        return out;
-    }
-    const std::size_t nodeCount = g.wOutDeg.size();
-    const auto*       inRo      = g.inEdges.rowOffsets();
-    const auto*       inCi      = g.inEdges.colIndices();
-
-    // Row → its name; a name may head several rows (two <enc> chains `A::f` and `B::f`) — each row asks of the NAME.
-    HashMap<std::string_view, std::vector<std::uint32_t>> rowsOfName;
-    std::vector<std::uint32_t>                            pending;   // Calls rows not yet decided by the cheap evidence
+    countfloor::RowsOfName   rowsOfName;
+    std::vector<std::uint32_t> pending;   // Calls rows the use form and the declines left undecided
     for( std::uint32_t i = 0; i < sets.size(); ++i )
     {
         const std::vector<NodeId>& ids = sets[i];
-        bool anyNotCalls = false;
-        bool anyCalls    = false;
-        for( const NodeId id : ids )
-        {
-            if( id >= ing.symbols.size() )
-            {
-                continue;
-            }
-            const UseForm form = useFormOf( ing.symbols[id] );
-            anyNotCalls = anyNotCalls || form == UseForm::NotCalls;
-            anyCalls    = anyCalls || form == UseForm::Calls;
-        }
         if( ids.empty() || ids[0] >= ing.symbols.size() )
         {
             continue;
         }
-        if( anyNotCalls )
+        const UseForm form = countfloor::rowUseForm( ing, ids );
+        out[i].isFloor = form == UseForm::NotCalls || ( form == UseForm::Calls && declinedCallsNaming( g, ids ) > 0 );
+        if( form == UseForm::Calls && !out[i].isFloor )
         {
-            out[i].isFloor = true;
-            out[i].unmodelled = true;
-            continue;
+            rowsOfName[ std::string_view( ing.symbols[ ids[0] ].name ) ].push_back( i );
+            pending.push_back( i );
         }
-        if( !anyCalls )
-        {
-            continue;   // NotCode only: nothing calls or reads a heading, the zero is true
-        }
-        if( declinedCallsNaming( g, ids ) > 0 )
-        {
-            out[i].isFloor = true;
-            continue;
-        }
-        rowsOfName[ std::string_view( ing.symbols[ ids[0] ].name ) ].push_back( i );
-        pending.push_back( i );
     }
 
     if( !pending.empty() )
     {
-        // Per pending NAME: every symbol with an edge into ANY definition of that name. A call from one of them was
-        // bound somewhere — to this row or to a same-named sibling — so it is not evidence of a miss.
-        HashMap<std::string_view, std::vector<NodeId>> boundCallers;
-        for( NodeId id = 0; id < ing.symbols.size() && id < nodeCount; ++id )
-        {
-            const auto it = rowsOfName.find( std::string_view( ing.symbols[id].name ) );
-            if( it == rowsOfName.end() )
-            {
-                continue;
-            }
-            std::vector<NodeId>& bound = boundCallers[ it->first ];
-            for( std::uint32_t k = inRo[id]; k < inRo[id + 1]; ++k )
-            {
-                bound.push_back( inCi[k] );
-            }
-        }
-        for( auto& [ name, bound ] : boundCallers )
-        {
-            std::sort( bound.begin(), bound.end() );
-            bound.erase( std::unique( bound.begin(), bound.end() ), bound.end() );
-        }
+        // A call from a symbol with an edge into ANY definition of the name was bound somewhere — to this row or to a
+        // same-named sibling — so it is not evidence of a miss.
+        const auto* inRo = g.inEdges.rowOffsets();
+        const auto* inCi = g.inEdges.colIndices();
+        const countfloor::IdsOfName boundCallers = countfloor::relatedByName( ing, rowsOfName, g.wOutDeg.size(),
+            [ & ]( NodeId id, std::vector<NodeId>& into ) { into.insert( into.end(), inCi + inRo[id], inCi + inRo[id + 1] ); } );
+        countfloor::markUnboundSpellings( ing, rowsOfName, boundCallers, countfloor::isCallSpelling,
+                                          [ & ]( std::uint32_t row ) { out[row].isFloor = true; } );
 
-        // ONE pass: a call or macro site spelled like a pending name, from a symbol no edge of that name leaves.
-        for( const Reference& r : ing.references )
-        {
-            if( ( r.role != RefRole::Call && r.role != RefRole::Macro ) || r.isInherit || r.isDocLink || r.isCompose || r.lang == Lang::Markdown )
-            {
-                continue;
-            }
-            const auto it = rowsOfName.find( std::string_view( r.calleeName ) );
-            if( it == rowsOfName.end() )
-            {
-                continue;
-            }
-            const auto                 boundIt = boundCallers.find( it->first );
-            const std::vector<NodeId>* bound   = boundIt == boundCallers.end() ? nullptr : &boundIt->second;
-            const bool isBound = r.fromSymbol != kNoNode && bound != nullptr && std::binary_search( bound->begin(), bound->end(), r.fromSymbol );
-            if( isBound )
-            {
-                continue;
-            }
-            for( const std::uint32_t row : it->second )
-            {
-                out[row].isFloor = true;
-            }
-        }
-
-        // value evidence, last and only where still undecided: a ValueRefIndex is one more pass over the table.
-        std::vector<std::uint32_t> stillOpen;
+        std::optional<ValueRefIndex> own;   // one more pass over the table: built only if a row is still open
         for( const std::uint32_t row : pending )
         {
-            if( !out[row].isFloor )
+            if( out[row].isFloor )
             {
-                stillOpen.push_back( row );
+                continue;
             }
-        }
-        if( !stillOpen.empty() )
-        {
-            std::optional<ValueRefIndex> own;
-            const ValueRefIndex*         index = vri;
-            if( index == nullptr )
+            if( vri == nullptr && !own )
             {
                 own.emplace( ing );
-                index = &*own;
             }
-            for( const std::uint32_t row : stillOpen )
-            {
-                for( const ValueRefRow& vr : valueRefCallerRows( ing, *index, sets[row] ).rows )
-                {
-                    // a decorator row (into="@name") is a fact about the definition, not a path that calls it
-                    if( vr.ref < ing.references.size() && !ing.references[ vr.ref ].fieldName.starts_with( '@' ) )
-                    {
-                        out[row].isFloor = true;
-                        break;
-                    }
-                }
-            }
+            out[row].isFloor = countfloor::hasValueUse( ing, vri != nullptr ? *vri : *own, sets[row] );
         }
     }
 
@@ -263,8 +276,8 @@ inline std::vector<CallerFloor> callerFloors( const IngestResult& ing, const Gra
 inline std::vector<char> implementorFloors( const IngestResult& ing, const std::vector<std::vector<NodeId>>& graphImplementors,
                                             std::span<const NodeId> ifaces )
 {
-    std::vector<char> out( ifaces.size(), 0 );
-    HashMap<std::string_view, std::vector<std::uint32_t>> rowsOfName;
+    std::vector<char>      out( ifaces.size(), 0 );
+    countfloor::RowsOfName rowsOfName;
     for( std::uint32_t i = 0; i < ifaces.size(); ++i )
     {
         if( ifaces[i] < ing.symbols.size() )
@@ -276,44 +289,10 @@ inline std::vector<char> implementorFloors( const IngestResult& ing, const std::
     {
         return out;
     }
-    HashMap<std::string_view, std::vector<NodeId>> boundDerived;   // every implementor of any def of the name
-    for( NodeId id = 0; id < ing.symbols.size() && id < graphImplementors.size(); ++id )
-    {
-        const auto it = rowsOfName.find( std::string_view( ing.symbols[id].name ) );
-        if( it == rowsOfName.end() )
-        {
-            continue;
-        }
-        std::vector<NodeId>& bound = boundDerived[ it->first ];
-        bound.insert( bound.end(), graphImplementors[id].begin(), graphImplementors[id].end() );
-    }
-    for( auto& [ name, bound ] : boundDerived )
-    {
-        std::sort( bound.begin(), bound.end() );
-        bound.erase( std::unique( bound.begin(), bound.end() ), bound.end() );
-    }
-    for( const Reference& r : ing.references )
-    {
-        if( !r.isInherit && r.role != RefRole::Extends )
-        {
-            continue;
-        }
-        const auto it = rowsOfName.find( std::string_view( r.calleeName ) );
-        if( it == rowsOfName.end() )
-        {
-            continue;
-        }
-        const auto boundIt = boundDerived.find( it->first );
-        const bool isBound = r.fromSymbol != kNoNode && boundIt != boundDerived.end()
-                             && std::binary_search( boundIt->second.begin(), boundIt->second.end(), r.fromSymbol );
-        if( !isBound )
-        {
-            for( const std::uint32_t row : it->second )
-            {
-                out[row] = 1;
-            }
-        }
-    }
+    const countfloor::IdsOfName boundDerived = countfloor::relatedByName( ing, rowsOfName, graphImplementors.size(),
+        [ & ]( NodeId id, std::vector<NodeId>& into ) { into.insert( into.end(), graphImplementors[id].begin(), graphImplementors[id].end() ); } );
+    countfloor::markUnboundSpellings( ing, rowsOfName, boundDerived, []( const Reference& r ) { return r.isInherit || r.role == RefRole::Extends; },
+                                      [ & ]( std::uint32_t row ) { out[row] = 1; } );
     return out;
 }
 
