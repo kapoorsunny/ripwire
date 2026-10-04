@@ -387,6 +387,7 @@
 "pargatescheck.sh": 8.9,
 "parsehealthcheck.sh": 1.9,
 "partitioncheck.sh": 7.2,
+"pathgapcheck.sh": 1.5,
 "patterncheck.sh": 5.0,
 "perfharnesscheck.sh": 8.6,
 "phpcheck.sh": 2.4,

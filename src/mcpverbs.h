@@ -37,6 +37,7 @@
 #include "slice.h"         // lane/tc-sliceat: the shared --slice / MCP slice def-use core (sliceBundleText — ONE emitter, two surfaces)
 #include "fielduses.h"     // the member-variable round: the ONE --uses=Owner.field renderer (renderFieldUses — CLI ≡ MCP)
 #include "testmap.h"       // lane/t10-mcp-coverage: writeAffectedReport — the shared --affected / `affected` verb renderer
+#include "pathgaps.h"      // PATH-GAP: the shared gap analysis + clause of --path / path_between
 
 #include <filesystem>      // §B6 M3: the shared root-path existence/directory check (mcpRootRefusal below)
 #include <optional>        // mcpAnswerText / usesText: nullopt is an answer buffer that failed, never an empty answer
@@ -3197,9 +3198,11 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
     // H5: the same brief floor legend + marker the CLI --path prints (verbs_navigate.h) — one wording, two transports.
     // Reference-as-value round: the CLI --path's to_value_refs=, by the same call.
     const std::size_t ptToValueRefs = toValueRefsCount( ing, pth.empty(), dstDefs, &valueRefIndexOf( ix ) );
+    // PATH-GAP: the CLI --path's gap clause, by the same analysis and emitter (src/pathgaps.h).
+    const PathSearchGaps ptGaps = pth.empty() ? pathSearchGaps( ing, g, srcDefs, valueRefIndexOf( ix ) ) : PathSearchGaps{};
     rw::emitTo( mem, "<!-- ripwire path: one DIRECTED call path from= to to= (each <s> a hop); reachable= is 0 and hops= 0 when the "
-                       "graph holds none. {}{}{}-->{}", unprovenDefsVerbLegend( UnprovenDefsVerb::Path, unprovenDefs > 0 ).c_str(),
-                  toValueRefsLegend( ptToValueRefs > 0 ),
+                       "graph holds none. {}{}{}{}-->{}", unprovenDefsVerbLegend( UnprovenDefsVerb::Path, unprovenDefs > 0 ).c_str(),
+                  toValueRefsLegend( ptToValueRefs > 0 ), pathGapsLegend( ptGaps.any() ),
                   graphCountFloorBrief( rw::graphGaugeClauses( g ) ).c_str(), rootRelPathsLegend( ptSingleRoot ) );
     rw::emitTo( mem, "<path from=\"{}\" to=\"{}\" from_p=\"{}\" to_p=\"{}\" from_defs=\"{}\" to_defs=\"{}\"{} reachable=\"{}\" hops=\"{}\"{}{}",
                   ex( from ).c_str(), ex( to ).c_str(), loc( srcUsed ).c_str(), loc( dstUsed ).c_str(),
@@ -3207,12 +3210,20 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
                   pth.empty() ? 0 : 1, pth.empty() ? std::size_t( 0 ) : pth.size() - 1, ptRootAttr.c_str(),
                   graphCountFloorAttrXml( g ).c_str()  );   // M15: gauge + marker
     rw::emitTo( mem, "{}", countAttrXmlOrEmpty( "to_value_refs", ptToValueRefs ) );   // absent at zero, as on the CLI
-    if( pth.empty() )
+    std::string ptGapRows;
+    if( ptGaps.any() )
+    {
+        const PathGapsXml gx = pathGapsXml( ing, ptGaps, ptSingleRoot, ptRootPrefix, "the connect verb on " + from + "," + to, "" );
+        rw::emitTo( mem, "{}", gx.rootAttrs );
+        ptGapRows = gx.rows;
+    }
+    else if( pth.empty() )
     {
         rw::emitTo( mem, " hint=\"no directed call path — try the connect verb on {},{} (undirected: finds a shared caller), or uses/impact for non-call references\"",
                       ex( from ).c_str(), ex( to ).c_str() );
     }
     rw::emitRaw( mem, ">" );
+    rw::emitRaw( mem, ptGapRows.c_str() );
     for( NodeId n : pth )
     { const Symbol&           s  = ing.symbols[n];
       const std::string_view  rp = ptSingleRoot ? sarif::rootRelativeUri( ing.files[ s.fileId ], ptRootPrefix ) : std::string_view( ing.files[ s.fileId ] );

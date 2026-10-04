@@ -71,7 +71,9 @@ inline constexpr NodeId kNoNode = 0xFFFFFFFFu;
 // interface keeps t="struct"/t="iface". Every other language's @definition.type capture still maps to Struct (C/C++
 // typedef and enum, TS/Swift/Dart aliases, Java/C#/PHP/GDScript enums, Elixir @type) — a disclosed floor, not a claim
 // that those are structs. The three kinds BEHAVE as Struct did everywhere a predicate reads the kind
-// (isStructOrNamedType below): only the label changes, so callable/owner/type-like semantics are byte-identical.
+// (isStructOrNamedType below), so only the label changes: a label-normalised base-vs-head sample over Go fixtures and
+// 26 argv found no other byte moved (2026-10-04, this lane). Dropping the helper moved nothing on
+// those probes either, so it is a guard for predicates no Go fixture reaches today, not a proven behaviour.
 enum class SymKind : std::uint8_t { Function, Method, Class, Struct, Interface, Var, Section, Macro, Field, Other, ModuleScope, NamedType, Alias, FuncType };
 // The number of SymKind enumerators, and the bound a cached def's kind byte is VALIDATED against on the way
 // back in (ingest_cache.h ByteR::enumU8). The static_assert is not a restatement: enumCountIsExact asks the

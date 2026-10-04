@@ -2368,11 +2368,11 @@ inline constexpr std::string_view kModScopeMapLegend =
 // honesty-small-068: the three Go named-type kinds' reading, appended ONLY when the corpus has one (the modscope clause's
 // byte-identity rule: a corpus without such a row keeps every byte of this legend). What it does NOT mean: t=type is not
 // "a struct" (its underlying form is not a struct/interface/func, or is another named type the parse cannot see into),
-// and only Go is split — another language's typedef/alias/enum still reads t=struct.
+// and only Go is split — another language's typedef/alias/enum still reads t=struct (said in model.h and the gate's
+// arm F, not in every Go answer: the clause rides each Go map, so it carries only what a Go row needs).
 inline constexpr std::string_view kNamedTypeMapLegend =
-    "<!-- t=type|alias|functype=a-Go-named-type-by-its-written-form:type=a-defined-type-over-a-non-struct-form-or-another-named-type"
-    "(type-N-string,type-L[T-any][]T),alias=type-A=B,functype=type-F-func(...);struct/iface-keep-their-own-t;"
-    "other-languages'-typedef/alias/enum-still-read-t=struct -->";
+    "<!-- t=type|alias|functype=a-Go-named-type-by-its-written-form:type=a-defined-type-not-a-struct/iface/func(type-N-string),"
+    "alias=type-A=B,functype=type-F-func(...) -->";
 
 // EXTENT HONESTY (src/extentsuspect.h, gate test/extentcheck.sh) — the ONE reading of extent_suspect= on every ROW
 // surface: the map's <s>, a bundle's <d> and <b>. Written only into a document that carries the attribute, right
