@@ -450,7 +450,7 @@ inline std::string sinceLogArgs( const SinceScope& scope, const char* fallbackSi
 // repo 43 of 1028 paths moved, ALL upward, none downward, and 2 appeared for the first time.
 //
 // Cost: 0.103 s → 0.148 s for the whole-history walk on this repo (1133 commits, 133 merges) — one popen,
-// and the expensive walk is memoized (quality::gitCoChangeAndChurnCached; its cache SCHEME is bumped with
+// and the expensive walk is memoized (quality::gitRawCommitStreamCached; its cache SCHEME is bumped with
 // this change, since a warm blob written by a merge-blind binary would otherwise keep serving the old stream).
 //
 // `-c` after `log` is git log's combined-diff option; it is NOT the `git -c core.quotepath=false` config
@@ -1550,7 +1550,7 @@ inline std::int64_t approxMonthsAgoEpoch( unsigned months )
 
 // The RAW, per-commit (epoch, changed-paths) stream from ONE `git log --name-only` walk
 // over `coSince`: the parsed-but-UNRESOLVED form gitCoChangeAndChurn needs. Split out of that function so
-// it can be MEMOIZED (quality::gitCoChangeAndChurnCached) independent of any particular ingest's fileId
+// it can be MEMOIZED (quality::gitRawCommitStreamCached) independent of any particular ingest's fileId
 // space — paths stay raw repo-relative strings here; resolveCommitStream (below) resolves them against a
 // CALLER-supplied `ing` fresh on every call. Committed-history-only by construction (git log never sees
 // working-tree state), which is exactly what makes this cacheable: two calls with the SAME (repo, coSince)
@@ -1629,7 +1629,7 @@ inline std::string gitWindowBoundarySha( const std::string& root, const std::str
 
 // Resolve a RawCommitStream against the CURRENT `ing` (+ `onlyRoot`) into the same (sets, churn) shape
 // gitCoChangeAndChurn has always returned — pure in-memory work (basename/suffix matching + a churn tally),
-// no subprocess. Split out (Y2) so the cached path (quality::gitCoChangeAndChurnCached) and the uncached
+// no subprocess. Split out (Y2) so the cached path (quality::resolveHistoryWalk) and the uncached
 // path (gitCoChangeAndChurn, below) share ONE resolver instead of two copies that could drift.
 inline std::vector<std::vector<std::uint32_t>> resolveCommitStream(
     const RawCommitStream& raw, const IngestResult& ing, std::size_t maxFiles,
@@ -1704,7 +1704,7 @@ inline std::vector<std::vector<std::uint32_t>> resolveCommitStream(
 //
 // This UNCACHED form is now a thin raw-walk + resolve composition (below) — kept as-is for
 // any caller that doesn't want the memoized path. The two rich-verb call sites (main.cpp's --metrics/--for
-// amp=/churn= computation) go through quality::gitCoChangeAndChurnCached instead, which memoizes exactly
+// amp=/churn= computation) go through quality::gitRawCommitStreamCached + resolveHistoryWalk instead, which memoize exactly
 // the expensive part (gitLogNameOnlyRaw) this function also calls.
 inline std::vector<std::vector<std::uint32_t>> gitCoChangeAndChurn(
     const std::string& root, const IngestResult& ing, const char* coSince, std::size_t maxFiles,
