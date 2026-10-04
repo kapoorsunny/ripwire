@@ -799,12 +799,14 @@ inline RefOutcome applyRefPosture( std::string& doc, LegendSession& session )
     // lean-answers lane: a session OPENED by its first inline answer (openSessionWith, the MCP default) was never sent the
     // core — the reading of <about legend="ref"> itself. Its first ref answer carries every unserved core entry in the
     // same trailing comment as any other unserved entry, so the honesty rule above holds without a resource read.
-    std::string core;
+    // The core ids are marked served ONLY when the ref answer goes out: an answer kept inline (below) never carried them.
+    std::string              core;
+    std::vector<std::size_t> coreIds;
     for( std::size_t id = 0; id < kCoreCount; ++id )
     {
         if( !session.isServed( id ) )
         {
-            head->touched.push_back( id );
+            coreIds.push_back( id );
             core += core.empty() ? "" : " ";
             core.append( entryBody( id ) );
             core += '.';
@@ -836,6 +838,7 @@ inline RefOutcome applyRefPosture( std::string& doc, LegendSession& session )
     out += parts.trailer;
     out += shape->closeTag;
     ENSURES( out.size() <= doc.size(), "a ref answer is never longer than the inline answer it replaces" );
+    for( const std::size_t id : coreIds ) { session.markServed( id ); }   // carried by this ref answer's trailing comment
     doc.swap( out );
     return RefOutcome::Ref;
 }

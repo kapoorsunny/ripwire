@@ -531,6 +531,9 @@ struct McpDispatchPolicy
     // time); the HTTP transport passes none, so every answer there keeps its legend inline and the resource read that
     // switches a stdio session to legend="ref" only serves text. See legenddict.h.
     legenddict::LegendSession* legendSession = nullptr;
+    // lean-answers lane: whether that session OPENS on its first reducible answer (the stdio default) or only on a read of
+    // ripwire://legend-dict (--mcp-legend=inline, the pre-lane posture). Read only where legendSession is set.
+    bool                       legendOpensOnFirstAnswer = false;
     // --mcp-tools: bit i = kMcpVerbTable[ i ] is listed and callable. The whole catalog unless the flag narrowed it;
     // toolSpec is the flag's value as typed, rendered only under a subset (the refusal and the instructions note).
     McpToolMask toolMask = kMcpAllToolsMask;
@@ -1034,6 +1037,13 @@ inline std::string mcpLegendPointer( const McpDispatchPolicy& policy )
     {
         return {};
     }
+    if( !policy.legendOpensOnFirstAnswer )   // --mcp-legend=inline: the pre-lane pointer, byte for byte
+    {
+        return " Legends: each answer defines its own attributes until this session reads the resource ripwire://legend-dict "
+               "once (dictv=" + legenddict::dictionaryVersion() + "); after that answers list rows first, carry a definition "
+               "only the first time the session meets it, and end with <about legend=\"ref\"/>. legend:\"compact\" on a call "
+               "that takes it keeps that answer's legend inline.";
+    }
     return " Legends: the session's first answer defines its own attributes inline (dictv=" + legenddict::dictionaryVersion()
            + "); later answers list rows first, carry a definition only the first time the session meets it, and end with "
            "<about legend=\"ref\"/>; ripwire://legend-dict/full holds every definition. legend:\"compact\" on a call "
@@ -1364,7 +1374,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                    + mcprefuse::toolMetadataFor( "edit_check", pathIsRequired ) + "},"
                    // The cross-branch + dark-content verbs. Read-only git plumbing, no index
                    // coupling for the first two (they read OTHER refs' blobs, which the index never ingested).
-                   + mcprefuse::gitOnlyStanza( omitGitVerbs, "{\"name\":\"whereis\",\"description\":\"WHERE DOES THIS CONTENT LIVE? Which branch's tree defines or mentions a symbol, HEAD first, with on-head=0 naming the case this verb exists for: content that lives only on a branch (a finished fix stranded on 1 of 30 refs). Each distinct blob is read once (content-addressed), so N branches cost about one tree. kind=def on a REF row is a LEXICAL heuristic (ref blobs are raw text, never ingested) — for HEAD's parsed answer use find_symbol/fetch_body. symbol = the name, or an @FILE:LINE seed; kind = optional ref-name substring filter, echoed as filter=; limit/offset page the hits (first 60). listing = defs (default: the kind=def rows, the kind=ref rows counted in <refs count= next=>), refs or all. at= is HEAD's sha; +dirty = changed paths read from the working tree (worktree=). Single-root; read-only.\","
+                   + mcprefuse::gitOnlyStanza( omitGitVerbs, "{\"name\":\"whereis\",\"description\":\"WHERE DOES THIS CONTENT LIVE? Which branch's tree defines or mentions a symbol, HEAD first, with on-head=0 naming the case this verb exists for: content that lives only on a branch (a finished fix stranded on 1 of 30 refs). Each distinct blob is read once (content-addressed), so N branches cost about one tree. kind=def on a REF row is a LEXICAL heuristic (ref blobs are raw text, never ingested) — for HEAD's parsed answer use find_symbol/fetch_body. symbol = the name, or an @FILE:LINE seed; kind = optional ref-name substring filter, echoed as filter=; limit/offset page the hits (first 60). at= is HEAD's sha; +dirty = changed paths read from the working tree (worktree=). Single-root; read-only.\","
                    + mcprefuse::toolMetadataFor( "whereis", pathIsRequired ) + "}," ) +
                    mcprefuse::gitOnlyStanza( omitGitVerbs, "{\"name\":\"stray_content\",\"description\":\"Per branch: the lines its own divergent work AUTHORED (vs its merge-base with HEAD) that the live line does NOT have. Four verdicts (unmerged+superseded+merged+unknown=refs): v=unmerged is genuinely absent; v=superseded means the live line re-implemented the work — the case `git cherry` structurally cannot see; merged branches are omitted and counted; v=unknown is a branch this scan could NOT analyse at all (no merge-base, unrelated history), not a fourth kind of divergence. Every file row carries its raw del/redone/sim evidence. Line-granular, not semantic. kind = optional ref-name substring filter, echoed as filter=; limit/offset page the refs. Single-root; read-only.\","
                    + mcprefuse::toolMetadataFor( "stray_content", pathIsRequired ) + "}," ) +
@@ -1540,7 +1550,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             const bool legendSessionPosture = legendSession != nullptr
                                             && ( legendDeclaredHere ? ( legendArg.empty() || legendArg == "ref" ) : name == "for" );
             const bool legendRefPosture   = legendSessionPosture && legendSession->refOn;
-            const bool legendOpensSession = legendSessionPosture && !legendSession->refOn;
+            const bool legendOpensSession = legendSessionPosture && !legendSession->refOn && policy.legendOpensOnFirstAnswer;
 
             // ── W3FIX H4/M5: every NUMERIC argument through the ONE guarded reader ─────────────────────────
             //
@@ -2857,6 +2867,7 @@ struct McpStdioConfig
     std::vector<std::string> roots;
     McpToolMask              toolMask = kMcpAllToolsMask;
     std::string              toolSpec;
+    bool                     legendInline = false;   // --mcp-legend=inline: the session opens only on a read of the core
 };
 
 // The stdio server's dispatch policy. Same root plumbing as runMcpHttp(), building McpDispatchPolicy::defaultRoot
@@ -2887,6 +2898,7 @@ inline McpDispatchPolicy mcpStdioPolicy( const McpStdioConfig& config )
     policy.defaultRoot = defaultRoot;   // "" unless a startup root was given — see the comment above
     policy.toolMask    = config.toolMask;  // --mcp-tools
     policy.toolSpec    = config.toolSpec;
+    policy.legendOpensOnFirstAnswer = !config.legendInline;   // lean-answers lane: the default session posture
 
     // R2a (the 2026-08-12 usage mine): with NO startup root, resolve the launch cwd ONCE as the softest
     // default — see McpDispatchPolicy::assumedRoot for the full contract and mcpResolveAssumedRoot for

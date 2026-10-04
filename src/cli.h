@@ -47,6 +47,7 @@ struct Config
                                                  // transport. Required for a non-loopback bind and for --allow-remote-edits.
     bool             allowRemoteEdits = false;   // --allow-remote-edits: permit the 3 edit verbs over --listen (refused by
                                                  // default); forces the token requirement even on loopback.
+    std::string_view mcpLegend;                  // --mcp-legend=session|inline: the stdio server's legend posture (default session)
     std::string_view mcpTools;                   // --mcp-tools=SPEC: list (and answer) only these MCP tools — names and/or the
                                                  // core/full profiles, validated against the tool table in main.cpp (mcp.h).
     std::vector<std::string> excludes;           // --exclude=SUBSTR (repeatable): drop matching paths
@@ -2720,6 +2721,12 @@ inline constexpr char kHelpTail[] =
         "                               and a run without <dir> prints usage, or that same line from such a directory. Each\n"
         "                               tool call over the --max-memory limit is refused by name; an answer from an index the\n"
         "                               memory guard cut carries _memory_stop in its envelope.\n"
+        "    --mcp-legend=WHEN          the stdio MCP server's legend posture: session (the default) or inline\n"
+        "                               session: the first answer of a session carries its legend inline; later answers list\n"
+        "                               rows first, carry each definition only the first time the session meets it, and end\n"
+        "                               with <about legend=\"ref\" dict= dictv=/> (the first of them also carries the core).\n"
+        "                               inline: every answer keeps its legend until the client reads ripwire://legend-dict.\n"
+        "                               legend:\"compact\"/\"full\" on a call keeps that answer inline either way. Stdio only.\n"
         "    --mcp-tools=LIST           list only these MCP tools (names and/or the core/full profiles, default full).\n"
         "                               A comma list of tool names and/or profiles, unioned. core = explore, batch, from_trace,\n"
         "                               impact, uses, fetch_body, edit_check, quality_delta (the loop the server's own\n"
@@ -4539,6 +4546,12 @@ inline void validateModifierGuards( Config& c ) noexcept
         rw::emitRaw( stderr, "ripwire: --mcp-token is read by the --listen HTTP transport only — pass both (e.g. ripwire . --listen=127.0.0.1:8765 --mcp-token=SECRET)\n" );
         c.ok = false;
     }
+    // --mcp-legend= shapes the stdio session's legend posture; the HTTP transport holds no session (every answer inline).
+    if( !c.mcpLegend.empty() && ( !c.mcp || !c.listen.empty() ) )
+    {
+        rw::emitRaw( stderr, "ripwire: --mcp-legend is read by the stdio MCP server only (--listen holds no legend session) — e.g. ripwire . --mcp --mcp-legend=inline\n" );
+        c.ok = false;
+    }
     if( !c.mcpTools.empty() && !c.mcp )   // --listen sets c.mcp, so this covers both transports
     {
         rw::emitRaw( stderr, "ripwire: --mcp-tools is read by the MCP server only — pass --mcp (or --listen) too, e.g. ripwire . --mcp --mcp-tools=core\n" );
@@ -5335,6 +5348,17 @@ inline Config parseArgs( int argc, char** argv ) noexcept
                     c.ok = false; return c;
                 }
                 c.grepScope = v;
+            }
+            else if( startsWith( a, "--mcp-legend=" ) )
+            {
+                // A closed value set, refused on an unknown value (the --whereis-listing= rule just below).
+                const std::string_view v = a.substr( 13 );
+                if( v != "session" && v != "inline" )
+                {
+                    rw::emitTo( stderr, "ripwire: --mcp-legend={} — unknown value (supported: session|inline), e.g. --mcp-legend=inline\n", std::string_view( v.data(), v.size() ) );
+                    c.ok = false; return c;
+                }
+                c.mcpLegend = v;
             }
             else if( startsWith( a, "--whereis-listing=" ) )
             {
