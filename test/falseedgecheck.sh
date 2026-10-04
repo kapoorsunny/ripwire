@@ -261,6 +261,14 @@ exactly goreplace callees app/app.go:UseLegacy "fn Shape legacy/lib/lib.go"
 exactly goreplace callees quoted/app/app.go:UseQuoted "fn Quote quoted/qlegacy/lib/lib.go"
 exactly goreplace callees quoted/app/raw.go:UseRaw "fn Raw quoted/qraw/lib/lib.go"
 lacks goreplace callees quoted/app/remote.go:UseRemote "Quote quoted/qlegacy/lib/lib.go"
+# goworkspace/: two roots indexed together; a's go.mod replaces example.com/wb by the SIBLING root ../b, quoted. The
+# cross-root alias (resolve.h parseGoModReplaces) reads the path with the same goModToken, so the call keeps its edge.
+wsf="$TMP/goworkspace.callees.xml"
+( cd "$CORPUS/goworkspace" && "$BIN" a b --no-cache --callees=app/app.go:Use >"$wsf" 2>/dev/null ); wsrc=$?
+wsgot="$( rows "$wsf" | tr '\n' ';' | sed 's/;$//' )"
+if [ "$wsrc" -ne 0 ]; then no "(goworkspace) --callees=app/app.go:Use over roots a b exited rc=$wsrc"
+elif [ "$wsgot" = "fn Far b/lib/lib.go" ]; then ok "(goworkspace) a quoted replace into a sibling root keeps the cross-root edge [fn Far b/lib/lib.go]"
+else no "(goworkspace) --callees=app/app.go:Use over roots a b: rows [${wsgot:-none}], want [fn Far b/lib/lib.go]"; fi
 
 echo "=== (B) JS: globals, required packages, accessors ==="
 lacks js callees lib/response.js:length "stringify lib/query.js"
