@@ -135,6 +135,12 @@ SANENV = {
     "ASAN_OPTIONS": "detect_leaks=0:halt_on_error=1:abort_on_error=1:quarantine_size_mb=0:allocator_release_to_os_interval_ms=0:log_path=%s/asan" % (SAN,),
     "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1:log_path=%s/ubsan" % SAN,
 }
+for cand in ("/opt/homebrew/opt/llvm@22/bin/llvm-symbolizer", "/usr/bin/llvm-symbolizer"):
+    # the sanitizer's own symbolizer: macOS's default (atos) can take minutes on a loaded host while the process waits to abort
+    if os.path.exists(cand):
+        SANENV["ASAN_OPTIONS"] += ":external_symbolizer_path=" + cand
+        SANENV["UBSAN_OPTIONS"] += ":external_symbolizer_path=" + cand
+        break
 TOPK = "6"
 fails, notes = [], []
 checks = 0
