@@ -35,6 +35,7 @@
 #include <cstring>
 #include <optional>
 #include <string_view>
+#include <iterator>   // back_inserter (reorderDocsAfterCode)
 #include <utility>
 #include <vector>
 
@@ -4346,30 +4347,36 @@ inline constexpr bool endLinesFitCeiling( std::size_t budgetTokens, bool bodyCei
 // globalRank order; EntryT has globalRank (kept: it maps the row back to its symbol), displayRank (the r= it is shown
 // with) and dropped. `isDoc(e)` says which rows are docs; `rehead(e, newRank)` re-renders a row whose r= changed.
 // Returns how many doc rows moved below a code row (0 ⇒ nothing changed; the caller discloses a non-zero count).
+// The shown (not dropped) rows' indices in `entries` order, and how many doc rows among them sit above the LAST code row
+// (the rows reorderDocsAfterCode moves; 0 ⇒ nothing to move).
+template< class EntryT, class IsDoc >
+inline std::pair<std::vector<std::size_t>, std::size_t> shownDocsAboveCode( const std::vector<EntryT>& entries, IsDoc&& isDoc )
+{
+    std::vector<std::size_t> live;
+    std::size_t              docsSoFar = 0, docsAboveLastCode = 0;
+    for( std::size_t i = 0; i < entries.size(); ++i )
+    {
+        if( entries[i].dropped )
+        {
+            continue;
+        }
+        live.push_back( i );
+        if( isDoc( entries[i] ) )
+        {
+            ++docsSoFar;
+        }
+        else
+        {
+            docsAboveLastCode = docsSoFar;   // every doc row seen so far sits above this code row
+        }
+    }
+    return { std::move( live ), docsAboveLastCode };
+}
+
 template< class EntryT, class IsDoc, class Rehead >
 inline std::size_t reorderDocsAfterCode( std::vector<EntryT>& entries, IsDoc&& isDoc, Rehead&& rehead )
 {
-    std::vector<std::size_t> live;
-    for( std::size_t i = 0; i < entries.size(); ++i )
-    {
-        if( !entries[i].dropped )
-        {
-            live.push_back( i );
-        }
-    }
-    std::size_t lastCode = live.size();
-    for( std::size_t k = 0; k < live.size(); ++k )
-    {
-        if( !isDoc( entries[ live[k] ] ) )
-        {
-            lastCode = k;
-        }
-    }
-    std::size_t moved = 0;
-    for( std::size_t k = 0; lastCode < live.size() && k < lastCode; ++k )
-    {
-        moved += isDoc( entries[ live[k] ] ) ? 1u : 0u;
-    }
+    const auto [ live, moved ] = shownDocsAboveCode( entries, isDoc );
     if( moved == 0 )
     {
         return 0;   // no doc row above a code row (or no code row shown at all): byte-identical
@@ -4379,18 +4386,9 @@ inline std::size_t reorderDocsAfterCode( std::vector<EntryT>& entries, IsDoc&& i
     for( const std::size_t i : live )
     {
         ranks.push_back( entries[i].globalRank );
-        if( !isDoc( entries[i] ) )
-        {
-            newOrder.push_back( i );
-        }
     }
-    for( const std::size_t i : live )
-    {
-        if( isDoc( entries[i] ) )
-        {
-            newOrder.push_back( i );
-        }
-    }
+    std::copy_if( live.begin(), live.end(), std::back_inserter( newOrder ), [ & ]( std::size_t i ) { return !isDoc( entries[i] ); } );
+    std::copy_if( live.begin(), live.end(), std::back_inserter( newOrder ), [ & ]( std::size_t i ) { return isDoc( entries[i] ); } );
     ASSUME( newOrder.size() == ranks.size() );
     for( std::size_t k = 0; k < newOrder.size(); ++k )
     {
