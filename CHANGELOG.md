@@ -37,7 +37,8 @@ in a Java class with an outside base drawn to an unrelated class's `flush`.
   `find_referencing_symbols`, `impact` and `path_between`. An `--impact` row that no all-proven path reaches inherits
   it. A legend sentence rides exactly when such a row does and says what it does not mean: not that the edge is
   false. Rule 3's include-file narrow no longer decides a member call: the file a caller imports says nothing about
-  its receiver.
+  its receiver. Ranking keeps the old ladder's pick (the same-file, else same-directory rung): the extra candidates
+  are listed at edge weight zero, so a guess never moves PageRank.
 - Measured on the round-1 comparison-table calls for this tool: see the lane report; the gate is
   `test/receiverevidencecheck.sh` (every surface, CLI/MCP parity, census conservation, and near misses
   for every evidence rule). Ingest records the receiver chain (`kParserVer` 145, `kCacheVersion` 29), so a cache

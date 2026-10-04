@@ -6186,6 +6186,29 @@ inline void regroupEmittedRecord( EmittedBodies* out, const std::vector<PackedBo
 // --pack-task, --detail, --around, MCP `exemplar`) already answer a DIFFERENT question ("show me this
 // symbol") where a file-context summary is not what was asked; --expand's contract IS "orient me on this
 // symbol", so it turns this on (main.cpp's two --expand call sites).
+// FE-B: may a <calls> row under one of `nodes` carry via="name"? True when any of their out-edges is name-only — an
+// over-approximation of what a section renders (its 16-per-symbol cap may cut that row), asked BEFORE the section is
+// built by a verb whose first-screen legend must define every attribute its payload can carry (--for, --exemplar).
+inline bool namesOnlyOutAny( const std::vector<std::uint32_t>& outOff, const std::vector<std::uint8_t>& outNameOnly,
+                             std::span<const NodeId> nodes ) noexcept
+{
+    for( const NodeId n : nodes )
+    {
+        if( std::size_t( n ) + 1 >= outOff.size() )
+        {
+            continue;
+        }
+        for( std::uint32_t e = outOff[ n ]; e < outOff[ n + 1 ] && e < outNameOnly.size(); ++e )
+        {
+            if( outNameOnly[ e ] != 0 )
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vector<NodeId>& nodes,
                         std::size_t budgetBytes,
                         const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
@@ -6206,12 +6229,14 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
                                                                         //   false (every caller but --expand) ⇒ byte-identical.
                         std::string_view rootArg = {},   // R-E (2026-08-17): same single-root-only root
                                                           // argument serialize() takes — see its comment.
-                        const std::vector<float>* calleeRank = nullptr )   // orders each body's CUT <calls> listing: the query relevance
+                        const std::vector<float>* calleeRank = nullptr,   // orders each body's CUT <calls> listing: the query relevance
                                                                             //   on --for/--pack-task/--from-trace, calleeNameSpecificity on
                                                                             //   --expand; nullptr (--around/--exemplar) ⇒ node-id order.
                                                                             //   See CalleeCallsSink::rank.
+                        bool viaLegendInHead = false )   // FE-B: the caller's own first-screen legend already defines via="name"
+                                                         //   (namesOnlyOutAny below), so this section neither repeats nor charges it
 {
-    bool viaLegendCharged = false;   // FE-B: the via="name" legend has been charged against the budget (CalleeCallsSink)
+    bool viaLegendCharged = viaLegendInHead;   // FE-B: the via="name" legend has been charged against the budget (CalleeCallsSink)
     // budgetBytes == 0 ⇒ UNLIMITED (A3-F2): the MCP `exemplar` verb has no byte budget, and 0 must never
     // mean "cap at zero bytes" (the cap fired before the first body and emitted a bare <bodies></bodies>).
     // Matches buildRecall's "0 = no cap" convention; the CLI always passes a real budget (default 64 KB).
@@ -6580,7 +6605,7 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
     {
         w.write( kOverCeilingBodyLegend );   // the same rule, for <b over_ceiling="1">
     }
-    if( children.find( " via=\"name\"" ) != std::string::npos )
+    if( !viaLegendInHead && children.find( " via=\"name\"" ) != std::string::npos )
     {
         w.write( viaNameLegendComment() );   // FE-B: the same rule, for a <calls> row's via="name"
     }
@@ -6620,9 +6645,10 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
                       RedactCounts* redact = nullptr,
                       std::size_t* outShown = nullptr,          // rows actually emitted; nullptr ⇒ not recorded
                       const std::vector<float>* rank = nullptr, // query relevance, for ordering a CUT callee listing
-                      std::string_view rootArg = {} )           // R-E: same single-root-only root= every verb takes
+                      std::string_view rootArg = {},            // R-E: same single-root-only root= every verb takes
+                      bool viaLegendInHead = false )            // FE-B: packBodies' parameter of the same name
 {
-    bool viaLegendCharged = false;   // FE-B: the via="name" legend has been charged against the budget (CalleeCallsSink)
+    bool viaLegendCharged = viaLegendInHead;   // FE-B: the via="name" legend has been charged against the budget (CalleeCallsSink)
     if( budgetBytes == 0 )                                      // 0 ⇒ UNLIMITED, packBodies' own convention
     {
         budgetBytes = SIZE_MAX;
@@ -6729,7 +6755,7 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
         rw::formatTo( open, sizeof( open ), "<hops shown=\"{}\" total=\"{}\" capped=\"{}\">",
                        shownCount, requestedCount, shownCount < requestedCount ? 1 : 0 );
     }
-    if( children.find( " via=\"name\"" ) != std::string::npos )
+    if( !viaLegendInHead && children.find( " via=\"name\"" ) != std::string::npos )
     {
         w.write( viaNameLegendComment() );   // FE-B: exactly when a hop's <calls> row carries via="name"
     }

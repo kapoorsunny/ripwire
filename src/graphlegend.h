@@ -883,6 +883,20 @@ inline std::string viaNameLegend( bool present, bool impact = false, bool column
     }
     return out;
 }
+// …and as --for's two header strips spell a present-only clause (see kForCompactModScopeClause below): the verb's FIRST-SCREEN
+// legend must define every attribute its payload can carry, so --for (and --exemplar) define it there, on an over-approximated
+// bit (serialize.h namesOnlyOutAny), and tell the section not to repeat it.
+inline constexpr std::string_view kForCompactViaNameClause =
+    "; c via=name: that callee matched by name alone, receiver unproven (NOT a claim the edge is false)";
+inline std::string forViaNameClause()
+{
+    std::string out = std::string( " " ) + kViaNameLegend;
+    while( !out.empty() && out.back() == ' ' )
+    {
+        out.pop_back();
+    }
+    return out;
+}
 // …as its own comment node, for the surfaces whose legend is written beside the rows (a <bodies>/<hops> block's <calls>)
 inline std::string viaNameLegendComment()
 {
@@ -894,7 +908,7 @@ inline std::string viaNameNoteJson()
     std::string text = kViaNameLegend;
     for( std::size_t at = text.find( "via=\"name\"" ); at != std::string::npos; at = text.find( "via=\"name\"", at ) )
     {
-        text.replace( at, 10, "\\\"via\\\":\\\"name\\\"" );   // via="name" -> \"via\":\"name\" inside the JSON string
+        text.replace( at, 10, "\\\"via\\\":\\\"name\\\"" ); // via="name" -> \"via\":\"name\" inside the JSON string
         at += 16;
     }
     if( const std::size_t at = text.find( "on a row" ); at != std::string::npos )
