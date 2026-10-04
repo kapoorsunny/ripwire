@@ -51,6 +51,15 @@ inline bool implicitReceiverLang( Lang l ) noexcept
     return l == Lang::Java || l == Lang::Kotlin || l == Lang::CSharp || l == Lang::Swift || l == Lang::Cpp || l == Lang::Ruby;
 }
 
+// the languages where a call written on a receiver reaches a function only as a METHOD (or through a module alias): a
+// free function is never what `x.f()` calls. JS/TS (an object property may hold one), Kotlin (an extension function is a
+// top-level `fun T.f()`) and C (a function-pointer field) are left out.
+inline bool memberNeverReachesFreeFunction( Lang l ) noexcept
+{
+    return l == Lang::Python || l == Lang::Go || l == Lang::Cpp || l == Lang::Rust || l == Lang::Ruby || l == Lang::Java
+        || l == Lang::CSharp || l == Lang::Swift;
+}
+
 // a call written ON a receiver — every language's member shape: Python/C++/Ruby record a RecvKind, the rest memberCall
 inline bool isMemberCallRef( const Reference& r ) noexcept
 {
@@ -177,6 +186,8 @@ struct ReceiverEvidence
                 ownerClass[ b.fromSymbol ] = b.typeName;
             }
         }
+        ENSURES( ownerClass.size() == N && fnsByFile.size() == ing.files.size() && classesByFile.size() == ing.files.size(),
+                 "one owner per symbol, one sorted list per file" );
     }
 
     // the innermost class-like symbol of `fileId` whose span holds [start, end) (never `self`); kNoNode when none
@@ -240,7 +251,9 @@ struct ReceiverEvidence
         buildRubyMixins();
         for( const Symbol& s : ing.symbols )
         {
-            if( callableKind( s.kind ) && !ownerClass[ s.id ].empty() && receiverHedgeLang( s.lang ) )
+            // a BODIED callable only: an interface's or an abstract class's bodyless signature is the contract a call
+            // dispatches through, never the body it reaches — that call stays with the ladder (declined_iface= reads it)
+            if( callableKind( s.kind ) && !ownerClass[ s.id ].empty() && receiverHedgeLang( s.lang ) && s.endByte > s.sigEndByte )
             {
                 methodsByType[ typeKey( ownerClass[ s.id ], "::", s.name ) ].push_back( s.id );
             }
@@ -415,6 +428,7 @@ struct ReceiverEvidence
     // answer is in `found`; false when nothing in the cone defines it. superOnly skips `type` itself (`super.m()`).
     bool methodOf( std::string_view type, std::string_view name, bool superOnly ) const
     {
+        EXPECTS( active, "methodOf reads the tables build() fills" );
         found.clear();
         if( type.empty() )
         {
@@ -603,6 +617,10 @@ struct ReceiverEvidence
         if( alias == nullptr )
         {
             return false;
+        }
+        if( isThisRoot( alias->first ) || alias->first == "cls" )
+        {
+            return methodOf( callerClass( scope ), alias->second, false );   // `write = self.write`: the class's own member
         }
         const std::string* type = typedLocal( scope, alias->first );
         return type != nullptr && methodOf( unalias( r.fileId, *type ), alias->second, false );

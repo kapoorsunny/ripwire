@@ -543,6 +543,13 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // root's attribute; a <d> signature row's tested= is the next row's. No earlier sweep saw it because the gate fixture holds
     // no test (compactlegendcheck (D31) builds the smallest tree that prints one).
     { "tested",            "<s tested=1>: a non-test row an indexed test transitively reaches (absent otherwise, never 0)", true, "s" },
+    // FE-B (test/receiverevidencecheck.sh): via="name" on a call row — graphlegend.h kViaNameLegend is the full reading. ELEMENT-
+    // and VALUE-qualified (<s>/<c>/<e> whose via= lists name), so impact's <f via="import"> importer rows never pull it in; the
+    // columnar form names it in fields= like the tested column.
+    { "via",               "via=name: the target was matched by name alone (receiver unproven); every by-name candidate in reach is listed; NOT a claim the edge is false", true, "s", MapHeaderRead::No, "name" },
+    { "via",               "<c via=name>: that callee matched by name alone (receiver unproven); NOT a claim the edge is false", true, "c", MapHeaderRead::No, "name" },
+    { "via",               "<e via=name>: that edge matched by name alone (receiver unproven); NOT a claim the edge is false", true, "e", MapHeaderRead::No, "name" },
+    { "fields",            "<via> column: 1 = via=name, the row's edge matched by name alone (receiver unproven); NOT a claim the edge is false", true, "cols", MapHeaderRead::No, "via" },
     // DEPTH-LABELLED --impact (0.6.5): graph.h transitiveCallersDepth's hop per row. The <s> row prints d= run-length
     // (graph.h depthRunAttrXml: the window's first row and each depth change), the columnar form a dense <depth> column, and
     // the root by_depth= (graphlegend.h byDepthAttrXml) partitions reaches= by depth; all three are absent at reaches="0".

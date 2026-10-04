@@ -185,6 +185,7 @@ inline bool edgeNameOnly( const Graph& g, NodeId from, NodeId to ) noexcept
     {
         return false;
     }
+    EXPECTS( g.outNameOnly.size() == g.outTargets.size(), "the hedge bit is parallel to outTargets (buildGraph allocates it per edge)" );
     const auto b  = g.outTargets.begin() + g.outOff[ from ];
     const auto e  = g.outTargets.begin() + g.outOff[ std::size_t( from ) + 1 ];
     const auto it = std::lower_bound( b, e, to );   // ascending within a source (buildGraph sorts by (from, to))
@@ -4673,7 +4674,9 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         const rw::SmallVec<NodeId, 2>* nameIds = localsYield ? &reachScratch : baseIds;
         // FE-B: for a MEMBER call the include graph says which file the caller imports, never what its receiver is — the
         // included file's definitions join the name-only tier below instead of deciding the call.
-        const bool hedgeEligible = !scipPinned && !canonical && receiverHedgeLang( r.lang ) && r.role == RefRole::Call;
+        // a QUALIFIED call (`A::m()`, `Storage<D, S>::reset()`) names its scope: that is the canonical tier's evidence axis,
+        // not a receiver's, so a qualifier the canonical tier could not place keeps the ladder exactly as before
+        const bool hedgeEligible = !scipPinned && !canonical && receiverHedgeLang( r.lang ) && r.role == RefRole::Call && r.qualifier.empty();
         memberRule3.clear();
         if( !scipPinned && !canonical && !narrowed && it != byName.end() )
         {
@@ -4847,6 +4850,20 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 else if( provedScratch.size() < cand.size() )
                 {
                     cand.swap( provedScratch );
+                }
+            }
+            // a name-only MEMBER call never reaches a free function where the language has no way to (Python, Go, C++,
+            // Rust, Ruby, Java, C#, Swift: a function is reached through a member only as a method, or through a module
+            // alias, which proves itself above) — JS/TS object properties, Kotlin extensions and C function-pointer fields
+            // can hold one, so those keep it. Nothing left: no in-repo definition can answer the call (external=).
+            if( nameOnly && isMemberCallRef( r ) && memberNeverReachesFreeFunction( r.lang ) )
+            {
+                std::erase_if( cand, [ & ]( NodeId c ) { return ownerIsClass( c ).empty() && ing.symbols[ c ].kind == SymKind::Function; } );
+                std::erase_if( memberRule3, [ & ]( NodeId c ) { return ownerIsClass( c ).empty() && ing.symbols[ c ].kind == SymKind::Function; } );
+                if( cand.empty() )
+                {
+                    disposition = vetoExternal( r );
+                    continue;
                 }
             }
         }
@@ -5114,6 +5131,9 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 // another — rubygems' composed_set.rb). Widening tier 1 past the caller would invent a
                 // cross-file edge the SAME-FILE tier already outranked, and `other.each` on a second instance
                 // of the caller's own class is a genuine self-loop, so the honest nothing stands.
+                // FE-B narrows that floor to calls WITH receiver evidence: a NAME-ONLY call never reaches this
+                // block (its tier keeps every same-file and same-directory candidate, receiverevidence.h), so
+                // there the cross-file candidate IS listed — hedged via="name", never as a confident edge.
                 const std::size_t sh = ( c == r.fromSymbol ) ? 0 : localityRank( callerCanon, g.localityKey[c], ( r.recv == RecvKind::None && r.qualifier.empty() ) || r.recv == RecvKind::ThisObj, localityCap );   // path-scoped even for a free function
                 locShare.push_back( sh );
                 if( sh > bestShare )
@@ -5178,6 +5198,22 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 {
                     gateRefused.push_back( c );
                 }
+            }
+            if( anyReal && anyAdmitted && nameOnly )
+            {
+                // FE-B: a name-only call's tier is WIDER than the ladder's pick (every same-file and same-directory candidate),
+                // so "the decision stands" would hand a builtin-named call every class's method in reach. A CLASS-owned
+                // target still needs the gate's evidence; a module or object-literal member (no class to look for) stays.
+                std::erase_if( tier, [ & ]( NodeId c )
+                {
+                    if( c == r.fromSymbol )
+                    {
+                        return false;
+                    }
+                    const std::uint32_t owner = builtinGate.ownerOf( c );
+                    return owner != BuiltinMethodGate::kNoClass && owner != BuiltinMethodGate::kNested
+                        && builtinGate.judge( r, c, chaCones ) != BuiltinMethodGate::Verdict::Admit;
+                } );
             }
             if( anyReal && !anyAdmitted )
             {
@@ -5414,6 +5450,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
             if( !g.outNameOnly.empty() )
             {
+                ASSUME( pos < g.outNameOnly.size(), "outNameOnly is allocated one slot per flattened edge" );
                 g.outNameOnly[ pos ] = hedged( ( std::uint64_t( e.from ) << 32 ) | e.to ) ? 1u : 0u;
             }
         }
@@ -8573,6 +8610,7 @@ inline std::vector<char> provenCallerReach( const Graph& g, std::span<const Node
             }
         }
     }
+    ENSURES( proven.size() == N && q.size() <= N, "each node is enqueued at most once, by the mark" );
     return proven;
 }
 // the --impact row's hedge: reached, but by no all-proven path

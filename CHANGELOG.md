@@ -15,6 +15,34 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Changed — a call bound by name alone keeps its rows, marked `via="name"`; typed receivers resolve
+
+A member call `x.m()` (or, where the receiver is implicit, a bare `m()`) bound to every in-repo definition spelled
+`m` that the name ladder reached, and each such row read as a confident edge with nothing behind it but the name: a
+request context's `ctx.onerror()` drawn to the `Application.onerror` its file defines, a WeakMap's `.get()` drawn to
+the same file's accessor, a Go struct field's `item.text.Get()` drawn to an unrelated `Merger.Get`, a bare `flush()`
+in a Java class with an outside base drawn to an unrelated class's `flush`.
+
+- **Receivers the source types now resolve** (JavaScript, TypeScript, Python, Go, Java, Kotlin, C#, Swift): `this` /
+  `self` / `cls` inside a class and `super` / `base` through its bases; a parameter or local whose class is written
+  (a TS/Python/Go annotation, a Go method receiver, a JS `new Foo()`, Python `Foo()` or Go `Foo{}` initializer, an
+  import alias of the class); a constructed receiver (`new Foo().m()`); a class-name receiver; a chain of fields
+  whose classes are stated (`this.bucket = new Schemas()`, Python `self.x = Foo()`, Go struct and embedded fields);
+  Python `feed = parser.feed`; a Ruby `include`d module.
+- **A call nothing proves is NAME-ONLY.** Its candidates the language's own lookup proves are its answer (an
+  implicit receiver's class and bases, a free function in scope, the module a receiver alias names). With none
+  proven, every same-file and same-directory candidate is listed — a lone global one too, because one candidate is
+  not evidence — and each row carries `via="name"` (MCP: `"via":"name"`) on `--callees`, `--callers`, `--path`,
+  `--connect`'s `<e>`, the `<calls>` rows of `--expand` and `--for`, and MCP `find_symbol`,
+  `find_referencing_symbols`, `impact` and `path_between`. An `--impact` row that no all-proven path reaches inherits
+  it. A legend sentence rides exactly when such a row does and says what it does not mean: not that the edge is
+  false. Rule 3's include-file narrow no longer decides a member call: the file a caller imports says nothing about
+  its receiver.
+- Measured on the round-1 comparison-table calls for this tool: see the lane report; the gate is
+  `test/receiverevidencecheck.sh` (212 arms: every surface, CLI/MCP parity, census conservation, and near misses
+  for every evidence rule). Ingest records the receiver chain (`kParserVer` 142, `kCacheVersion` 29), so a cache
+  written by an earlier build is re-parsed.
+
 
 ### Added — MCP `grep` rows carry the matched text and a `fetch_body` handle (CLI parity)
 
