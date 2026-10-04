@@ -2070,6 +2070,36 @@ inline std::size_t enrichmentLegendBytesEmitted( const ForEnrichmentPlan& plan, 
     return plan.compact ? kForCompactLegendHops.size() : kForCompactLegendBodies.size();
 }
 
+// The compact route's <hops> rows: the positive-score head of the ranked surface, capped at kPackTaskBodyCandidates. One
+// spelling, read by buildForCompactHops and by the header's via="name" question (FE-B), so the two cannot disagree.
+inline std::vector<rw::NodeId> forCompactHopIds( const std::vector<rw::NodeId>& lensSurfaceIds, const std::vector<float>& lensRank )
+{
+    std::vector<rw::NodeId> hopIds;
+    for( rw::NodeId sid : lensSurfaceIds )
+    {
+        if( hopIds.size() >= rw::kPackTaskBodyCandidates || lensRank[sid] <= 0.0f )
+        {
+            break;
+        }
+        hopIds.push_back( sid );
+    }
+    return hopIds;
+}
+// --detail=N's bodies: the top min(N, forTopN) symbols by (score desc, id asc) — the order the sigs use. One spelling, read
+// by the --detail section and by the header's via="name" question (FE-B).
+inline std::vector<rw::NodeId> forDetailIds( const rw::IngestResult& ing, const std::vector<float>& lensRank, int detail, int forTopN )
+{
+    const std::size_t        S = ing.symbols.size();
+    std::vector<rw::NodeId> ids( S );
+    for( rw::NodeId i = 0; i < S; ++i )
+    {
+        ids[i] = i;
+    }
+    rw::sortutil::radixSortByScoreDescId( ids, lensRank );
+    ids.resize( std::min<std::size_t>( { std::size_t( detail ), std::size_t( forTopN ), S } ) );
+    return ids;
+}
+
 ForAutoBodiesResult buildForCompactHops( const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g,
                                           const std::vector<rw::NodeId>& lensSurfaceIds, const std::vector<float>& lensRank,
                                           std::size_t committedBytes, std::size_t bundleBudget, rw::RedactCounts* redactPtr,
@@ -2082,15 +2112,7 @@ ForAutoBodiesResult buildForCompactHops( const rw::Config& cfg, const rw::Ingest
 
     // candidates: EXACTLY the head buildForAutoBodies would have bodied — same rule, same order, so the
     // two shapes describe the same symbols and only differ in how much of each they serve.
-    std::vector<rw::NodeId> hopIds;
-    for( rw::NodeId sid : lensSurfaceIds )
-    {
-        if( hopIds.size() >= rw::kPackTaskBodyCandidates || lensRank[sid] <= 0.0f )
-        {
-            break;
-        }
-        hopIds.push_back( sid );
-    }
+    const std::vector<rw::NodeId> hopIds = forCompactHopIds( lensSurfaceIds, lensRank );
 
     std::size_t leftBytes = bundleBudget > committedBytes ? bundleBudget - committedBytes : 0;
     if( cfg.tokenBudget == 0 )
@@ -2630,12 +2652,27 @@ std::optional<int> runForLens( const MainDispatch& d )
             const rw::NodeId sid = lensSurfaceIds[i];
             forModScopePresent = lensRank[sid] > 0.0f && ing.symbols[sid].kind == rw::SymKind::ModuleScope;
         }
-        // FE-B: the same row head again — may one of its <calls> rows carry via="name"?
+        // FE-B: may a <calls> row of this bundle carry via="name"? Only the sections that render <calls> can, and each one's
+        // node set is known before the header: the compact route's hop ids, T3's auto-body candidates, or --detail's head
+        // (autoBundleMode excludes --detail). Their name-only out-edges decide it — over-approximating only the byte ladder
+        // and the 16-per-symbol cap inside those sections, never the rows the header itself lists.
         bool forViaPresent = false;
-        for( std::size_t i = 0; i < lensSurfaceIds.size() && i < forRowHead && !forViaPresent; ++i )
+        if( !g.outNameOnly.empty() )
         {
-            const rw::NodeId sid = lensSurfaceIds[i];
-            forViaPresent = lensRank[sid] > 0.0f && rw::namesOnlyOutAny( g.outOff, g.outNameOnly, std::span<const rw::NodeId>( &sid, 1 ) );
+            std::vector<rw::NodeId> viaIds;
+            if( autoBundleMode && plan.compact )
+            {
+                viaIds = forCompactHopIds( lensSurfaceIds, lensRank );
+            }
+            else if( autoBundleMode && plan.autoBodies )
+            {
+                viaIds = computeAutoBodyCandidateIds( ing, lensSurfaceIds, lensRank, routeAnchorDefs );
+            }
+            else if( cfg.detail > 0 )
+            {
+                viaIds = forDetailIds( ing, lensRank, cfg.detail, forTopN );
+            }
+            forViaPresent = rw::namesOnlyOutAny( g.outOff, g.outNameOnly, viaIds );
         }
         ForLensHeaderParts headerParts{ cfg.forTask, rootOpenStr, taskNote, adaptiveNote,
                                         mentionNote, boostNote, docMentionNote, sibliftNote, expandNote, floorNote,
@@ -3222,15 +3259,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // the lens. N=0 emits nothing → byte-identical to a run without --detail.
         if( cfg.detail > 0 )
         {
-            const std::size_t S = ing.symbols.size();
-            detailIds.resize( S );
-            for( NodeId i = 0; i < S; ++i )
-            {
-                detailIds[i] = i;
-            }
-            rw::sortutil::radixSortByScoreDescId( detailIds, lensRank );   // (score desc, id asc) — same order as the sigs
-            const std::size_t detN = std::min<std::size_t>( { std::size_t( cfg.detail ), std::size_t( forTopN ), S } );
-            detailIds.resize( detN );
+            detailIds = forDetailIds( ing, lensRank, cfg.detail, forTopN );   // (score desc, id asc) — same order as the sigs
             // Composes with --max-tokens: when set, it bounds the body byte budget (same conservative rate the
             // map path uses). §F1: --token-budget SHAPES this lens (D10 — trims to fit, always exit 0), so it
             // has to bound the bodies as well; before this it bounded <sigs> ONLY and the bodies rode along on
@@ -3283,7 +3312,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             if( enrich.surfaceOff || enrich.legendOff )
             {
                 headerParts.autoBundle = headerParts.compactBundle = false;
-                headerParts.viaPresent = headerParts.viaPresent && cfg.detail > 0;   // FE-B: only --detail's bodies are left to carry it
+                headerParts.viaPresent = false;   // FE-B: the section that could carry it is gone (autoBundleMode excludes --detail)
                 headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
             }
         }
