@@ -302,7 +302,15 @@ constexpr std::uint32_t kCacheVersion = 28;           // 28: FE-A (test/falseedg
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 143;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 145;          // bump on any grammar/.scm/extraction change
+                                                      // 145 = 2026-10-04 (train 25 re-review fixes): three extraction changes —
+                                                      //   a parameter of a prototype, function-pointer typedef, Go func type or TS
+                                                      //   function type no longer declares its name in the enclosing scope; a file
+                                                      //   whose value walk stops at kVrMaxDepth gains ONE depth-cut Value record;
+                                                      //   the remaining written key slots (a C `[expr]` designator, a numeric or
+                                                      //   identifier key) go through vrClean. 145, not 144: 143's RICH file tag is
+                                                      //   144 (parserVerFor below adds 1). The train renumbers if another lane
+                                                      //   takes 145/146.
                                                       // 143 = 2026-10-04 (train 25 review fixes): two extraction changes —
                                                       //   a declaration named like the global object (`var self = this`, a
                                                       //   parameter `window`) is now a JsShadow binding, and a value-reference

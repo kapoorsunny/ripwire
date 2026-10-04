@@ -2180,7 +2180,8 @@ inline std::string cacheRootKeyHex( const std::string& root )
 // not include this header; it relies on ingest.cpp including quality.h (line 13) before ingest_cache.h, and a reorder
 // that broke that fails the build on the undeclared name rather than passing.
 constexpr std::uint32_t kIngestCacheVersionMirror   = 28;   // MUST equal ingest.cpp's kCacheVersion (gated); 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
-constexpr std::uint32_t kIngestParserVerMirror    = 143;  // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 145;  // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 145 = 2026-10-04 (train 25 re-review fixes; see the kParserVer note)
                                                           // 141 = 2026-10-04 (train 25: above FE-A's 134/135 and refval-edges' 140, see kParserVer
                                                           //   note; kIngestCacheVersionMirror 28 from FE-A, kQSnapCacheScheme 17 from refval-edges)
                                                           // 140 = lane refval-edges (reference-as-value rows; see kParserVer note)
@@ -3378,7 +3379,10 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // argument holds as a VALUE (valuerefindex.h ValueRefIndex::isValueReferenced, checked after every other exemption,
 // counted as value-ref-excluded= like --dead-code): the dead SET moved, as in v9/v12/v15. kParserVer moved with
 // the extraction (the Value/Through rows) and its mirror moved with it. Bumped 16 -> 17.
-constexpr std::uint32_t kQSnapCacheScheme = 17;
+// v18 (2026-10-04, train 25 re-review fixes) — isValueReferenced ignores a value reference made inside the function
+// itself (`timer_set( tick )` in tick), as the CSR drops a recursive self-call: the dead SET moved, as in v9/v12/v15/v17.
+// kParserVer moved too (145: prototype parameters, the depth-cut record). Bumped 17 -> 18.
+constexpr std::uint32_t kQSnapCacheScheme = 18;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
 // The qsnap EXCLUDES-config key folds the qsnap SCHEME (independent of the ingest cache's kHeadSnapCacheScheme)

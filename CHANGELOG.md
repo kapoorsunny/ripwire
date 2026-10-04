@@ -93,6 +93,18 @@ call-shaped references, so on such a function `--callers`, `--callees`, `--impac
   tree, django and webpack, 30 were identical. The 3 that differed are in scope: a read row became
   `role="value"`; a callee answer gained 2 rows; `--dead-code` dropped 4 functions that a `NODE_SET_METHOD`
   argument or a CommonJS `module.exports` table holds.
+- **Depth.** The capture does not descend past 512 levels of nesting (a 300-link C `else if` chain reaches it). That
+  cut is disclosed, never silent: every answer that reads value references for the cut file's language — the
+  callers/callees roots, `--impact`, `--safe-delete`, `--dead-code`, `--json` and the MCP twins — carries
+  `value_refs_depth_capped=N` (files cut) and `value_refs_depth_at=FILE:LINE` (the first cut), so a missing row or a
+  listed dead function there reads as a floor.
+- **Second review.** A parameter of a prototype, a function-pointer typedef or parameter, a C++ member declaration, a
+  Go func type or interface method, or a TS function type, `declare function` or interface signature no longer hides a
+  same-named function in the enclosing scope (`signal( SIGINT, handler )` beside `typedef void (*fn_t)( int handler )`
+  was no row). A function that only stores ITSELF (`timer_set( tick )` inside tick) is no longer kept off `--dead-code`
+  or `dead_code_candidate`, as a recursive self-call is no caller. `--callees` rows are per binding site: two calls
+  through one slot are one row, and `sites=` counts binding sites, not calls. A C `[expr]` designator, a numeric key
+  and an identifier key are capped like every other written slot.
 - **Cost.** A cold default map costs +3.6% CPU on this tree, +6.3% on django and +5.2% on webpack (median of 5,
   `sim/refval_cpu.sh`).
 - **Cache.** `kParserVer` moves.
@@ -513,15 +525,17 @@ per page instead. Gate: `test/impactdepthcheck.sh`.
 
 ### Changed — the versions this release moves, stated once
 
-`kParserVer` 124 → 143 (the function-literal fix takes 128; #338 and #325 take 129; the body-less C/C++ type-specifier
+`kParserVer` 124 → 145 (the function-literal fix takes 128; #338 and #325 take 129; the body-less C/C++ type-specifier
 span fix and the TypeScript `await f<T>(x)` / `!f<T>(x)` calls each took a number of their own on their branches, as did
 the false-edge resolution (134, 135) and the value-reference rows (140); 141 sat above every number a branch build of
 unreleased work had used, and the review fixes to the global-object shadow and the value-reference slot text take 143,
-above 141's full-use file tag 142, so no cache such a build wrote is read as this release's), `kCacheVersion` 25 → 28
-(the function-literal fix's record changes, then the false-edge fix's member-call fields) and `kQSnapCacheScheme` 15 → 17
+above 141's full-use file tag 142, so no cache such a build wrote is read as this release's; the second review's
+value-reference fixes take 145, above 143's full-use tag 144), `kCacheVersion` 25 → 28
+(the function-literal fix's record changes, then the false-edge fix's member-call fields) and `kQSnapCacheScheme` 15 → 18
 (the `--quality-delta` error-masking and placeholder changes, then the dead kind agreeing with `--dead-code` on functions
-held as values). Every ingest cache written by an earlier build is refused and re-indexed once, and every
-cached quality snapshot is recomputed. The session legend dictionary is `dictv=04d7833c60d2d5bd entries=784`.
+held as values, then on a function that only stores itself). Every ingest cache written by an earlier build is refused
+and re-indexed once, and every cached quality snapshot is recomputed. The session legend dictionary is
+`dictv=beedfcd755c9457f entries=786`.
 
 ### Fixed — a call the language resolves outside the tree no longer binds to a same-named in-repo definition
 
@@ -535,7 +549,8 @@ the result as a confident edge. Three shapes are now resolved the way the langua
 - a JavaScript/TypeScript call on a global object (`JSON.parse`, `Buffer.from`, `crypto.subtle.verify`) or to a global
   function (`fetch`) in a file that neither imports nor declares that name;
 - a call through `require( 'pkg' )`, `import * as ns from 'pkg'` or a name destructured from a global object, and a Go
-  call through an import whose path no go.mod in the tree contains.
+  call through an import whose path no go.mod in the tree contains (a go.mod path is read as its grammar spells it:
+  bare, quoted or a raw string, with a trailing comment dropped, so `replace "x" => "./x"` puts x in the tree).
 Such a call has no edge and is counted `external=` where the language proves the target is outside the tree (a
 builtin, a global, an outside package or `use`, a Go predeclared function, a C library name), `unresolved=` otherwise. A
 name an import binds from inside the tree, and every implicit-receiver language (Java, C#, C++, Kotlin, Swift, Ruby,
