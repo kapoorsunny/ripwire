@@ -108,12 +108,12 @@ inline const char* symTag( SymKind k ) noexcept
 // admitted Struct as "a named type" (callable as a conversion, a method owner, a type-like row) admits these too, so
 // the split changes the t= LABEL and nothing else. Read this, not `== SymKind::Struct`, wherever the question is
 // "is this a struct-or-named-type definition".
-inline constexpr std::uint32_t kStructOrNamedTypeBits = ( 1u << unsigned( SymKind::Struct ) ) | ( 1u << unsigned( SymKind::NamedType ) )
-                                                     | ( 1u << unsigned( SymKind::Alias ) ) | ( 1u << unsigned( SymKind::FuncType ) );
-static_assert( kSymKindCount <= 32, "kStructOrNamedTypeBits holds one bit per SymKind" );
+// The three split kinds are the LAST three enumerators, so they are one range; the asserts pin that.
+static_assert( SymKind::Alias == SymKind( unsigned( SymKind::NamedType ) + 1 ) && SymKind::FuncType == SymKind( unsigned( SymKind::NamedType ) + 2 )
+               && kSymKindCount == unsigned( SymKind::FuncType ) + 1, "NamedType..FuncType are the last, contiguous kinds" );
 inline bool isStructOrNamedType( SymKind k ) noexcept
 {
-    return ( ( kStructOrNamedTypeBits >> unsigned( k ) ) & 1u ) != 0u;
+    return k == SymKind::Struct || k >= SymKind::NamedType;
 }
 
 // #324: a ModuleScope owner is SYNTHETIC (comment above the enum) — a CALLER minted after the tags.scm pass,

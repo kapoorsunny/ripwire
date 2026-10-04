@@ -378,8 +378,8 @@ inline constexpr std::array<const char*, rw::kSymKindCount> kLspKindWords = {
 };
 inline const char* lspKindWord( rw::SymKind k ) noexcept
 {
-    const std::size_t i = std::size_t( k );
-    return i < kLspKindWords.size() ? kLspKindWords[i] : "symbol";
+    EXPECTS( std::size_t( k ) < kLspKindWords.size(), "a symbol's kind is a SymKind enumerator (the cache validates the byte)" );
+    return kLspKindWords[ std::size_t( k ) ];
 }
 
 // ─── file identity: a client URI → an index fileId ──────────────────────────────────────────────────

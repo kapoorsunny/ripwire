@@ -36,7 +36,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <numeric>
 #include <span>
 #include <string>
 #include <string_view>
@@ -57,27 +56,19 @@ struct PathGapSym
 {
     NodeId        id    = kNoNode;
     std::uint32_t depth = 0;       // hops from the nearest from= definition
+    std::size_t   calls = 0;       // the sum of counts — the row order's second key
     PathGapCounts counts{};
 };
 
 struct PathSearchGaps
 {
     std::size_t             searched = 0;   // symbols the directed search reached, the from= definitions included
+    std::size_t             calls    = 0;   // every gap in the cone: the sum of totals
     PathGapCounts           totals{};
     std::vector<PathGapSym> syms;           // cone symbols carrying >= 1 gap: nearest first, then more gaps, then id
 
-    bool any() const noexcept;
+    bool any() const noexcept { return calls > 0; }
 };
-
-inline std::size_t pathGapSum( const PathGapCounts& c ) noexcept
-{
-    return std::accumulate( c.begin(), c.end(), std::size_t( 0 ) );
-}
-
-inline bool PathSearchGaps::any() const noexcept
-{
-    return pathGapSum( totals ) > 0;
-}
 
 // The directed cone of `srcs` (the same out-edges shortestPathAny walks, every one of them — no early stop at a target,
 // because this runs only when there was none) and the gap populations inside it. Deterministic: BFS in id-ascending
@@ -144,15 +135,17 @@ inline PathSearchGaps pathSearchGaps( const IngestResult& ing, const Graph& g, s
     }
     for( const NodeId u : queue )
     {
-        if( pathGapSum( per[u] ) == 0 )
-        {
-            continue;
-        }
+        std::size_t here = 0;
         for( std::size_t k = 0; k < kPathGapKindCount; ++k )
         {
+            here          += per[u][k];
             out.totals[k] += per[u][k];
         }
-        out.syms.push_back( PathGapSym{ u, depth[u], per[u] } );
+        if( here > 0 )
+        {
+            out.calls += here;
+            out.syms.push_back( PathGapSym{ u, depth[u], here, per[u] } );
+        }
     }
     std::ranges::sort( out.syms, []( const PathGapSym& a, const PathGapSym& b )
     {
@@ -160,10 +153,9 @@ inline PathSearchGaps pathSearchGaps( const IngestResult& ing, const Graph& g, s
         {
             return a.depth < b.depth;
         }
-        const std::size_t sa = pathGapSum( a.counts ), sb = pathGapSum( b.counts );
-        if( sa != sb )
+        if( a.calls != b.calls )
         {
-            return sa > sb;
+            return a.calls > b.calls;
         }
         return a.id < b.id;
     } );
