@@ -929,6 +929,10 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // 2026-10-01 freshness fix (crossref.h scanWorktree): present only on a checkout that differs from HEAD.
     { "worktree", "worktree=read|partial|unlisted: the checkout differs from HEAD (at= +dirty); each changed path is read from disk as ref=\"worktree\" rows replacing HEAD's, and on-head=/hits=/head_labels= count them; on-head= then reads the checkout, not HEAD's commit; partial = some changed path unreadable or a directory (nested repo, submodule), its HEAD rows may be stale; unlisted = git could not list the changes; either withholds complete=", false, "whereis", MapHeaderRead::No, {}, "whereis" },
     { "hits", "more hits=N: rows after this page; page on with offset=next_offset", true, "more", MapHeaderRead::No, {}, "whereis" },
+    // lean-answers lane (crossref.h WhereisListing / the tip-date hoist): each rides only the answer that carries it.
+    { "listing", "listing=defs: kind=def rows only, the kind=ref rows counted by refs count= (next= lists them); refs: kind=ref rows only; the window counts listed rows, hits= all", false, "whereis", MapHeaderRead::No, {}, "whereis" },
+    { "head_date", "head_date=: a hit without tip= date= is on HEAD's commit: tip= is at=, date= is this", false, "whereis", MapHeaderRead::No, {}, "whereis" },
+    { "count", "refs count=N: the kind=ref rows not listed", true, "refs", MapHeaderRead::No, {}, "whereis" },
     // the GREY ZONE of the same sweep: attributes the compact prose named in passing ("in/out, cx/ccx", "<g> groups") but never
     // DEFINED as name= — legendcoveragecheck's default rows hold the definitional predicate, so each gets its reading here.
     // affected: src/verbs_change.h runAffected
@@ -985,7 +989,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // doc-drift: src/docdrift.h
     { "filter", "filter=: the path filter this run was narrowed to; docs outside it were not checked", false, "doc-drift", MapHeaderRead::No, {}, "doc-drift" },
     // whereis: src/crossref.h (the exhaustiveness claim)
-    { "complete", "complete=1: the scan read every ref AND this page lists every hit (absent: one of the two is a floor)", false, "whereis", MapHeaderRead::No, {}, "whereis" },
+    { "complete", "complete=1: the scan read every ref AND this page lists every hit of its listing (absent: one of the two is a floor)", false, "whereis", MapHeaderRead::No, {}, "whereis" },
     // plan-lint: src/planlint.h
     { "file", "file=/dialect=: the plan read and whether the PLAN dialect was detected (dialect=0: nothing to lint)", false, "plan-lint", MapHeaderRead::No, {}, "plan-lint" },   // also defines dialect=
     { "cards", "cards=/ledger=: card rows found / whether the doc carries a ledger (ledger_line= names its line)", false, "plan-lint", MapHeaderRead::No, {}, "plan-lint" },   // also defines ledger=

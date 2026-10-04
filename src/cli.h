@@ -384,6 +384,7 @@ struct Config
     std::string_view laneBrief;                              // --brief=FILE: one non-blank line per lane, each ranked on its own
     bool             whereisFlag     = false;               // --whereis was given at all (a bare/empty value still routes to the
                                                              // handler and refuses loudly rather than falling through to the map)
+    std::string_view whereisListing;                        // --whereis-listing=defs|refs|all (default defs; crossref.h WhereisListing)
     std::string_view whereis;                               // --whereis=SYM: every ref whose TREE contains SYM,
                                                              // HEAD first, with on-head= saying whether the live line has it at all.
                                                              // Scans each ref's FULL tree; each distinct blob is read once (content-
@@ -2092,6 +2093,15 @@ inline constexpr char kHelpTail[] =
         "                               is invisible. Add --with-history: a <fate> row then says v=\"never\" or v=\"removed\"\n"
         "                               with the commit, date and file that removed it. Remote-tracking refs are excluded\n"
         "                               (they mirror local ones); refs are capped, narrow with --stray-content=SUBSTR.\n"
+        "                               LISTING: by default only the kind=\"def\" rows are listed; the kind=\"ref\" rows are\n"
+        "                               counted in one <refs count=N next=...> element (see --whereis-listing).\n"
+        "    --whereis-listing=WHICH    with --whereis: which rows to list, defs (the default), refs or all\n"
+        "                               defs lists every kind=\"def\" row and COUNTS the kind=\"ref\" rows in one\n"
+        "                               <refs count=N next=...> element whose next= lists exactly them (refs). With no ref\n"
+        "                               row, or no def row (the mentions are then the answer), every hit is listed and the\n"
+        "                               root carries no listing=. all lists every row, the whole hit list. shown=/capped=\n"
+        "                               and --limit/--offset window the LISTED rows; hits= counts every row. Refused\n"
+        "                               without --whereis, and on an unknown value.\n"
         "    --flags[=SUBSTR]           the dark-content dashboard: what is built but switched OFF in this repo\n"
         "                               the dark-content dashboard: what is BUILT but OFF in this repo. Harvests all three gate\n"
         "                               patterns — #ifndef/#define header gates, CMake option(), and getenv() reads — and reports\n"
@@ -4645,6 +4655,11 @@ inline void validateModifierGuards( Config& c ) noexcept
         rw::emitRaw( stderr, "ripwire: --and=/--not=/--grep-scope= modify --grep=STR — pass it too (e.g. ripwire <dir> --grep=stale --and=mcp)\n" );
         c.ok = false;
     }
+    if( !c.whereisListing.empty() && !c.whereisFlag )
+    {
+        rw::emitRaw( stderr, "ripwire: --whereis-listing=defs|refs|all modifies --whereis=SYM — pass it too (e.g. ripwire <dir> --whereis=parseArgs --whereis-listing=all)\n" );
+        c.ok = false;
+    }
     // R-H: --grep-in= is the one grep modifier that ALSO applies to --regex (a regex hit lands in a span
     // exactly like a literal one), so its refusal tests both spellings rather than --grep= alone.
     if( !c.grepIn.empty() && c.grep.empty() )
@@ -5320,6 +5335,18 @@ inline Config parseArgs( int argc, char** argv ) noexcept
                     c.ok = false; return c;
                 }
                 c.grepScope = v;
+            }
+            else if( startsWith( a, "--whereis-listing=" ) )
+            {
+                // A closed value set, refused on an unknown value (the --grep-in= rule): a typo must not quietly read
+                // as the default listing and hide the rows the caller asked for.
+                const std::string_view v = a.substr( 18 );
+                if( v != "defs" && v != "refs" && v != "all" )
+                {
+                    rw::emitTo( stderr, "ripwire: --whereis-listing={} — unknown value (supported: defs|refs|all), e.g. --whereis-listing=all\n", std::string_view( v.data(), v.size() ) );
+                    c.ok = false; return c;
+                }
+                c.whereisListing = v;
             }
             else if( startsWith( a, "--grep-in=" ) )
             {

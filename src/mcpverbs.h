@@ -555,7 +555,8 @@ inline std::string rankByText( const std::string& root, std::string_view mode, i
 // returns "" with `seedFault` set, and the dispatcher speaks the shared refusal triple over -32602 rather
 // than answering a question the caller did not ask.
 inline std::string whereisText( const std::string& root, const std::string& symbol, const std::string& filter,
-                                std::size_t maxHits, McpPageArgs page = {}, bool* seedFault = nullptr )
+                                std::size_t maxHits, McpPageArgs page = {}, bool* seedFault = nullptr,
+                                crossref::WhereisListing listing = crossref::WhereisListing::Defs )
 {
     std::string sel = symbol;
     std::string seedSpec;
@@ -590,7 +591,7 @@ inline std::string whereisText( const std::string& root, const std::string& symb
     {
         res.nearMiss = didYouMean( getIndex( root ).ing, sel );
     }
-    return captureXml( [ & ]( std::FILE* f ) { crossref::writeWhereisPage( f, res, maxHits, page.limit, page.offset ); } );
+    return captureXml( [ & ]( std::FILE* f ) { crossref::writeWhereisPage( f, res, maxHits, page.limit, page.offset, listing ); } );
 }
 
 // `stray_content` verb: per ref, the content its own divergent work authored that the live line lacks.
@@ -1053,6 +1054,18 @@ inline std::string grepAuxJson( const std::vector<GrepAuxHit>& hits, const PageW
 //     was false: mcprefusal.h already registers the field, and the batch surface refuses loudly.
 //   · `in` reaches the batch arm at all. It previously took the defaulted GrepIn::Code with no hatch.
 // Absent reads as the default, as an OPTIONAL field must; only a PRESENT unknown spelling refuses.
+// `listing` on whereis — the CLI --whereis-listing= twin, the same closed set (defs|refs|all; absent = defs), refused on
+// any other value through the shared sentence so a typo never reads as the default listing.
+inline std::string whereisListingFromArg( std::string_view typed, bool isPresent, crossref::WhereisListing& out )
+{
+    out = crossref::whereisListingOf( typed );
+    if( !isPresent || typed == "defs" || typed == "refs" || typed == "all" )
+    {
+        return {};
+    }
+    return mcprefuse::badValueRefusal( "listing", typed );
+}
+
 inline std::string grepInModeFromArg( std::string_view typed, GrepIn& out )
 {
     out = GrepIn::Code;
