@@ -2176,21 +2176,12 @@ std::optional<int> runPath( const MainDispatch& d )
         rw::emitTo( stdout, "{}", rw::countAttrXmlOrEmpty( "to_value_refs", pthToValueRefs ) );   // absent at zero: byte-identical otherwise
         // P2.10: a dead end is exactly the moment to name the next verb. --path is DIRECTED; --connect searches
         // undirected and finds the shared-caller join a directed walk can never see.
-        const char* const pthDefsTail = ( srcDefs.size() > 1 || dstDefs.size() > 1 ) ? "; several defs share these names — qualify as file:name to pick one" : "";
-        std::string       pthGapRows;
-        if( pthGaps.any() )
-        {
-            const rw::PathGapsXml gx = rw::pathGapsXml( ing, pthGaps, pthSingleRoot, pthRootPrefix,
-                                                        "--connect=" + std::string( srcN ) + "," + std::string( dstN ), pthDefsTail );
-            rw::emitTo( stdout, "{}", gx.rootAttrs );
-            pthGapRows = gx.rows;
-        }
-        else if( path.empty() )
-        {
-            rw::emitTo( stdout, " hint=\"no directed call path — try --connect={},{} (undirected: finds a shared caller), or --uses/--impact for non-call references{}\"",
-                         ex( srcN ).c_str(), ex( dstN ).c_str(), pthDefsTail );
-        }
-        rw::emitTo( stdout, ">{}", pthGapRows );
+        const rw::PathGapsXml pthUnreached = path.empty()
+            ? rw::pathUnreachedXml( ing, pthGaps, pthSingleRoot, pthRootPrefix,
+                                    { "--connect=" + std::string( srcN ) + "," + std::string( dstN ), "--uses/--impact",
+                                      ( srcDefs.size() > 1 || dstDefs.size() > 1 ) ? "; several defs share these names — qualify as file:name to pick one" : "" } )
+            : rw::PathGapsXml{};
+        rw::emitTo( stdout, "{}>{}", pthUnreached.rootAttrs, pthUnreached.rows );
         for( NodeId n : path )
         {
             const Symbol&           s  = ing.symbols[n];

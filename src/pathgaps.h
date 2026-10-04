@@ -36,6 +36,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <numeric>
 #include <span>
 #include <string>
 #include <string_view>
@@ -65,20 +66,17 @@ struct PathSearchGaps
     PathGapCounts           totals{};
     std::vector<PathGapSym> syms;           // cone symbols carrying >= 1 gap: nearest first, then more gaps, then id
 
-    bool any() const noexcept
-    {
-        return std::ranges::any_of( totals, []( std::size_t n ) { return n > 0; } );
-    }
+    bool any() const noexcept;
 };
 
 inline std::size_t pathGapSum( const PathGapCounts& c ) noexcept
 {
-    std::size_t s = 0;
-    for( const std::size_t n : c )
-    {
-        s += n;
-    }
-    return s;
+    return std::accumulate( c.begin(), c.end(), std::size_t( 0 ) );
+}
+
+inline bool PathSearchGaps::any() const noexcept
+{
+    return pathGapSum( totals ) > 0;
 }
 
 // The directed cone of `srcs` (the same out-edges shortestPathAny walks, every one of them — no early stop at a target,
@@ -202,22 +200,35 @@ inline std::string_view pathGapsLegend( bool on ) noexcept
 
 struct PathGapsXml
 {
-    std::string rootAttrs;   // searched= gaps= gap_syms= [gap_syms_capped=] hint= next= — replaces the old hint
-    std::string rows;        // the <gap> rows, the path element's only children when reachable="0"
+    std::string rootAttrs;   // searched= gaps= gap_syms= [gap_syms_capped=] hint= next=, or the plain no-path hint alone
+    std::string rows;        // the <gap> rows, the path element's only children when reachable="0" ("" with the plain hint)
 };
 
-// `rootPrefix` empty ⇒ p= stays as indexed (multi-root), exactly as the hop rows spell it. `connectSuggestion` is the
-// transport's own spelling of the undirected follow-up ("--connect=A,B" on the CLI, "the connect verb on A,B" on MCP);
-// `hintTail` is the CLI's existing several-defs clause (already escaped text), "" on MCP — both as the no-gap hint has them.
-inline PathGapsXml pathGapsXml( const IngestResult& ing, const PathSearchGaps& gaps, bool singleRoot, std::string_view rootPrefix,
-                                std::string_view connectSuggestion, std::string_view hintTail )
+// The transport's own spellings of the follow-ups, so one function writes both dialects: `connect` is the undirected verb
+// ("--connect=A,B" on the CLI, "the connect verb on A,B" on MCP), `usesImpact` the non-call one ("--uses/--impact" /
+// "uses/impact"), `tail` the CLI's several-defs clause (plain text, "" on MCP) — exactly as the no-gap hint had them.
+struct PathHintSpelling
 {
-    EXPECTS( gaps.any(), "the gap clause is emitted only for a search that met a gap" );
+    std::string      connect;
+    std::string_view usesImpact;
+    std::string_view tail;
+};
+
+// The reachable="0" clause: the gap clause when the search met a gap, else the plain hint, byte-identical to before.
+// `rootPrefix` empty ⇒ p= stays as indexed (multi-root), exactly as the hop rows spell it.
+inline PathGapsXml pathUnreachedXml( const IngestResult& ing, const PathSearchGaps& gaps, bool singleRoot, std::string_view rootPrefix,
+                                     const PathHintSpelling& say )
+{
     std::vector<char> esc;
     const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
-    const std::size_t shown = std::min( gaps.syms.size(), kPathGapRows );
-
     PathGapsXml out;
+    if( !gaps.any() )
+    {
+        out.rootAttrs = " hint=\"no directed call path — try " + ex( say.connect ) + " (undirected: finds a shared caller), or "
+                      + std::string( say.usesImpact ) + " for non-call references" + std::string( say.tail ) + "\"";
+        return out;
+    }
+    const std::size_t shown = std::min( gaps.syms.size(), kPathGapRows );
     std::string next = "--expand=";
     for( std::size_t i = 0; i < shown; ++i )
     {
@@ -231,7 +242,7 @@ inline PathGapsXml pathGapsXml( const IngestResult& ing, const PathSearchGaps& g
     out.rootAttrs = " searched=\"" + std::to_string( gaps.searched ) + "\" gaps=\"" + pathGapCountsValue( gaps.totals ) + "\" gap_syms=\""
                   + std::to_string( gaps.syms.size() ) + "\"" + ( gaps.syms.size() > shown ? " gap_syms_capped=\"1\"" : "" )
                   + " hint=\"no path through resolved call edges, but the search is incomplete: it met calls with no edge (gaps=) — read the gap rows, or try "
-                  + ex( connectSuggestion ) + " (undirected: finds a shared caller)" + std::string( hintTail ) + "\"" + nextAttrXml( next );
+                  + ex( say.connect ) + " (undirected: finds a shared caller)" + std::string( say.tail ) + "\"" + nextAttrXml( next );
     return out;
 }
 

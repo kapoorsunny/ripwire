@@ -3210,20 +3210,10 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
                   pth.empty() ? 0 : 1, pth.empty() ? std::size_t( 0 ) : pth.size() - 1, ptRootAttr.c_str(),
                   graphCountFloorAttrXml( g ).c_str()  );   // M15: gauge + marker
     rw::emitTo( mem, "{}", countAttrXmlOrEmpty( "to_value_refs", ptToValueRefs ) );   // absent at zero, as on the CLI
-    std::string ptGapRows;
-    if( ptGaps.any() )
-    {
-        const PathGapsXml gx = pathGapsXml( ing, ptGaps, ptSingleRoot, ptRootPrefix, "the connect verb on " + from + "," + to, "" );
-        rw::emitTo( mem, "{}", gx.rootAttrs );
-        ptGapRows = gx.rows;
-    }
-    else if( pth.empty() )
-    {
-        rw::emitTo( mem, " hint=\"no directed call path — try the connect verb on {},{} (undirected: finds a shared caller), or uses/impact for non-call references\"",
-                      ex( from ).c_str(), ex( to ).c_str() );
-    }
-    rw::emitRaw( mem, ">" );
-    rw::emitRaw( mem, ptGapRows.c_str() );
+    const PathGapsXml ptUnreached = pth.empty()
+        ? pathUnreachedXml( ing, ptGaps, ptSingleRoot, ptRootPrefix, { "the connect verb on " + from + "," + to, "uses/impact", "" } )
+        : PathGapsXml{};
+    rw::emitTo( mem, "{}>{}", ptUnreached.rootAttrs, ptUnreached.rows );
     for( NodeId n : pth )
     { const Symbol&           s  = ing.symbols[n];
       const std::string_view  rp = ptSingleRoot ? sarif::rootRelativeUri( ing.files[ s.fileId ], ptRootPrefix ) : std::string_view( ing.files[ s.fileId ] );

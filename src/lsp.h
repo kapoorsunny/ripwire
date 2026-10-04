@@ -35,6 +35,7 @@
 
 #include "infra/os.h"        // rw::os::realpath / getcwd / stat — the root-is-a-directory check at initialize, the launch-cwd base for relative index paths
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
@@ -366,26 +367,19 @@ inline int lspKindOf( rw::SymKind k ) noexcept
     return 13;   // Variable — the neutral bucket
 }
 
+// The hover word per SymKind, a declarative table in enum order (CONTRIBUTING §3's table-over-switch rule; it was a
+// switch, and the three Go named-type kinds made it a near-clone of model.h's langTag switch). Sized by kSymKindCount,
+// so an appended kind without a word does not compile.
+inline constexpr std::array<const char*, rw::kSymKindCount> kLspKindWords = {
+    "function", "method", "class", "struct", "interface", "variable", "section", "macro", "field",
+    "symbol",          // Other
+    "module scope",    // ModuleScope
+    "type", "type alias", "function type"   // NamedType, Alias, FuncType
+};
 inline const char* lspKindWord( rw::SymKind k ) noexcept
 {
-    switch( k )
-    {
-        case rw::SymKind::Function:  return "function";
-        case rw::SymKind::Method:    return "method";
-        case rw::SymKind::Class:     return "class";
-        case rw::SymKind::Struct:    return "struct";
-        case rw::SymKind::Interface: return "interface";
-        case rw::SymKind::Var:       return "variable";
-        case rw::SymKind::Section:   return "section";
-        case rw::SymKind::Macro:     return "macro";
-        case rw::SymKind::Field:     return "field";
-        case rw::SymKind::ModuleScope: return "module scope";
-        case rw::SymKind::NamedType: return "type";
-        case rw::SymKind::Alias:     return "type alias";
-        case rw::SymKind::FuncType:  return "function type";
-        case rw::SymKind::Other:     break;
-    }
-    return "symbol";
+    const std::size_t i = std::size_t( k );
+    return i < kLspKindWords.size() ? kLspKindWords[i] : "symbol";
 }
 
 // ─── file identity: a client URI → an index fileId ──────────────────────────────────────────────────
