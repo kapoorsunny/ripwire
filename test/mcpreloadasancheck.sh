@@ -148,7 +148,7 @@ def row(kind, text):
 
 def fail(text):
     fails.append(text)
-    row("FAIL", text[:700])
+    row("FAIL", text[:3500])
 
 
 def check(cond, label, detail=""):
@@ -822,7 +822,13 @@ def main():
             row("PASS" if not fails else "NOTE", "cycle %d/%d done (checks so far %d, failures %d)" % (k, CYCLES, checks, len(fails)))
     except Dead as e:
         fail("the server died: %s" % e)
-        time.sleep(3)          # let a report finish landing in the log directory
+        # let the report finish landing in the log directory (the symbolizer can take a while on a loaded host): wait for its
+        # SUMMARY line, or for the process to be gone, for at most two minutes
+        t0 = time.time()
+        while time.time() - t0 < 120 and server.p.poll() is None:
+            if any("SUMMARY:" in open(os.path.join(SAN, f), errors="replace").read() for f in os.listdir(SAN)):
+                break
+            time.sleep(1)
         server.kill()
     except Exception as e:  # a driver bug must be loud, never a pass
         import traceback
@@ -830,7 +836,7 @@ def main():
     rc = server.close() if server.p.poll() is None else server.p.returncode
     found = sanitizer_findings()
     check(not found, "no sanitizer report in the log directory or on stderr (halt_on_error, abort_on_error, log_path)",
-          " | ".join("%s: %s" % (n, t[:1800]) for n, t in found[:1]))
+          " | ".join("%s: %s" % (n, t[:3000]) for n, t in found[:1]))
     check(rc == 0, "the session ended with exit status 0 after its input closed", "rc=%s" % rc)
     row("NOTE", "time: CLI %.0fs in %d runs, MCP %.0fs in %d requests" % (T["cli"], T["ncli"], T["mcp"], T["nmcp"]))
     print("SUMMARY checks=%d fails=%d cycles=%d stamp=%d content=%d edit=%d switch=%d release=%d cold=%d changed=%d missed=%d rc=%s san=%d" % (
