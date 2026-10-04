@@ -7257,10 +7257,9 @@ inline constexpr std::string_view kForLegoCountLegend =
 
 // Whether a rendered ranked <lego> block carries an attribute kForLegoCountLegend defines (attribute values are escaped,
 // so ` name="` can only open an attribute).
-inline constexpr std::string_view kLegoCountAttrNeedles[] = { " implementors_shown=\"", " implementors_floor=\"" };
 inline bool legoCarriesCountAttrs( std::string_view legoXml ) noexcept
 {
-    return std::ranges::any_of( kLegoCountAttrNeedles, [ & ]( std::string_view needle ) { return legoXml.find( needle ) != std::string_view::npos; } );
+    return legoXml.find( " implementors_" ) != std::string_view::npos;   // _shown=/_next=/_floor=: every one is defined there
 }
 
 // L2 fault-injection fix (independent review, 2026-09-19): packLego/packCompose's out-params give the stub

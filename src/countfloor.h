@@ -81,11 +81,18 @@ inline UseForm useFormOf( const Symbol& s ) noexcept
 // The languages whose read/write/type uses reach the use-site table in an ingest that captured value uses
 // (ingest_sidecap.h arms that pass for C++, ObjC and Python only). Outside them `--uses` lists calls and value references
 // but never a read, so the honest follow-up for a NotCalls symbol is the literal scan.
-inline constexpr std::array<Lang, 3> kValueUsesArmedLangs = { Lang::Cpp, Lang::ObjC, Lang::Python };
+inline constexpr std::array<bool, kLangCount> kValueUsesArmed = []
+{
+    std::array<bool, kLangCount> armed {};   // value-initialised: every language unarmed unless listed below
+    armed[ static_cast<std::size_t>( Lang::Cpp ) ]    = true;
+    armed[ static_cast<std::size_t>( Lang::ObjC ) ]   = true;
+    armed[ static_cast<std::size_t>( Lang::Python ) ] = true;
+    return armed;
+}();
 
 inline bool valueUsesArmedFor( Lang lang ) noexcept
 {
-    return std::ranges::find( kValueUsesArmedLangs, lang ) != kValueUsesArmedLangs.end();
+    return enumTableAt( kValueUsesArmed, lang, false );
 }
 
 // The follow-up that finds what a floored count could not: the uses verb lists every call, value and (where armed)

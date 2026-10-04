@@ -890,19 +890,23 @@ inline std::string safeDeleteFloorLegend( const SafeDeleteLegendFlags& flags, st
 }
 
 // The one risk= sentence in force (a reader needs their own value spelled out, not a glossary of four).
+struct SafeDeleteRiskReading
+{
+    std::string_view risk;
+    const char*      sentence;
+};
+inline constexpr SafeDeleteRiskReading kSafeDeleteRiskReadings[] = {
+    { "none-found",      "none-found: zero callers AND zero uses — an ABSENCE of evidence, never evidence of absence. " },
+    { "untested-radius", "untested-radius: callers or uses exist, and NONE of the transitive blast radius is test-covered. " },
+    { "uses-exist",      "uses-exist: callers or uses exist, and at least part of the radius is test-covered. " },
+    { "unmodelled",      "unmodelled: zero callers AND zero uses were READ, but this kind is used by reading or naming it and those "
+                         "counts cannot see that — no reading either way, never a none-found. " },
+};
 inline const char* safeDeleteRiskSentence( std::string_view risk ) noexcept
 {
-    if( risk == "unmodelled" )
-    {
-        return "unmodelled: zero callers AND zero uses were READ, but this kind is used by reading or naming it and those "
-               "counts cannot see that — no reading either way, never a none-found. ";
-    }
-    if( risk == "none-found" )
-    {
-        return "none-found: zero callers AND zero uses — an ABSENCE of evidence, never evidence of absence. ";
-    }
-    return risk == "untested-radius" ? "untested-radius: callers or uses exist, and NONE of the transitive blast radius is test-covered. "
-                                     : "uses-exist: callers or uses exist, and at least part of the radius is test-covered. ";
+    const auto it = std::ranges::find( kSafeDeleteRiskReadings, risk, &SafeDeleteRiskReading::risk );
+    ASSUME( it != std::end( kSafeDeleteRiskReadings ), "safeDeleteRiskSentence: runSafeDelete assigns only the four values listed" );
+    return it != std::end( kSafeDeleteRiskReadings ) ? it->sentence : "";
 }
 
 inline void emitSafeDeleteLegend( std::size_t defCount, std::size_t unprovenDefs, std::size_t ambiguousCallers, std::string_view risk,
