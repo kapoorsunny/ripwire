@@ -28,6 +28,7 @@
 #      (the clue) lists the reading file.
 #   F  grep <enc> on a method whose only call the resolver DECLINED (two same-named defs in other dirs, an
 #      untyped receiver): callers="0" callers_floor="1".
+#   F2 the same, from a caller that also BINDS a same-named call elsewhere — the declined evidence alone floors it.
 #   G  grep <enc> on a TS method whose only call is spelled like it and bound NOWHERE (unresolved, no decline).
 #   H  grep <enc> on a C function stored in a table and never called directly (a value use).
 #   I  (negative) grep <enc> on a C function with only direct, bound calls: callers="2", no marker.
@@ -119,6 +120,12 @@ cat > "$W/py/pkg/use.py" <<'EOF'
 def use_param(q):
     return q.tail()
 EOF
+# F2: one caller binds a same-named call elsewhere (x = LRU(); x.head()) and has a second one DECLINED (q.head()):
+# the unbound scan treats that caller as bound, so only the declined evidence can floor Selection.head
+mkdir -p "$W/py2/pkg/css" "$W/py2/pkg/other"
+printf 'class Selection:\n    def head(self):\n        raise ValueError("first item marker")\n' > "$W/py2/pkg/css/query.py"
+printf 'class LRU:\n    def head(self):\n        return "lru head"\n' > "$W/py2/pkg/other/cache.py"
+printf 'def mixed(q):\n    x = LRU()\n    x.head()\n    return q.head()\n' > "$W/py2/pkg/mix.py"
 cat > "$W/ts/router.ts" <<'EOF'
 export interface Router<T> { add(m: string): void; match(p: string): T | null }
 EOF
@@ -207,6 +214,13 @@ CALLERS_F="$( root_tag "$( run py --callers=Selection.tail )" callers )"
 [ -n "$( attr "$CALLERS_F" declined_calls )" ] || no "(F) premise: the q.tail() call is not declined here: $CALLERS_F"
 [ "$( attr "$ROW_F" callers )" = 0 ] && [ "$( attr "$ROW_F" callers_floor )" = 1 ] && [ "$( attr "$ROW_F" floor_next )" = "--uses=tail" ] \
     && ok "(F) callers=\"0\" callers_floor=\"1\" floor_next=\"--uses=tail\"" || no "(F) declined row: $ROW_F"
+
+echo "=== F2: a declined call from a caller that ALSO binds the same name elsewhere — only the decline can floor it ==="
+CALLERS_F2="$( root_tag "$( run py2 --callers=Selection.head )" callers )"
+CALLERS_F2B="$( root_tag "$( run py2 --callers=LRU.head )" callers )"
+[ -n "$( attr "$CALLERS_F2" declined_calls )" ] && [ "$( attr "$CALLERS_F2B" count )" = 1 ] || no "(F2) premise: want q.head() declined and x.head() bound: $CALLERS_F2 / $CALLERS_F2B"
+ROW_F2="$( enc_row "$( run py2 --grep='first item marker' )" 'Selection::head' )"
+if [ "$( attr "$ROW_F2" callers )" = 0 ] && [ "$( attr "$ROW_F2" callers_floor )" = 1 ]; then ok "(F2) declined-only evidence: callers_floor=\"1\""; else no "(F2) row: $ROW_F2"; fi
 
 # ── G: an unbound call, no decline ───────────────────────────────────────────────────────────────────────
 echo "=== G: grep <enc> on a TS method whose one call bound nowhere ==="
