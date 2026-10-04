@@ -2793,7 +2793,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // tally). Overwritten below if the §P3×§P4 narrow-and-re-render fires, so it always reflects the set
         // that would actually be restored.
         std::size_t legoPreCapCount = 0, composePreCapCount = 0;
-        legoPreRendered = preRender( [ & ]( std::FILE* lm ) { packLego( lm, ing, legoScoped, lensRank, 12, redactPtr, impurePtr, kNoNode, /*withPaths=*/true, flRootArg, {}, &legoPreCapCount ); },
+        legoPreRendered = preRender( [ & ]( std::FILE* lm ) { packLego( lm, ing, legoScoped, lensRank, 12, redactPtr, impurePtr, kNoNode, /*withPaths=*/true, flRootArg, {}, &legoPreCapCount, &g.implementors ); },
                                      legoStr );
         if( !legoPreRendered )
         {
@@ -3091,7 +3091,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         if( sigsPreRendered && legoPreRendered && !legoStr.empty()
             && narrowLegoToRenderedSigs( ing, legoScoped, sigsStr, flRootArg.empty() ? std::string_view() : rw::sarif::rootPrefixOf( flRootArg ) ) )
         {
-            legoStr = captureXml( [ & ]( std::FILE* f ) { packLego( f, ing, legoScoped, lensRank, 12, redactPtr, impurePtr, kNoNode, /*withPaths=*/true, flRootArg, {}, &legoPreCapCount ); } );
+            legoStr = captureXml( [ & ]( std::FILE* f ) { packLego( f, ing, legoScoped, lensRank, 12, redactPtr, impurePtr, kNoNode, /*withPaths=*/true, flRootArg, {}, &legoPreCapCount, &g.implementors ); } );
         }
 
         // L2 (round-1 lever B1, §9.3 disclosed cut): collapse <lego>/<compose> to a counted stub BY DEFAULT —
@@ -3156,6 +3156,12 @@ std::optional<int> runForLens( const MainDispatch& d )
         if( legoWillStub || composeWillStub )
         {
             sectionsStubNote = rw::kForSectionStubLegend;
+        }
+        // count-floor: the lego COUNT clause rides only on a document whose served <lego> carries its attributes (a short
+        // list or a floor) — the same post-render, present-only splice, so an answer without them keeps every byte.
+        if( legoPreRendered && !legoWillStub && rw::legoCarriesCountAttrs( legoStr ) )
+        {
+            sectionsStubNote += rw::kForLegoCountLegend;
         }
         if( legoPreRendered && legoWillStub )
         {
@@ -3485,7 +3491,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             // the same bytes --sections=lego would restore. Same scope+identity (§P3; un-narrowed — the sigs
             // bytes are unknown here). legoStubTotal == 0 emits nothing, packLego's own no-op.
             ASSUME( !legoWillStub, "runForLens: an unmeasured lego section was marked for collapse" );
-            packLego( stdout, ing, legoScoped, lensRank, 12, redactPtr, impurePtr, kNoNode, /*withPaths=*/true, flRootArg );
+            packLego( stdout, ing, legoScoped, lensRank, 12, redactPtr, impurePtr, kNoNode, /*withPaths=*/true, flRootArg, {}, nullptr, &g.implementors );
         }
         if( composePreRendered )
         {
@@ -3589,9 +3595,10 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         // graphUnindexedLegendComment) because kLegoLegend is one closed literal: the attribute below is
         // conditional on g.unindexedFiles, so its definition has to be too.
         // H1: the unproven_defs= clause takes the same route for the same reason (graphlegend.h unprovenDefsVerbComment).
-        rw::emitTo( stdout, "{}{}{}{}", rw::ctxRootOpen( {}, {}, tvRootArg ).c_str(), rw::kLegoLegend,
+        rw::emitTo( stdout, "{}{}{}{}{}", rw::ctxRootOpen( {}, {}, tvRootArg ).c_str(), rw::kLegoLegend,
                      rw::graphUnindexedLegendComment( rw::graphGaugeClauses( g ) ).c_str(),
-                     rw::unprovenDefsVerbComment( rw::UnprovenDefsVerb::Lego, legoUnprovenDefs > 0, "<!-- ripwire lego: " ).c_str() );
+                     rw::unprovenDefsVerbComment( rw::UnprovenDefsVerb::Lego, legoUnprovenDefs > 0, "<!-- ripwire lego: " ).c_str(),
+                     rw::implementorsFloorLegendComment( ing, g.implementors, focus ) );   // count-floor: present-only, as the two above
         packLego( stdout, ing, g.implementors, flat, 1, d.redactPtr, &legoImpure, focus, /*withPaths=*/true, tvRootArg,
                   rw::unprovenDefsAttrXml( legoUnprovenDefs ) + rw::graphCountFloorAttrXml( g ) );   // H1 + M15: residue, gauge, marker on the targeted root
         rw::emitRaw( stdout, "</ctx>" );

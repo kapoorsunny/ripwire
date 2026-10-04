@@ -847,6 +847,9 @@ struct SafeDeleteLegendFlags
     std::size_t declinedCalls = 0;       // declined_calls= on the root (graph.h declinedCallsNaming)
     bool        gateDeclined  = false;   // the builtin-method gate declined a call in this graph
     std::size_t valueRefs     = 0;       // value_refs= on the root (valuerefs.h): SYM is used as a value
+    bool        callersFloor  = false;   // callers_floor= on the root (countfloor.h): callers= may be short for THIS definition
+    bool        usesFloor     = false;   // uses_floor= on the root: this kind's reads/type mentions are not indexed in this run
+    bool        hasSitesL     = false;   // a <c sites_l=> row is on this page
 };
 
 inline void emitSafeDeleteLegend( std::size_t defCount, std::size_t unprovenDefs, std::size_t ambiguousCallers, std::string_view risk,
@@ -864,6 +867,36 @@ inline void emitSafeDeleteLegend( std::size_t defCount, std::size_t unprovenDefs
         declinedClause += "none-found beside declined_calls= is not a safety reading: those calls may reach this definition. ";
     }
     declinedClause += rw::valueRefsSafeDeleteLegend( flags.valueRefs > 0 );   // exactly when the root carries value_refs=
+    // count-floor (countfloor.h): each clause exactly when its attribute rides the root/rows, each saying what it does NOT mean.
+    if( flags.callersFloor )
+    {
+        declinedClause += "callers_floor=\"1\": callers= may be SHORT for this definition, because the index holds evidence of a miss "
+                          "for it: a call the resolver declined to bind that named it, a call or macro site spelled like it that bound to "
+                          "no definition at all, a use as a value, or a kind that is read or named more than called (a variable, a "
+                          "class or struct, an interface) — impact_reaches= is walked over the same edges and is short the same way. It does NOT "
+                          "mean more callers exist (an unbound x.f() may be another type's f); absent, the index holds no such evidence. ";
+    }
+    if( flags.usesFloor )
+    {
+        declinedClause += "uses_floor=\"1\": uses= could not see this kind's reads, writes or type mentions in this run (only calls, values, "
+                          "imports and extends sites are indexed for it), so a zero there is not a count of its uses. ";
+    }
+    if( flags.callersFloor && risk == "none-found" )
+    {
+        declinedClause += "none-found beside callers_floor= is not a safety reading: the calls it names may reach this definition. ";
+    }
+    if( flags.callersFloor || flags.usesFloor )
+    {
+        declinedClause += "next= is the call that lists what the floored counts could not: the uses verb (every call, value and, where "
+                          "indexed, read site spelled like sym=, bound or not), or the literal grep where this language's reads are never indexed. ";
+    }
+    if( flags.hasSitesL )
+    {
+        declinedClause += "sites_l= on a c row is the ascending LINE list of that caller's call sites spelled like sym= (the rows the uses "
+                          "verb prints) — the lines to open, beside p=, which is where the CALLER is defined. It does NOT mean each line "
+                          "binds to this definition (a same-named call to another definition in that caller is listed too); absent when no "
+                          "call there is spelled like sym= (a renamed import). Two calls on one line are one site. ";
+    }
     rw::emitTo( stdout, "<!-- ripwire safe-delete: composes signals the tool already computes into one \"can I delete this?\" READ "
                 "— never a verdict. defs= is resolveAllByNameQualified's match count, exactly as the impact/uses/callers "
                 "verbs already disclose it. callers= is the 1-hop caller count (the callers verb's own walk over defs' "
@@ -895,7 +928,10 @@ inline void emitSafeDeleteLegend( std::size_t defCount, std::size_t unprovenDefs
                     : "",
                 // One risk= value, the one in force. A verdict a reader has to look up in a glossary of three is a
                 // marker string legible only to whoever wrote it.
-                  risk == "none-found"
+                  risk == "unmodelled"
+                      ? "unmodelled: zero callers AND zero uses were READ, but this kind is used by reading or naming it and those "
+                        "counts cannot see that — no reading either way, never a none-found. "
+                  : risk == "none-found"
                       ? "none-found: zero callers AND zero uses — an ABSENCE of evidence, never evidence of absence. "
                   : risk == "untested-radius"
                       ? "untested-radius: callers or uses exist, and NONE of the transitive blast radius is test-covered. "
@@ -1056,8 +1092,22 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
         if( c < g.ambOut.size() && g.ambOut[c] > 0 ) { ++ambiguousCallers; }
     }
 
+    // count-floor (countfloor.h): callers= is a floor when the index holds evidence of a miss for THESE definitions;
+    // uses= is a floor when a definition is read/named rather than called and this run indexed no reads for its
+    // language (the lean family never does — rw::needsValueUses leaves this verb out). Neither moves a count.
+    const std::vector<std::vector<NodeId>> sdFloorSets{ defs };
+    const CallerFloor sdFloor   = callerFloors( ing, g, sdFloorSets, &sdVri ).front();
+    bool              usesFloor = false;
+    for( NodeId def : defs )
+    {
+        const Symbol& ds = ing.symbols[def];
+        usesFloor = usesFloor || ( useFormOf( ds ) == UseForm::NotCalls && !( d.valueUses && valueUsesArmedFor( ds.lang ) ) );
+    }
+    ENSURES( !usesFloor || sdFloor.isFloor );   // a NotCalls definition always floors callers= too (callerFloors' first rule)
+
     const bool  anyEvidence = !callerIds.empty() || !sites.empty() || !sdValueRefs.rows.empty();   // a decorator row is not a use site, still evidence
-    const char* risk        = !anyEvidence                                    ? "none-found"
+    const char* risk        = ( !anyEvidence && usesFloor )                   ? "unmodelled"
+                            : !anyEvidence                                    ? "none-found"
                             : ( !reach.empty() && radiusTested == 0 )         ? "untested-radius"
                             :                                                   "uses-exist";
 
@@ -1080,10 +1130,24 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
     // it here (the legend streams BEFORE the rows) cannot disagree with the window the rows below take.
     const PageWindow sdLw = pageWindow( callerIds.size(), effectiveRowCap( cfg.pageLimit, 40 ), cfg.pageOffset );
     const std::size_t sdDeclinedCalls = declinedCallsNaming( g, defs );   // declined calls that could have meant a def (as --callers counts them)
+
+    // CALLSITE-LINE: a <c> row's p= is where the CALLER is defined; the lines to open are its call sites. The edit-check
+    // verb's own pass (editcheck.h editCheckCallSites: the uses verb's call-role filters, one scan of the reference table,
+    // (caller, line) pairs deduplicated) over every caller row this page prints.
+    std::vector<char> sdOnPage( ing.symbols.size(), 0 );
+    for( std::size_t i = sdLw.begin; i < sdLw.end; ++i )
+    {
+        sdOnPage[ callerIds[i] ] = 1;
+    }
+    EditCheckCalleeTest sdCallee( ing, ing.symbols[ defs[0] ], defs );
+    const std::vector<std::pair<NodeId, std::uint32_t>> sdCallSites =
+        sdLw.end > sdLw.begin ? editCheckCallSites( ing, sdCallee, sdOnPage ) : std::vector<std::pair<NodeId, std::uint32_t>>{};
+
     emitSafeDeleteLegend( defs.size(), sdUnprovenDefs, ambiguousCallers, risk,
                           SafeDeleteLegendFlags{ sdSingleRoot, rw::graphGaugeClauses( g ),
                                                  anyModuleScopeRow( ing, std::span<const NodeId>( callerIds ).subspan( sdLw.begin, sdLw.end - sdLw.begin ) ),
-                                                 sdDeclinedCalls, g.gateDeclinedCalls > 0, sdValueRefs.rows.size() } );
+                                                 sdDeclinedCalls, g.gateDeclinedCalls > 0, sdValueRefs.rows.size(),
+                                                 sdFloor.isFloor, usesFloor, !sdCallSites.empty() } );
 
     const Symbol&      lead = ing.symbols[ defs[0] ];   // resolveAllByNameQualified walks ascending id — defs[0] is the
                                                         // lowest, same convention --impact/--uses/--callers's of=/defs=
@@ -1091,22 +1155,31 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
     const PageWindow   cw   = pageWindow( callerIds.size(), effectiveRowCap( cfg.pageLimit, 40 ), cfg.pageOffset );
     char               cab[ kPageDisclosureCap ];
     const std::string  sdRootAttr = sdSingleRoot ? ( " root=\"" + ex( cfg.roots[0] ) + "\"" ) : std::string();
-    rw::emitTo( stdout, "<safe-delete sym=\"{}\" t=\"{}\" p=\"{}:{}\" defs=\"{}\" callers=\"{}\" ambiguous_callers=\"{}\" "
-                "impact_reaches=\"{}\" uses=\"{}\" tested_self=\"{}\" radius_tested=\"{}\" radius_untested=\"{}\" "
-                "dead_code_candidate=\"{}\" risk=\"{}\"{}{}{}{}{}{}>",
+    // count-floor: each marker straight after the count it qualifies (absent when the index holds no evidence of a miss),
+    // and the follow-up last, after root= — the place every other verb's next= rides.
+    const char* const sdCallersFloorAttr = sdFloor.isFloor ? " callers_floor=\"1\"" : "";
+    const char* const sdUsesFloorAttr    = usesFloor ? " uses_floor=\"1\"" : "";
+    const std::string sdNextAttr         = rw::nextAttrXml( sdFloor.next );
+    rw::emitTo( stdout, "<safe-delete sym=\"{}\" t=\"{}\" p=\"{}:{}\" defs=\"{}\" callers=\"{}\"{} ambiguous_callers=\"{}\" "
+                "impact_reaches=\"{}\" uses=\"{}\"{} tested_self=\"{}\" radius_tested=\"{}\" radius_untested=\"{}\" "
+                "dead_code_candidate=\"{}\" risk=\"{}\"{}{}{}{}{}{}{}>",
                 ex( cfg.safeDeleteSym ).c_str(), symTag( lead.kind ), ex( sdPathRel( lead.fileId ) ).c_str(), lead.line,
-                defs.size(), callerIds.size(), ambiguousCallers, reach.size(), sites.size(), testedSelf ? 1 : 0,
-                radiusTested, radiusUntested, deadCodeCandidate ? 1 : 0, risk,
+                defs.size(), callerIds.size(), sdCallersFloorAttr, ambiguousCallers, reach.size(), sites.size(), sdUsesFloorAttr,
+                testedSelf ? 1 : 0, radiusTested, radiusUntested, deadCodeCandidate ? 1 : 0, risk,
                 rw::unprovenDefsAttrXml( sdUnprovenDefs ).c_str(),   // H1: beside the verdict it qualifies; absent at zero
                 rw::declinedCallsAttrXml( sdDeclinedCalls ).c_str(), // beside risk= too: declined calls that may reach it; absent at zero
                 rw::valueRefsCountAttrXml( sdValueRefs.rows.size() ), // value uses: in uses=, never in callers=/impact_reaches=; absent at zero
                 pageDisclosure( cab, sizeof( cab ), cw.end - cw.begin, callerIds.size(), cw.end, cfg.pageLimit, cfg.pageOffset, true ),
-                rw::graphCountFloorAttrXml( g ).c_str(), sdRootAttr.c_str() );
+                rw::graphCountFloorAttrXml( g ).c_str(), sdRootAttr.c_str(), sdNextAttr.c_str() );
     for( std::size_t i = cw.begin; i < cw.end; ++i )
     {
         const NodeId  callerId = callerIds[i];
         const Symbol& cs       = ing.symbols[ callerId ];
         rw::emitTo( stdout, "<c n=\"{}\" p=\"{}:{}\"", ex( cs.name ).c_str(), ex( sdPathRel( cs.fileId ) ).c_str(), cs.line );
+        if( const std::string siteList = editCheckSiteList( sdCallSites, callerId ); !siteList.empty() )
+        {
+            rw::emitTo( stdout, " sites_l=\"{}\"", siteList );   // CALLSITE-LINE: the lines to open, beside the definition line
+        }
         if( callerId < g.ambOut.size() && g.ambOut[ callerId ] > 0 )
         {
             rw::emitTo( stdout, " amb=\"{}\"", g.ambOut[ callerId ] );   // M15: the same COUNT a map row's amb= prints — one meaning, one unit

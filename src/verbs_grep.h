@@ -107,10 +107,26 @@ void emitGrepEncRows( const rw::IngestResult& ing, const rw::Graph& g, std::span
 {
     using namespace rw;
     GrepHandleAttrs handleAttrs( ing, g, opt.handles, opt.root );
-    for( const GrepEncRow& row : grepEnclosingRows( ing, g, hits ) )
+    const std::vector<GrepEncRow> rows = grepEnclosingRows( ing, g, hits );
+    // count-floor: callers= beside evidence of a miss for THAT row is a floor (countfloor.h); the MCP twin calls the same
+    // function over the same rows (mcpverbs.h grepEnclosingJson), so the two surfaces cannot disagree.
+    std::vector<std::vector<NodeId>> rowIds;
+    rowIds.reserve( rows.size() );
+    for( const GrepEncRow& row : rows )
     {
+        rowIds.push_back( row.ids );
+    }
+    const std::vector<CallerFloor> floors = callerFloors( ing, g, rowIds );
+    ENSURES( floors.size() == rows.size() );
+    for( std::size_t r = 0; r < rows.size(); ++r )
+    {
+        const GrepEncRow& row = rows[r];
         const auto en = rw::escapeXml( row.chain, opt.esc );
         rw::emitTo( stdout, "<enc n=\"{}\" callers=\"{}\"", std::string_view( en.data(), en.size() ), row.callerCount );
+        if( floors[r].isFloor )
+        {
+            rw::emitTo( stdout, " callers_floor=\"1\"{}", rw::nextAttrXml( floors[r].next, "floor_next" ) );
+        }
         if( row.defCount > 1 )
         {
             rw::emitTo( stdout, " defs=\"{}\"", row.defCount );
@@ -815,6 +831,11 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
                  // parse this verb's header counters by grep, and a quoted numeric example here would be matched first — the quality-delta legend's rule.
                  "After the hit rows, <enc> rows list each DISTINCT enclosing symbol NAME of THIS page (first-appearance order, bounded by the page) with callers= its 1-hop DISTINCT-caller count, "
                  "unioned across same-named defs like the callers verb (a FLOOR — dynamic dispatch contributes no edge), defs= how many defs the name grouped (only when more than one), cx= complexity; "
+                 // count-floor (countfloor.h): the row's own marker, no attribute=value literal (this legend's rule).
+                 "callers_floor= (value 1, present only on such a row) marks a count the index holds evidence of a miss for: a declined or "
+                 "unbound call spelled like the name, a use as a value, or a kind used by reading or naming it (a variable, a class, an "
+                 "interface); it is not proof more callers exist, and its absence means the index holds no such evidence. floor_next= is "
+                 "the call that lists what that count could not see (the uses verb, or this literal scan where reads are never indexed); "
                  "amp=/tested= join only when a metrics co-run already computed that lens. On a zero-hit answer a <suggest> element may follow: SUGGESTIONS, never matches — near= the nearest indexed "
                  "symbol name (did-you-mean), next= a ready-to-paste conceptual fallback; absent for regex/non-word-like patterns or when nothing plausible exists. "
                  // T1: the completeness claim, defined where it appears (no attribute=value literal in these
