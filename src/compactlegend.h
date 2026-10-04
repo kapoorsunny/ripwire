@@ -60,7 +60,7 @@ struct CompactLegendSpec
 inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
 {
     // ── the ranked-map family (root <r>) — hinted by the map-shaping flag that rode along ──
-    { "r",   "map",        "ranked symbol map: <f p= layer=> groups <s t= n= sc= k= amb=> rows (k= rank), <c n=> resolved callees; the header comment is data" },
+    { "r",   "map",        "ranked symbol map: <f p= layer=> groups <s t= n= sc= k= amb=> rows (k= rank), <c n=> resolved callees (or <s calls=a,b>); the header comment is data" },
     { "r",   "map-diff",   "the ranked map anchored at at=: what the diff touched, the map's row vocabulary" },
     { "r",   "metrics",    "the ranked map with per-symbol metrics: in/out, cx/ccx, loc, params, nest, humps/deep, locals, cbo, amp, tested, ev" },
     { "r",   "around",     "call neighbourhood of of=: depth= hops, fanout= kept per hop; absent rows lie outside that boundary" },
@@ -566,6 +566,8 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // ctxRootOpen) rides a bundle whose task was routed to a ranker: --pack-task always, MCP explore unless no_route; it is
     // ELEMENT-qualified on <ctx>. compactlegendcheck (D36)/(D37).
     { "r",                 "<d r=N>: rank N in this ranking, rows in r= order", true, "d" },
+    // lean-answers lane (serialize.h, the map's callee rows): present only where a row joined its callees.
+    { "calls",             "<s calls=a,b>: its resolved callees comma-joined in order, the <c n=> rows of a row none of whose calls carries an attribute", true, "s" },
     { "ccx",               "<d cx= ccx=>: cyclomatic/cognitive complexity", true, "d" },
     { "in",                "<d in=N>: N callers in the index (absent: not measured)", true, "d" },
     { "amp",               "<d amp=N>: direct callers + files sharing a commit with its file (absent at 0)", true, "d" },
