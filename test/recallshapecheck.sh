@@ -1695,7 +1695,7 @@ function h() { return 3; }
 const TABLE = { k: g };                                                          // @D_TABLE
 const T2 = { a: h, b: h };
 function store() { const tbl = {}; tbl.k = f; tbl.k(); tbl.k(); return tbl; }   // @D_STORE
-function store2() { const t = {}; t.k = f; t.j = f; t.k(); t.j(); return t; }
+function store2() { const t = {}; t.k = f; t.j = f; t.j(); t.k(); return t; }
 function run() { TABLE.k(); TABLE.k(); }
 function run2(x) { T2[x](); T2[x](); }
 module.exports = { store, store2, run, run2 };
@@ -1706,7 +1706,7 @@ arm "RD2 callees run: two calls through a slot one site fills — sites= absent 
     dup --callees=run attr:value_refs=1 nvr:1 'vr:to=g;bind=@D_TABLE;through=TABLE.k;sites=-'
 arm "RD3 callees run2 (near miss): two binding sites behind one computed slot, called twice — sites=2, not 4" \
     dup --callees=run2 attr:value_refs=1 nvr:1 'vr:to=h;through=T2[x];sites=2'
-arm "RD4 callees store2 (near miss): two binding sites in one function are two rows" \
+arm "RD4 callees store2 (near miss): two binding sites in one function are two rows, each with its own call (called in reverse order)" \
     dup --callees=store2 attr:value_refs=2 nvr:2 'vr:to=f;into=t.k;through=t.k' 'vr:to=f;into=t.j;through=t.j'
 cli dup --callees=store "$TMP/cli.dupstore.xml"
 mcp_call find_symbol '{"path":"'"$FX/dup"'","symbol":"store"}' >"$TMP/mcp.dupstore.json"
