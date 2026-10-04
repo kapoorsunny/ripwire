@@ -3938,6 +3938,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                                                  // whose per-reference tier work dominates the growth cascade by orders of
                                                  // magnitude. A guessed reserve would be a made-up number in a hot struct.
     std::vector<NodeId>      rule3Out;   // reused Rule-3 output buffer (candidates from the single included file)
+    Rule3FileMemo            rule3Memo;  // Rule 3's answer per (caller file, byName entry): one walk per name per file, not per call
     std::string              qkey;       // reused "qualifier::name" buffer for the E#4 canonical lookup (no per-ref alloc)
     std::vector<std::size_t> locShare;   // reused per-candidate localityRank memo (computed once per tier, below)
 
@@ -4502,8 +4503,13 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         const rw::SmallVec<NodeId, 2>* nameIds = localsYield ? &reachScratch : baseIds;
         if( !scipPinned && !canonical && !narrowed && it != byName.end() )
         {
-            if( narrower.rule3IncludeFile( *nameIds, r.fileId, rule3Out, localsYield ? 1u : 2u )
-                || ( localsYield && narrower.rule3IncludeFile( *baseIds, r.fileId, rule3Out ) ) )
+            // memoized when the list asked about IS the byName entry (no per-call survivor list in play): same answer, asked once
+            const auto rule3 = [ & ]( const rw::SmallVec<NodeId, 2>& ids, std::size_t minCands )
+            {
+                return ( &ids == &it->second && minCands == 2 ) ? rule3Memo.narrow( narrower, ids, r.fileId, rule3Out )
+                                                                 : narrower.rule3IncludeFile( ids, r.fileId, rule3Out, minCands );
+            };
+            if( rule3( *nameIds, localsYield ? 1u : 2u ) || ( localsYield && rule3( *baseIds, 2u ) ) )
             {
                 for( NodeId c : rule3Out )
                 {
