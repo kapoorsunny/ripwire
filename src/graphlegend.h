@@ -353,7 +353,7 @@ inline constexpr std::string_view kForRouteCodeLegend =
 // dropped (the answer stays honest — it just keeps the clause inline). Byte-identical to the inline spellings.
 // No "--" in any of them: they ride inside an XML comment (G4).
 inline constexpr std::string_view kMcpForBuildingBlocksLegend =
-    ": reusable building blocks (cx=complexity, in=reuse-count) — prefer composing/reusing these over reimplementing";
+    ": reusable building blocks (cx=complexity, in=reuse-count; an absent cx/ccx/in is 0) — prefer composing/reusing these over reimplementing";
 inline constexpr std::string_view kMcpForBundleSigsLegend =
     "; bundle=sigs: signatures only in this bundle, no inline bodies — fetch a symbol's full body with the fetch_body verb";
 inline constexpr std::string_view kMcpForLensColumnsLegend =

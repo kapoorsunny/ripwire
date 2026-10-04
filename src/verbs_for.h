@@ -736,13 +736,13 @@ inline std::string legendDroppedNote( bool compact, bool thin, bool routeWasOn, 
 inline constexpr std::string_view kForCompactLegendRoot =
     "bundle=/bodies=/reason= the body posture; ";
 inline constexpr std::string_view kForCompactLegendRows =
-    "d: cx= ccx= complexity, in= callers, churn= amp= change, clone= tested= 1, sc= scope, id=p::sc::n; "
+    "d: cx= ccx= complexity, in= callers (absent cx/ccx/in = 0), churn= amp= change, clone= tested= 1, sc= scope, id=p::sc::n; "
     "total= shown= capped=1 if cut";
 // …and the same clause for a bundle whose served rows carry NO scope (a corpus of free functions, a markdown
 // tree): 22 B of sc= reading removed, nothing else. Two constants rather than one built at runtime because this
 // dialect's whole contract is a pinned byte count per schema, and a pin reads a constant.
 inline constexpr std::string_view kForCompactLegendRowsNoScope =
-    "d: cx= ccx= complexity, in= callers, churn= amp= change, clone= tested= 1; "
+    "d: cx= ccx= complexity, in= callers (absent cx/ccx/in = 0), churn= amp= change, clone= tested= 1; "
     "total= shown= capped=1 if cut";
 // L1 fix round (2026-09-19, rv-r1-L1 HIGH-1): task= (the root's echo of the query), next= (the follow-up on a <d> row), pure=
 // (a <d> row flag) and the <compose><field> rows rode every default answer with no reading in either dialect;
@@ -983,7 +983,7 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
              "invisible neighbours without hurting, no measured recall lift; see bench/ANSWERQUALITY.md]";
     }
     h += ": reusable building blocks + quality facts for what you're about to touch "
-         "(cx=complexity ccx=cognitive in=reuse-count churn=recent-commits amp=change-amplification clone=1(duplicated) tested=1) "
+         "(cx=complexity ccx=cognitive in=reuse-count, each absent when 0; churn=recent-commits amp=change-amplification clone=1(duplicated) tested=1) "
          "— prefer composing/reusing these; watch the high-churn/high-amp/cloned ones";
     // BOTH readings are present-only (PR #215 review): sc= when a served row carries one, route= when the root
     // carries the attribute. A reading with nothing to define is bytes the bundle could have spent on a row, and
@@ -2990,7 +2990,8 @@ std::optional<int> runForLens( const MainDispatch& d )
                                 &shownSigIds,                                // lane 2: the rows actually emitted — the tail excludes THESE files
                                 &forSigsCapped,                              // did the ladder fire? — the budget_bytes= clause rides only then
                                 forTopRowNext,                               // L-W: the widening page on a thin answer, else the body
-                                &forSigsCut );                               // cut-fix lane A: which cut readings the tag owes
+                                &forSigsCut,                                 // cut-fix lane A: which cut readings the tag owes
+                                /*elideZeroMetrics=*/true );                 // lean-answers lane: zero cx=/ccx=/in= omitted (legend: absent = 0)
             },
             sigsStr );
         if( !sigsPreRendered )
@@ -3472,7 +3473,8 @@ std::optional<int> runForLens( const MainDispatch& d )
             packSignatures( stdout, ing, lensRank, forTopN, cfg.packBudgetBytes, true, fanInPtr, impurePtr, redactPtr,
                             &forChurn, &forClone, testedPtr, ampPtr, /*rankAdaptivePayload=*/true, sigsBudget, notesPtr, flRootArg,
                             /*hasRelevanceFloor=*/true, nullptr, nullptr, nullptr,   // LB-A: the direct-emission degrade path selects identically
-                            forTopRowNext );                                         // L-W: same next= rule on the degrade path
+                            forTopRowNext,                                           // L-W: same next= rule on the degrade path
+                            nullptr, /*elideZeroMetrics=*/true );                    // lean-answers lane: the same row spelling
         }
         if( legoPreRendered )
         {

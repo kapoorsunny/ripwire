@@ -2225,7 +2225,8 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
                         &mcpShownIds,                         // lane 2: see verbs_for.h shownSigIds
                         &mcpSigsCapped,                       // the ladder's own verdict — see the budget_bytes= splice below
                         mcpTopRowNext,                        // L-W: the widening page on a thin answer, else the body
-                        &mcpSigsCut );                        // cut-fix lane A: docs_dropped= / shrunk readings
+                        &mcpSigsCut,                          // cut-fix lane A: docs_dropped= / shrunk readings
+                        /*elideZeroMetrics=*/true );          // lean-answers lane: the CLI twin's row spelling
     } );
     // A2: same insert-before-"-->" splice as the CLI twin (verbs_for.h) — absent entirely on the (overwhelming)
     // no-drop path, so headerStr's bytes are unchanged there (byte-identical to the pre-A2 output). Bare
