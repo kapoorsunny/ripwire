@@ -85,6 +85,8 @@ struct RawRef
                                        //   field of a depth-2 chained receiver (recv FieldOfThis/FieldOfVar); "" otherwise
     std::string   composeRel;          // "creates" (value/inline) or "uses" (reference/pointer) when isCompose; "" otherwise
     std::string   memberRoot;          // FE-A: the receiver chain's ROOT identifier when memberCall (`JSON` in `JSON.parse()`); see model.h
+    std::string   memberPath;          // FE-B: the member names between memberRoot and the callee, '.'-joined ("" = `root.m()`); see model.h
+    std::string   memberCtor;          // FE-B: the class a constructed receiver names (`new X().m()`, Go `X{}.m()`); see model.h
 };
 
 // P2-D Rule 2 raw local-variable type binding (pre-attribution). startByte sits inside the enclosing
@@ -134,7 +136,11 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 //   all match) rather than silently re-absolutizing a key that was never root-relative to begin
 //   with — a v2 cache simply misses on every lookup that survives the guard, which is exactly the
 //   self-healing full-reparse path already used for any other corrupt/stale cache.
-constexpr std::uint32_t kCacheVersion = 28;           // 28: FE-A (test/falseedgecheck.sh) — RawRef gains `memberCall` (u8) and
+constexpr std::uint32_t kCacheVersion = 29;           // 29: FE-B (test/receiverevidencecheck.sh) — RawRef gains `memberPath` (str) and
+                                                      //    `memberCtor` (str) after `memberRoot` (ref record 46 -> 54 bytes lean),
+                                                      //    and RawBind gains four APPENDED kinds (RecvType, MemberType,
+                                                      //    MethodAlias, NameAlias). A FORMAT change: the version guard rejects a v28 blob.
+                                                      // 28: FE-A (test/falseedgecheck.sh) — RawRef gains `memberCall` (u8) and
                                                       //    `memberRoot` (str) after `qualifierRootsStd` (ref record 41 -> 46
                                                       //    bytes lean). A FORMAT change: a v27 blob lacks the bytes, so the
                                                       //    version guard rejects it (self-healing full reparse).
@@ -302,7 +308,12 @@ constexpr std::uint32_t kCacheVersion = 28;           // 28: FE-A (test/falseedg
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 141;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 142;          // bump on any grammar/.scm/extraction change
+                                                      // 142 = lane FE-B (receiver evidence): member calls record memberPath/memberCtor and
+                                                      //   Java/Kotlin/C#/Swift member calls are memberCall; typed parameters/locals, field types
+                                                      //   method aliases and aliased class imports are RecvType/MemberType/MethodAlias/NameAlias
+                                                      //   bindings. Above train 25's 141;
+                                                      //   the train renumbers.
                                                       // 141 = 2026-10-04 (train 25): cache-key hygiene above every branch build's number.
                                                       //   Two merged lanes changed extraction under their own numbers: FE-A 134/135
                                                       //   (member-call shape, ModuleAlias bindings, Rust path calls; kCacheVersion 28)
@@ -2124,7 +2135,7 @@ inline void writeDef( ByteW& w, const RawDef& d, bool withLex, std::size_t fileD
         }
     }
 }
-inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8( std::uint8_t( r.lang ) ); w.str( r.name ); w.u8( r.isInherit ? 1 : 0 ); w.u8( r.isDocLink ? 1 : 0 ); w.str( r.qualifier ); w.u8( std::uint8_t( r.recv ) ); w.str( r.recvVar ); w.u8( r.isCompose ? 1 : 0 ); w.str( r.fieldName ); w.str( r.composeRel ); w.u8( std::uint8_t( r.role ) ); w.u32( r.line ); w.u32( r.argCount ); w.u8( r.argCountKnown ? 1 : 0 ); w.u8( r.viaArrow ? 1 : 0 ); w.u8( r.qualifierRootsStd ? 1 : 0 ); w.u8( r.memberCall ? 1 : 0 ); w.str( r.memberRoot ); }
+inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8( std::uint8_t( r.lang ) ); w.str( r.name ); w.u8( r.isInherit ? 1 : 0 ); w.u8( r.isDocLink ? 1 : 0 ); w.str( r.qualifier ); w.u8( std::uint8_t( r.recv ) ); w.str( r.recvVar ); w.u8( r.isCompose ? 1 : 0 ); w.str( r.fieldName ); w.str( r.composeRel ); w.u8( std::uint8_t( r.role ) ); w.u32( r.line ); w.u32( r.argCount ); w.u8( r.argCountKnown ? 1 : 0 ); w.u8( r.viaArrow ? 1 : 0 ); w.u8( r.qualifierRootsStd ? 1 : 0 ); w.u8( r.memberCall ? 1 : 0 ); w.str( r.memberRoot ); w.str( r.memberPath ); w.str( r.memberCtor ); }
 
 // loadCache's countFits() bounds a corrupt on-disk record COUNT against remaining bytes /
 // minRecordBytes BEFORE reserve() — the guard that keeps a hostile blob's 0xFFFFFFFF count from reaching
@@ -2143,13 +2154,14 @@ inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8
 // dlWeighted u32 + tokenCount u32 + tfWidth u8 = 9 bytes. A ref record is 3 u32 + 8 u8 + 5 empty
 // str(len u32) fields = 3*4 + 8*1 + 5*4 = 40 bytes (39 until the `viaArrow` u8, kCacheVersion 23; #150's
 // `qualifierRootsStd` u8 then added a 9th u8 — 40 -> 41, kCacheVersion 25; FE-A's `memberCall` u8 and `memberRoot`
-// str then added a 10th u8 and a 6th str — 41 -> 46, kCacheVersion 28).
+// str then added a 10th u8 and a 6th str — 41 -> 46, kCacheVersion 28; FE-B's `memberPath` and `memberCtor` strs then
+// added a 7th and 8th str — 46 -> 54, kCacheVersion 29).
 // verifyCacheRecordMinimaTripwire() below derives these
 // same numbers from the REAL writer functions at runtime so the next field added to writeDef/writeRef
 // can't silently stale them.
 inline constexpr std::size_t kMinDefRecordBytesLean      = 88;   // 16×u32 + 16×u8 + 2×str(len u32, empty)
 inline constexpr std::size_t kMinDefRecordBytesRichExtra =  9;   // v10 rich withLex extra: dlWeighted u32 + tokenCount u32 + tfWidth u8
-inline constexpr std::size_t kMinRefRecordBytes          = 46;   // 3×u32 + 10×u8 + 6×str(len u32, empty)
+inline constexpr std::size_t kMinRefRecordBytes          = 54;   // 3×u32 + 10×u8 + 8×str(len u32, empty)
 
 inline std::size_t minDefRecordBytes( bool captureValueUses ) noexcept
 {
@@ -2257,7 +2269,7 @@ inline RawDef readDef( ByteR& r, bool withLex, const std::vector<std::uint64_t>&
     }
     return d;
 }
-inline RawRef readRef ( ByteR& r ) { RawRef x; x.startByte = r.u32(); x.lang = r.enumU8<Lang>( kLangCount ); x.name = r.str(); x.isInherit = r.u8() != 0; x.isDocLink = r.u8() != 0; x.qualifier = r.str(); x.recv = r.enumU8<RecvKind>( kRecvKindCount ); x.recvVar = r.str(); x.isCompose = r.u8() != 0; x.fieldName = r.str(); x.composeRel = r.str(); x.role = r.enumU8<RefRole>( kRefRoleCount ); x.line = r.u32(); x.argCount = r.u16Of32(); x.argCountKnown = r.u8() != 0; x.viaArrow = r.u8() != 0; x.qualifierRootsStd = r.u8() != 0; x.memberCall = r.u8() != 0; x.memberRoot = r.str(); return x; }
+inline RawRef readRef ( ByteR& r ) { RawRef x; x.startByte = r.u32(); x.lang = r.enumU8<Lang>( kLangCount ); x.name = r.str(); x.isInherit = r.u8() != 0; x.isDocLink = r.u8() != 0; x.qualifier = r.str(); x.recv = r.enumU8<RecvKind>( kRecvKindCount ); x.recvVar = r.str(); x.isCompose = r.u8() != 0; x.fieldName = r.str(); x.composeRel = r.str(); x.role = r.enumU8<RefRole>( kRefRoleCount ); x.line = r.u32(); x.argCount = r.u16Of32(); x.argCountKnown = r.u8() != 0; x.viaArrow = r.u8() != 0; x.qualifierRootsStd = r.u8() != 0; x.memberCall = r.u8() != 0; x.memberRoot = r.str(); x.memberPath = r.str(); x.memberCtor = r.str(); return x; }
 inline void   writeBind( ByteW& w, const RawBind& b ) { w.u32( b.startByte ); w.u8( std::uint8_t( b.lang ) ); w.u8( std::uint8_t( b.kind ) ); w.u8( b.isFromAssignment ? 1 : 0 ); w.u32( b.spanStart ); w.u32( b.spanEnd ); w.str( b.var ); w.str( b.typeName ); w.str( b.importedName ); }
 inline RawBind readBind( ByteR& r ) { RawBind b; b.startByte = r.u32(); b.lang = r.enumU8<Lang>( kLangCount ); b.kind = r.enumU8<LocalBindKind>( kLocalBindKindCount ); b.isFromAssignment = r.u8() != 0; b.spanStart = r.u32(); b.spanEnd = r.u32(); b.var = r.str(); b.typeName = r.str(); b.importedName = r.str(); return b; }
 inline void   writeFfi( ByteW& w, const BindingAlias& a ) { w.u8( std::uint8_t( a.kind ) ); w.u8( a.lowConf ? 1 : 0 ); w.str( a.aliasName ); w.str( a.targetName ); w.str( a.targetScope ); }

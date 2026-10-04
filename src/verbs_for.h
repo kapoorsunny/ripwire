@@ -1922,7 +1922,7 @@ ForAutoBodiesResult buildForAutoBodies( const rw::Config& cfg, const rw::IngestR
         // shell the "budget" branch below already gets for free, rather than a second hand-rolled tag.
         out.attr    = " bundle=\"auto\" bodies=\"0\" reason=\"no_candidates\"";
         out.section = rw::chargeSection( [ & ]( std::FILE* f )
-            { rw::packBodies( f, ing, autoBodyIds, /*budgetBytes=*/1, g.outOff, g.outTargets, cfg.compress, redactPtr,
+            { rw::packBodies( f, ing, autoBodyIds, /*budgetBytes=*/1, g.outOff, g.outTargets, g.outNameOnly, cfg.compress, redactPtr,
                                /*ranges=*/nullptr, /*noteIndex=*/nullptr, nullptr, /*truncateOversizedFirst=*/false,
                                /*withFileContext=*/false, fabRootArg, &lensRank ); },
             rw::kBytesPerTokenBody );
@@ -1944,7 +1944,7 @@ ForAutoBodiesResult buildForAutoBodies( const rw::Config& cfg, const rw::IngestR
     const std::size_t  autoBodyBudget = std::max<std::size_t>( 1, std::min( leftBytes, cfg.packBudgetBytes ) );
     rw::EmittedBodies autoEmitted;
     out.section = rw::chargeSection( [ & ]( std::FILE* f )
-        { rw::packBodies( f, ing, autoBodyIds, autoBodyBudget, g.outOff, g.outTargets, cfg.compress, redactPtr,
+        { rw::packBodies( f, ing, autoBodyIds, autoBodyBudget, g.outOff, g.outTargets, g.outNameOnly, cfg.compress, redactPtr,
                            /*ranges=*/nullptr, /*noteIndex=*/nullptr, &autoEmitted, /*truncateOversizedFirst=*/false,
                            /*withFileContext=*/false, fabRootArg, &lensRank ); },
         rw::kBytesPerTokenBody );
@@ -2113,7 +2113,7 @@ ForAutoBodiesResult buildForCompactHops( const rw::Config& cfg, const rw::Ingest
                                                                         : std::size_t( 1 ) );
 
     out.section = rw::chargeSection( [ & ]( std::FILE* f )
-        { rw::packHops( f, ing, hopIds, hopBudget, g.outOff, g.outTargets, redactPtr, /*outShown=*/nullptr, &lensRank, fcRootArg ); },
+        { rw::packHops( f, ing, hopIds, hopBudget, g.outOff, g.outTargets, g.outNameOnly, redactPtr, /*outShown=*/nullptr, &lensRank, fcRootArg ); },
         // MARKUP rate, not the body rate — and this is an honesty choice, not a copy-paste slip. The body
         // rate (3.80 B/tok) prices SOURCE TEXT; the compact section contains none, only tags, identifiers
         // and line numbers, which tokenize like the rest of the bundle. Charging structured markup at the
@@ -3233,7 +3233,7 @@ std::optional<int> runForLens( const MainDispatch& d )
                 detailBodyBudget = std::min( detailBodyBudget, leftBytes );
             }
             detailSection = rw::chargeSection( [ & ]( std::FILE* f )
-                { packBodies( f, ing, detailIds, detailBodyBudget, g.outOff, g.outTargets, cfg.compress, redactPtr,
+                { packBodies( f, ing, detailIds, detailBodyBudget, g.outOff, g.outTargets, g.outNameOnly, cfg.compress, redactPtr,
                               /*ranges=*/nullptr, notesPtr, /*outEmitted=*/nullptr, /*truncateOversizedFirst=*/true,
                               /*withFileContext=*/false, flRootArg, &lensRank ); },   // L3: --detail bodies surface notes too (part of the --for bundle)
                 rw::kBytesPerTokenBody );
@@ -3517,7 +3517,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // directly at the SAME budget — uncharged for that one run, with an alert, never a fabricated number.
         if( cfg.detail > 0 )
         {
-            rw::emitChargedSection( stdout, detailSection, [ & ]{ packBodies( stdout, ing, detailIds, detailBodyBudget, g.outOff, g.outTargets,
+            rw::emitChargedSection( stdout, detailSection, [ & ]{ packBodies( stdout, ing, detailIds, detailBodyBudget, g.outOff, g.outTargets, g.outNameOnly,
                                                                               cfg.compress, redactPtr, /*ranges=*/nullptr, notesPtr,
                                                                               /*outEmitted=*/nullptr, /*truncateOversizedFirst=*/true,
                                                                               /*withFileContext=*/false, flRootArg, &lensRank ); } );
@@ -3667,7 +3667,7 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
                      fin( pick.winner ), wsym.ccx, exemplarRootAttr.c_str(), ts( pick.winner ) ? " tested=\"1\"" : "",
                      pick.lowConfidence ? " low_confidence=\"1\"" : "",
                      pick.overCcxBar    ? " over_ccx_bar=\"1\"" : "" );
-        packBodies( stdout, ing, { pick.winner }, cfg.packBudgetBytes, g.outOff, g.outTargets, cfg.compress, redactPtr,
+        packBodies( stdout, ing, { pick.winner }, cfg.packBudgetBytes, g.outOff, g.outTargets, g.outNameOnly, cfg.compress, redactPtr,
                    /*ranges=*/nullptr, /*noteIndex=*/nullptr, /*outEmitted=*/nullptr, /*truncateOversizedFirst=*/true,
                    /*withFileContext=*/false, tvRootArg );
         rw::emitRaw( stdout, "</exemplar>" );

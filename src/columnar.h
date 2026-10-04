@@ -193,9 +193,12 @@ inline void emitColumnarSymbolRows( std::FILE* out, const IngestResult& ing,
                                     const char* wrapperTag, const std::string& wrapperAttrs,
                                     const std::vector<NodeId>& rows, std::string_view rootPrefix = {},
                                     const std::vector<char>* testReach = nullptr,
-                                    const std::vector<std::uint32_t>* depth = nullptr )
+                                    const std::vector<std::uint32_t>* depth = nullptr,
+                                    const std::vector<char>* viaName = nullptr )
 {
     std::vector<char> esc;
+    // FE-B: a dense `<via>` column (1 = the row's edge is name-only, via="name"), present only when some row carries it
+    const bool hasVia = viaName != nullptr && std::any_of( viaName->begin(), viaName->end(), []( char c ) { return c != 0; } );
 
     std::vector<std::uint32_t> rowFiles;  rowFiles.reserve( rows.size() );
     for( NodeId id : rows )
@@ -208,7 +211,8 @@ inline void emitColumnarSymbolRows( std::FILE* out, const IngestResult& ing,
     std::fputs( kColumnarLegend, out );   // §B1.5: once per output, before the element it describes
     rw::emitTo( out, "<{} {} format=\"columnar\">", wrapperTag, wrapperAttrs.c_str() );
     emitPathTable( out, ing, uniqueFiles, esc, rootPrefix );
-    rw::emitTo( out, "<cols n=\"{}\" fields=\"path,name,line,kind{}\">", rows.size(), columnarOptionalFields( testReach != nullptr, depth != nullptr ) );
+    rw::emitTo( out, "<cols n=\"{}\" fields=\"path,name,line,kind{}{}\">", rows.size(), columnarOptionalFields( testReach != nullptr, depth != nullptr ),
+                hasVia ? ",via" : "" );
 
     // path index array
     std::fputs( "<path>", out );
@@ -258,6 +262,16 @@ inline void emitColumnarSymbolRows( std::FILE* out, const IngestResult& ing,
     std::fputs( "</kind>", out );
     // A6 / 0.6.5: each present only when the caller passed it — see the wrapper banner and emitColumnarOptionalColumns.
     emitColumnarOptionalColumns( out, ing, rows, testReach, depth );
+    if( hasVia )
+    {
+        std::fputs( "<via>", out );
+        for( std::size_t i = 0; i < rows.size(); ++i )
+        {
+            std::fputs( i ? "," : "", out );
+            std::fputc( i < viaName->size() && ( *viaName )[ i ] != 0 ? '1' : '0', out );
+        }
+        std::fputs( "</via>", out );
+    }
 
     rw::emitTo( out, "</cols></{}>", wrapperTag );
 }

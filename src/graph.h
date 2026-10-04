@@ -19,6 +19,7 @@
 #include "prconverge.h"          // W2-F: RankDisclosure — the power iteration's own account, carried with its result
 #include "smallvec.h"            // rw::SmallVec — THE ONE ALIAS (src/smallvec.h picks the implementation)
 #include "resolve.h"             // P2-D one-hop type narrowing (Rule 1: class membership) — applied before the name-based fallback
+#include "receiverevidence.h"    // FE-B: typed receivers RESOLVE; a call nothing proves keeps its rows marked via="name"
 #include "scipoverlay.h"         // SCIP precision overlay (data struct only; parser lives in scip.h)
 #include "pincensus.h"           // eval-only per-call-site decision census (--pin-census); inert unless armed
 #include "externalnames.h"       // Phase 5: the committed builtin/stdlib tables behind the external-name veto
@@ -62,6 +63,9 @@ struct Graph
                                             //       the export (JS/TS); read, not chosen by name
                                             // Empty ⇒ no overlay, no FFI/import edge and nothing split: every edge
                                             // uniquely resolved, so the whole attribute is absent (omit-at-confident).
+    std::vector<std::uint8_t>  outNameOnly; // FE-B: per-out-edge HEDGE bit, parallel to outTargets — 1 = every call site that bound this
+                                            // edge did so by NAME ALONE (no receiver evidence: receiverevidence.h), rendered via="name"
+                                            // on every surface; 0 = at least one site proved it. Empty ⇒ no edge is name-only.
     std::size_t                scipDocsSeen = 0;   // # SCIP documents consumed (0 unless --scip); honesty summary
     std::size_t                scipEdgesPinned = 0;   // # (from,to) edges the SCIP index pinned; honesty summary
     std::vector<std::vector<NodeId>> implementors;   // base-class id → derived class ids (inheritance/Lego view)
@@ -172,6 +176,65 @@ struct Graph
                                               // (`--pin-census=FILE`), so every other run allocates nothing and
                                               // emits nothing — the map is byte-identical either way.
 };
+
+// FE-B: is the call edge from → to NAME-ONLY (Graph::outNameOnly) — bound by name alone at every site that bound it, so every
+// surface renders it via="name". false for an edge that does not exist and on a graph with no name-only edge at all.
+inline bool edgeNameOnly( const Graph& g, NodeId from, NodeId to ) noexcept
+{
+    if( g.outNameOnly.empty() || std::size_t( from ) + 1 >= g.outOff.size() )
+    {
+        return false;
+    }
+    const auto b  = g.outTargets.begin() + g.outOff[ from ];
+    const auto e  = g.outTargets.begin() + g.outOff[ std::size_t( from ) + 1 ];
+    const auto it = std::lower_bound( b, e, to );   // ascending within a source (buildGraph sorts by (from, to))
+    return it != e && *it == to && g.outNameOnly[ std::size_t( it - g.outTargets.begin() ) ] != 0;
+}
+
+// FE-B: does the call edge from → to exist at all (the out-CSR is ascending within a source)
+inline bool edgeExists( const Graph& g, NodeId from, NodeId to ) noexcept
+{
+    if( std::size_t( from ) + 1 >= g.outOff.size() )
+    {
+        return false;
+    }
+    const auto b = g.outTargets.begin() + g.outOff[ from ];
+    const auto e = g.outTargets.begin() + g.outOff[ std::size_t( from ) + 1 ];
+    return std::binary_search( b, e, to );
+}
+
+// FE-B: a neighbour row of a selector that matched several definitions is via="name" iff EVERY edge joining it to one
+// of them is name-only — one proven edge makes the row proven. `towardMatches`: the row is a CALLER (row → match);
+// else a callee (match → row). false when no edge joins them, and on a graph with no name-only edge.
+inline bool rowNameOnly( const Graph& g, std::span<const NodeId> matches, NodeId row, bool towardMatches ) noexcept
+{
+    if( g.outNameOnly.empty() )
+    {
+        return false;
+    }
+    bool any = false;
+    for( const NodeId m : matches )
+    {
+        const NodeId from = towardMatches ? row : m;
+        const NodeId to   = towardMatches ? m : row;
+        if( !edgeExists( g, from, to ) )
+        {
+            continue;
+        }
+        if( !edgeNameOnly( g, from, to ) )
+        {
+            return false;
+        }
+        any = true;
+    }
+    return any;
+}
+
+// The via="name" spelling every XML row of a name-only edge carries (" via=\"name\"", 11 bytes), "" otherwise.
+inline const char* viaNameAttr( bool nameOnly ) noexcept
+{
+    return nameOnly ? " via=\"name\"" : "";
+}
 
 // The prov= VOCABULARY, spelled once. serialize's XML and serializeJson's JSON must emit identical
 // words for identical edges — test/mcpclidiffcheck.sh is the gate that says so — and two ternary
@@ -1142,9 +1205,9 @@ inline FnPtrBindTables buildFnPtrBindTables( const IngestResult& ing )
     };
     for( const Binding& b : ing.bindings )
     {
-        if( b.kind == LocalBindKind::Type || b.kind == LocalBindKind::ParamType || b.var.empty() || b.typeName.empty() )
+        if( b.kind == LocalBindKind::Type || b.kind == LocalBindKind::ParamType || isReceiverEvidenceKind( b.kind ) || b.var.empty() || b.typeName.empty() )
         {
-            continue;   // a var→TYPE fact (declared or parameter) is never a fn-pointer binding
+            continue;   // a var→TYPE fact (declared or parameter, or FE-B's receiver evidence) is never a fn-pointer binding
         }
         const std::string& tgt = ( b.typeName == kFnBindClobberTarget ) ? emptyTarget : b.typeName;
         if( b.fromSymbol != kNoNode )
@@ -1343,9 +1406,9 @@ inline FieldNarrowTables buildFieldNarrowTables( const IngestResult& ing, const 
         // Every record, an assignment's included: localNameEvidence keeps an assignment out of Rule 2b's declared bit (the
         // member it assigns stays typed, which is what assignmentNamesNoClass guarded here), while Rule 2c still reads it as
         // proof the token is a variable (test/fieldnarrowcheck.sh arm v3).
-        if( b.fromSymbol == kNoNode || b.var.empty() )
+        if( b.fromSymbol == kNoNode || b.var.empty() || isReceiverEvidenceKind( b.kind ) )
         {
-            continue;
+            continue;   // FE-B's receiver evidence names fields and aliases the other bindings already record (or never declare)
         }
         key.clear();
         Narrower::appendUint( key, b.fromSymbol );
@@ -2822,7 +2885,10 @@ inline void collectFileClassEvidence( const IngestResult& ing, const std::vector
     }
     for( const Binding& b : ing.bindings )
     {
-        noteBindingClasses( gate, fileGated, b );
+        if( !isReceiverEvidenceKind( b.kind ) )   // FE-B's receiver evidence is read by ReceiverEvidence alone
+        {
+            noteBindingClasses( gate, fileGated, b );
+        }
     }
     for( const auto& [ importKey, bound ] : jsImports.targets )   // key "<fileId>#<local name>" (jsImportKey)
     {
@@ -3999,6 +4065,99 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     const ClassIdentity      classIds = buildClassIdentity( ing, chaUp );   // Rule 2's class identity: nesting, owners, real inheritance (resolve.h)
     std::vector<NodeId>      filtScratch;  // reused per-call survivor buffer for CHA-lite / arity filtering
     rw::SmallVec<NodeId, 2>  reachScratch; // reused per-call buffer: the candidates a call can reach by name (reachableByName)
+    // FE-B (receiverevidence.h): the receiver-evidence tables, the per-edge hedge sets and the reused per-call buffers.
+    ReceiverEvidence         recvEv( ing, chaUp, classNames );
+    {
+        PROFILE_SCOPE_DESCRIBE( "buildGraph/2i: receiver-evidence tables" );
+        recvEv.build();
+    }
+    HashMap<std::uint64_t, char> nameOnlyEdges;   // (from<<32|to) of an edge some call bound by NAME ALONE (no receiver evidence)
+    HashMap<std::uint64_t, char> provenEdges;     // … and of an edge some call bound WITH evidence: a proven site wins the merged row
+    std::vector<NodeId>      provedScratch;   // reused: the name-ladder candidates the language's own lookup proves
+    std::vector<NodeId>      memberRule3;     // reused: Rule 3's included-file candidates for a MEMBER call — a hedge tier, never a proof
+    // FE-B: which of a call's name-ladder candidates the language's own lookup PROVES (receiverevidence.h, point 2). A
+    // member call's receiver must name the candidate's class (this/self/cls and the class's bases, super and the bases,
+    // a class-name receiver) or its module (a JS/TS/Go/Python module alias); a bare call is an implicit receiver's own
+    // class or a free function in scope where the receiver is implicit, and elsewhere a definition the caller's scope
+    // sees — its own file, a file it imports, Go's package directory — reached by a name that is not a local or a
+    // parameter of the caller (a call THROUGH one holds whatever was passed in).
+    const auto ownerIsClass = [ & ]( NodeId c ) -> std::string_view
+    {
+        const std::string& owner = recvEv.ownerClass[ c ];
+        return ( !owner.empty() && classNames.contains( owner ) ) ? std::string_view( owner ) : std::string_view{};
+    };
+    const auto ladderProves = [ & ]( const Reference& ref, NodeId c ) -> bool
+    {
+        const Symbol& cs = ing.symbols[ c ];
+        if( isMemberCallRef( ref ) )
+        {
+            const ReceiverEvidence::Chain ch = ReceiverEvidence::chainOf( ref );
+            if( !ch.valid || !ch.path.empty() || !ch.ctor.empty() )
+            {
+                return false;   // a chained or constructed receiver the resolve rule could not type proves nothing here
+            }
+            const std::string_view owner = ownerIsClass( c );
+            if( isThisRoot( ch.root ) || ( ref.lang == Lang::Python && ch.root == "cls" ) )
+            {
+                const std::string_view callerCls = recvEv.callerClass( ref.fromSymbol );
+                if( !callerCls.empty() )
+                {
+                    return !owner.empty() && recvEv.inCone( callerCls, owner );
+                }
+                return owner.empty() && cs.fileId == ref.fileId && cs.kind == SymKind::Method;   // an object literal's own member
+            }
+            if( isSuperRoot( ch.root ) )
+            {
+                const std::string_view callerCls = recvEv.callerClass( ref.fromSymbol );
+                return !callerCls.empty() && !owner.empty() && owner != callerCls && recvEv.inCone( callerCls, owner );
+            }
+            if( recvEv.moduleNames( ref, ch.root, c ) )
+            {
+                return true;
+            }
+            if( ref.lang == Lang::Python && ref.recv == RecvKind::NamedVar )
+            {
+                bindKey.clear();  Narrower::appendUint( bindKey, ref.fileId );  bindKey.push_back( '#' );  bindKey.append( ref.recvVar );
+                if( const auto ait = extVeto.importBindFile.find( bindKey ); ait != extVeto.importBindFile.end() && ait->second == cs.fileId )
+                {
+                    return true;
+                }
+            }
+            return !owner.empty() && classNames.contains( std::string( ch.root ) ) && recvEv.typedLocal( ref.fromSymbol, ch.root ) == nullptr
+                && recvEv.inCone( ch.root, owner );   // a class-name receiver: the class or a base (`Cls.create()`, `Base.m( self )`)
+        }
+        if( implicitReceiverLang( ref.lang ) )
+        {
+            const std::string_view owner = ownerIsClass( c );
+            if( owner.empty() )
+            {
+                return true;   // a free / top-level function
+            }
+            const std::string_view callerCls = recvEv.callerClass( ref.fromSymbol );
+            return !callerCls.empty() && recvEv.inCone( callerCls, owner );
+        }
+        if( ref.lang == Lang::Rust || ref.lang == Lang::C )
+        {
+            return true;   // FE-A's rules already keep a receiverless call to what its scope reaches
+        }
+        if( falseEdges.isLocalOfCaller( ref ) )
+        {
+            return false;
+        }
+        if( cs.fileId == ref.fileId )
+        {
+            return !localDefOutOfReach( ing, c, ref );
+        }
+        if( ref.fileId < fileIncludes.size() && std::binary_search( fileIncludes[ ref.fileId ].begin(), fileIncludes[ ref.fileId ].end(), symFileId[ c ] ) )
+        {
+            return true;
+        }
+        if( ref.lang == Lang::Go )
+        {
+            return fileDir[ cs.fileId ] == fileDir[ ref.fileId ];   // one package is one directory
+        }
+        return ( ref.lang == Lang::TypeScript || ref.lang == Lang::JavaScript ) && rootRelPath( ing, cs.fileId ).ends_with( ".d.ts" );
+    };
 
     // ---- census arming + the ORACLE side (eval-only; src/pincensus.h) ------------------------------
     // The oracle rows are a straight transcription of the overlay's own (from, calleeName) → target table
@@ -4417,6 +4576,20 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             fieldTypeNarrowed = narrowed;
         }
         const bool receiverTypeNarrowed = narrowed && !narrowedBeforeReceiverRules;   // Rule 2, 2c or 2b chose the candidates (S6-C reads it)
+        // FE-B receiver evidence (receiverevidence.h, point 1): a receiver whose class the source states — `this`/`super`
+        // in a class, a typed parameter or local, a constructed receiver, a class-name receiver, a chain of stated field
+        // classes, Python's `feed = parser.feed` — resolves to that class's member or the shallowest base defining it.
+        if( !scipPinned && !canonical && !narrowed && recvEv.narrow( r ) )
+        {
+            for( NodeId c : recvEv.found )
+            {
+                if( langCompatible( ing.symbols[ c ].lang, r.lang ) && sameRoot( c, r.fileId ) )
+                {
+                    cand.push_back( c );
+                }
+            }
+            narrowed = !cand.empty();
+        }
         // Python Rule 2d (module-ALIAS receiver narrow, issue #287): `alias.m(...)` where `alias` is bound in
         // the caller's file by `import X as alias` / `import X` / `from pkg import X as alias` to a module X
         // that resolves to EXACTLY ONE indexed file (ExternalVetoTables::importBindFile — Step-A, plus the
@@ -4498,16 +4671,23 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                                  && reachableByName( ing, *baseIds, r, reachScratch )
                                  && !( r.role == RefRole::Call && r.qualifier.empty() && bindingTier.empty() && externalVeto.isExternalBound( r ) );
         const rw::SmallVec<NodeId, 2>* nameIds = localsYield ? &reachScratch : baseIds;
+        // FE-B: for a MEMBER call the include graph says which file the caller imports, never what its receiver is — the
+        // included file's definitions join the name-only tier below instead of deciding the call.
+        const bool hedgeEligible = !scipPinned && !canonical && receiverHedgeLang( r.lang ) && r.role == RefRole::Call;
+        memberRule3.clear();
         if( !scipPinned && !canonical && !narrowed && it != byName.end() )
         {
             if( narrower.rule3IncludeFile( *nameIds, r.fileId, rule3Out, localsYield ? 1u : 2u )
                 || ( localsYield && narrower.rule3IncludeFile( *baseIds, r.fileId, rule3Out ) ) )
             {
+                // an implicit receiver's bare call is the same question: the included file's definition must be one the
+                // language's lookup reaches (a free function, the class's own cone) — decided with the ladder's proof below
+                std::vector<NodeId>& into = ( hedgeEligible && ( isMemberCallRef( r ) || implicitReceiverLang( r.lang ) ) ) ? memberRule3 : cand;
                 for( NodeId c : rule3Out )
                 {
                     if( langCompatible( ing.symbols[c].lang, r.lang ) )
                     {
-                        cand.push_back( c );
+                        into.push_back( c );
                     }
                 }
                 narrowed = !cand.empty();
@@ -4625,6 +4805,51 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             continue;
         }
 
+        // ---- FE-B: PROVEN or NAME-ONLY (receiverevidence.h, point 2). A call no rule above answered binds by name; the
+        // candidates the language's own lookup proves are its answer (the rest never were candidates of that lookup), and
+        // with none proven the call is NAME-ONLY: the tier below keeps every same-file and same-directory candidate (and a
+        // member call's included-file ones) instead of one locality pick, each edge marked via="name" — D1 holds a single
+        // candidate to the same rule, because one candidate is not evidence.
+        bool nameOnly = false;
+        if( hedgeEligible && !narrowed && !cand.empty() && r.lang != Lang::Elixir )
+        {
+            provedScratch.clear();
+            if( !memberRule3.empty() && !isMemberCallRef( r ) )
+            {
+                // an implicit receiver's Rule 3 answer, kept where the lookup proves it — Rule 3's own decision, as before
+                for( NodeId c : memberRule3 )
+                {
+                    if( ladderProves( r, c ) )
+                    {
+                        provedScratch.push_back( c );
+                    }
+                }
+                if( !provedScratch.empty() )
+                {
+                    cand.swap( provedScratch );
+                    narrowed = true;
+                }
+            }
+            if( !narrowed )
+            {
+                provedScratch.clear();
+                for( NodeId c : cand )
+                {
+                    if( ladderProves( r, c ) )
+                    {
+                        provedScratch.push_back( c );
+                    }
+                }
+                if( provedScratch.empty() )
+                {
+                    nameOnly = true;
+                }
+                else if( provedScratch.size() < cand.size() )
+                {
+                    cand.swap( provedScratch );
+                }
+            }
+        }
         // ---- tier ladder (the name-based fallback) — SKIPPED when SCIP pinned this site, and for Rule 2's class-identity CLAIM (a type fact, not a locality guess)
         const bool identityClaim = narrowed && narrower.identityClaimFor( r );
         if( !scipPinned && ( r.lang == Lang::Elixir || identityClaim ) ) { tier = cand; }
@@ -4670,6 +4895,38 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                         }
                     }
                     continue;
+                }
+            }
+            else if( nameOnly )
+            {
+                // FE-B: every local candidate, hedged — the same file, the same directory, a member call's included file
+                bool anyFile = false, anyDir = false;
+                const std::uint32_t rdir = fileDir[ r.fileId ];
+                for( NodeId c : cand )
+                {
+                    const bool file = ing.symbols[ c ].fileId == r.fileId;
+                    const bool dir  = fileDir[ ing.symbols[ c ].fileId ] == rdir;
+                    if( file || dir || std::find( memberRule3.begin(), memberRule3.end(), c ) != memberRule3.end() )
+                    {
+                        tier.push_back( c );
+                        anyFile = anyFile || file;
+                        anyDir  = anyDir || dir;
+                    }
+                }
+                tierConf = anyFile ? 1.0f : anyDir ? 0.5f : 0.2f;
+                if( tier.empty() )
+                {
+                    if( cand.size() == 1 && !localsYield )
+                    {
+                        tier = cand;   // a unique global, hedged
+                    }
+                    else
+                    {
+                        ++g.declinedOut[ r.fromSymbol ];
+                        internDeclinedList( g, declinedListsByHash, cand );
+                        disposition = CallDisposition::Declined;
+                        continue;
+                    }
                 }
             }
             else
@@ -4826,7 +5083,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // declaring the member is a genuine split (the shape Rule 2c also keeps whole), not a locality race.
         if( !scipPinned && !bindingPinned && r.lang != Lang::Elixir && tier.size() > 1 && !ing.symbols[ r.fromSymbol ].scope.empty()
          && r.recv != RecvKind::FieldOfThis && r.recv != RecvKind::FieldOfVar && r.recv != RecvKind::SuperObj && !identityClaim
-         && !isJsTsLitRecv( r.recv ) && r.recv != RecvKind::JavaTypeCandidate )
+         && !isJsTsLitRecv( r.recv ) && r.recv != RecvKind::JavaTypeCandidate && !nameOnly )   // FE-B: a name-only call keeps every candidate
         {
             const std::string& callerCanon = g.localityKey[ r.fromSymbol ];   // == canonId here (the caller is scoped)
             const std::size_t localityCap = receiverLocalityCap( r, receiverTypeNarrowed, ing.files[ ing.symbols[ r.fromSymbol ].fileId ] );
@@ -5073,6 +5330,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             {
                 finalSegmentEdges[ekey] = 1;   // remember (from,to) for prov="final-segment"
             }
+            ( nameOnly ? nameOnlyEdges : provenEdges )[ ekey ] = 1;   // FE-B: a proven site wins the merged row (Graph::outNameOnly)
         }
         disposition = CallDisposition::Bound;
     }
@@ -5132,6 +5390,12 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         g.outProv.assign( edges.size(), 0u );
     }
     const EdgeProvenanceSets provSets{ bindingEdges, importEdges, splitEdges, finalSegmentEdges };
+    // FE-B: the hedge bit, allocated only when some edge is name-only (empty ⇒ every edge proven, nothing marked anywhere)
+    const auto hedged = [ & ]( std::uint64_t k ) { return nameOnlyEdges.contains( k ) && !provenEdges.contains( k ); };
+    if( std::any_of( edges.begin(), edges.end(), [ & ]( const E& e ) { return hedged( ( std::uint64_t( e.from ) << 32 ) | e.to ); } ) )
+    {
+        g.outNameOnly.assign( edges.size(), 0u );
+    }
     {
         std::vector<std::uint32_t> cur( g.outOff.begin(), g.outOff.begin() + N );
         for( const E& e : edges )
@@ -5147,6 +5411,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             if( !g.outProv.empty() )
             {
                 g.outProv[ pos ] = edgeProvenance( scip && scip->isPrecise( e.from, e.to ), provSets, ( std::uint64_t( e.from ) << 32 ) | e.to );
+            }
+            if( !g.outNameOnly.empty() )
+            {
+                g.outNameOnly[ pos ] = hedged( ( std::uint64_t( e.from ) << 32 ) | e.to ) ? 1u : 0u;
             }
         }
     }
@@ -8267,6 +8535,51 @@ inline std::vector<NodeId> transitiveCallersDepth( const Graph& g, std::span<con
     return out;
 }
 inline std::vector<NodeId> transitiveCallers( const Graph& g, std::span<const NodeId> seeds ) { return transitiveCallersDepth( g, seeds, nullptr ); }
+
+// FE-B (ruling D3): the callers that reach a seed through an ALL-PROVEN path — every edge on it bound with receiver
+// evidence (Graph::outNameOnly 0). An --impact row outside this set is reached only through some name-only edge and
+// inherits via="name"; a row with ANY all-proven path stays plain, at whatever depth. Indexed by node id; EMPTY (no row
+// hedged) on a graph with no name-only edge, so such a corpus pays one emptiness test.
+inline std::vector<char> provenCallerReach( const Graph& g, std::span<const NodeId> seeds )
+{
+    std::vector<char> proven;
+    if( g.outNameOnly.empty() )
+    {
+        return proven;
+    }
+    const std::size_t   N = g.wOutDeg.size();
+    std::vector<NodeId> q;
+    proven.assign( N, 0 );
+    for( NodeId s : seeds )
+    {
+        if( s < N && !proven[s] )
+        {
+            proven[s] = 1;
+            q.push_back( s );
+        }
+    }
+    const auto* ro = g.inEdges.rowOffsets();
+    const auto* ci = g.inEdges.colIndices();
+    for( std::size_t head = 0; head < q.size(); ++head )
+    {
+        const NodeId u = q[ head ];
+        for( std::uint32_t k = ro[u]; k < ro[u + 1]; ++k )
+        {
+            const NodeId c = ci[k];
+            if( c < N && !proven[c] && !edgeNameOnly( g, c, u ) )
+            {
+                proven[c] = 1;
+                q.push_back( c );
+            }
+        }
+    }
+    return proven;
+}
+// the --impact row's hedge: reached, but by no all-proven path
+inline bool impactRowNameOnly( const std::vector<char>& proven, NodeId n ) noexcept
+{
+    return !proven.empty() && n < proven.size() && proven[n] == 0;
+}
 
 // ── Depth-labelled --impact (0.6.5) — the hop depth the walk above already records, put on the listing ──────
 // A flat blast radius cannot tell a direct caller from a four-hop dependent, and a page window cut over a

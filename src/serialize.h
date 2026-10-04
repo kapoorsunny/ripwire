@@ -5563,6 +5563,9 @@ struct CalleeCallsSink
     // have a query. The ordering is a property of a CUT listing, not of a rendering, so the condition is
     // now the rank alone and packBodies threads one in (`calleeRank`); gate test/callsrankordercheck.sh.
     const std::vector<float>*     rank = nullptr;
+    // FE-B: Graph::outNameOnly (parallel to outTargets), so a callee row whose edge is name-only carries via="name" — the
+    // same bit --callees prints. nullptr / empty ⇒ no row is marked.
+    const std::vector<std::uint8_t>* nameOnly = nullptr;
 };
 
 // The <calls> wrapper, written in front of the rows it describes (they have to be walked before `shown`
@@ -5695,17 +5698,18 @@ struct MergedCalleeNameRow
 {
     std::string_view           name;    // a view into ing.symbols — stable for the emitter's lifetime
     std::vector<std::uint32_t> lines;   // every definition line of that name; joined ascending at append time
+    bool                       via = false;   // FE-B: these edges are name-only — merged only with rows of the same bit
 };
 
 inline void collectCalleeNameRow( std::vector<MergedCalleeNameRow>& rows, const Symbol& cs,
-                                  std::size_t& used, const CalleeCallsSink& sink )
+                                  std::size_t& used, const CalleeCallsSink& sink, bool via = false )
 {
     char lb[ 16 ];
     rw::formatTo( lb, sizeof( lb ), "{}", cs.line );
     bool merged = false;
     for( MergedCalleeNameRow& r : rows )
     {
-        if( r.name == cs.name )
+        if( r.name == cs.name && r.via == via )
         {
             r.lines.push_back( cs.line );  merged = true;
             break;
@@ -5713,10 +5717,10 @@ inline void collectCalleeNameRow( std::vector<MergedCalleeNameRow>& rows, const 
     }
     if( !merged )
     {
-        rows.push_back( MergedCalleeNameRow { cs.name, { cs.line } } );
+        rows.push_back( MergedCalleeNameRow { cs.name, { cs.line }, via } );
     }
-    // the comma and the digits a merge appends, or the whole row it opens
-    used += merged ? std::strlen( lb ) + 1 : cs.name.size() + 16;
+    // the comma and the digits a merge appends, or the whole row it opens (FE-B: plus its 11-byte via="name")
+    used += merged ? std::strlen( lb ) + 1 : cs.name.size() + 16 + ( via ? 11u : 0u );
     if( sink.recorded )
     {
         sink.recorded->push_back( EmittedBodyCall { cs.name, cs.line, std::string() } );   // §H5: no sig to record
@@ -5742,7 +5746,9 @@ inline void appendMergedCalleeNameRows( std::string& callsBody, std::vector<Merg
             rw::formatTo( lb, sizeof( lb ), "{}", r.lines[i] );
             callsBody += lb;
         }
-        callsBody += "\"/>";
+        callsBody += "\"";
+        callsBody += viaNameAttr( r.via );   // FE-B
+        callsBody += "/>";
     }
 }
 
@@ -5775,6 +5781,18 @@ inline void emitCalleeCallsBlock( std::string& out, NodeId id, const std::vector
     std::string                      callsBody;
     std::vector<MergedCalleeNameRow> nameRows;   // names-only rendering: collected, merged by name, written after the walk
     int                              shown = 0;
+    // FE-B: the edge id → cid's hedge bit (the walk reorders, so the bit is found by the target, ascending in the row)
+    const auto viaOf = [ & ]( NodeId cid ) -> bool
+    {
+        if( sink.nameOnly == nullptr || sink.nameOnly->empty() )
+        {
+            return false;
+        }
+        const auto b  = outTargets.begin() + outOff[ id ];
+        const auto e  = outTargets.begin() + outOff[ id + 1 ];
+        const auto it = std::lower_bound( b, e, cid );
+        return it != e && *it == cid && ( *sink.nameOnly )[ std::size_t( it - outTargets.begin() ) ] != 0;
+    };
     for( std::uint32_t k = outOff[id]; k < outOff[id + 1] && shown < 16 && used < budgetBytes; ++k )
     {
         const NodeId cid = walk[ k - outOff[id] ];
@@ -5783,11 +5801,12 @@ inline void emitCalleeCallsBlock( std::string& out, NodeId id, const std::vector
             continue;
         }
         const Symbol& cs = ing.symbols[cid];
+        const bool    via = viaOf( cid );
 
         // COMPACT: the names-only rendering — see collectCalleeNameRow above for what it does and does not do.
         if( sink.namesOnly )
         {
-            collectCalleeNameRow( nameRows, cs, used, sink );
+            collectCalleeNameRow( nameRows, cs, used, sink, via );
             ++shown;
             continue;
         }
@@ -5802,10 +5821,10 @@ inline void emitCalleeCallsBlock( std::string& out, NodeId id, const std::vector
         {
             continue;
         }
-        char hb[ 32 ];  rw::formatTo( hb, sizeof( hb ), "\" l=\"{}\">", cs.line );
+        char hb[ 48 ];  rw::formatTo( hb, sizeof( hb ), "\" l=\"{}\"{}>", cs.line, viaNameAttr( via ) );   // FE-B: via="name"
         callsBody += "<c n=\"";  callsBody += escapeXml( cs.name, esc );  callsBody += hb;
         callsBody += escapeXml( sig, esc );  callsBody += "</c>";
-        used += sig.size() + 24;
+        used += sig.size() + 24 + ( via ? 11u : 0u );
         ++shown;
         if( sink.recorded )
         {
@@ -6162,6 +6181,7 @@ inline void regroupEmittedRecord( EmittedBodies* out, const std::vector<PackedBo
 inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vector<NodeId>& nodes,
                         std::size_t budgetBytes,
                         const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
+                        const std::vector<std::uint8_t>& outNameOnly,   // FE-B: Graph::outNameOnly — the <c> rows' via="name"
                         bool compress = false, RedactCounts* redact = nullptr,
                         const HashMap<NodeId, LineRange>* ranges = nullptr,
                         const notes::NoteIndex* noteIndex = nullptr,    // L3: field notes — surfaces <note> children on each
@@ -6479,7 +6499,7 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
         // total=/shown=/capped= block — see emitCalleeCallsBlock above; `calleeRank` decides which
         // rows survive when it CUTS one, which is far from rare here (CalleeCallsSink::rank).
         emitCalleeCallsBlock( piece, id, outOff, outTargets, ing, contentOf, esc, used, budgetBytes,
-                              CalleeCallsSink{ redact, record ? &record->calls : nullptr, /*namesOnly=*/false, calleeRank } );
+                              CalleeCallsSink{ redact, record ? &record->calls : nullptr, /*namesOnly=*/false, calleeRank, &outNameOnly } );
         const std::string bodyNotes = renderNoteChildren( noteIndex, symbolNoteTarget( noteIndex, ing, s ), esc );   // L3/D5
         piece += bodyNotes;
         used += bodyNotes.size();                                                                   // W3-N2: same charge-never-trim rule
@@ -6551,6 +6571,10 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
     {
         w.write( kOverCeilingBodyLegend );   // the same rule, for <b over_ceiling="1">
     }
+    if( children.find( " via=\"name\"" ) != std::string::npos )
+    {
+        w.write( viaNameLegendComment() );   // FE-B: the same rule, for a <calls> row's via="name"
+    }
     w.write( children );
     w.write( "</bodies>" );
     w.flush();
@@ -6583,6 +6607,7 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
 inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector<NodeId>& nodes,
                       std::size_t budgetBytes,
                       const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
+                      const std::vector<std::uint8_t>& outNameOnly,   // FE-B: Graph::outNameOnly — the <c> rows' via="name"
                       RedactCounts* redact = nullptr,
                       std::size_t* outShown = nullptr,          // rows actually emitted; nullptr ⇒ not recorded
                       const std::vector<float>* rank = nullptr, // query relevance, for ordering a CUT callee listing
@@ -6672,7 +6697,7 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
         // the 1-hop callee signatures — the identical block a body carries, charged against the same
         // running `used` so the row identity bytes and the edge bytes share one budget.
         emitCalleeCallsBlock( row, id, outOff, outTargets, ing, contentOf, esc, used, budgetBytes,
-                              CalleeCallsSink{ redact, /*recorded=*/nullptr, /*namesOnly=*/true, rank } );
+                              CalleeCallsSink{ redact, /*recorded=*/nullptr, /*namesOnly=*/true, rank, &outNameOnly } );
         row += "</h>";
         children += row;
         ++shownCount;
@@ -6693,6 +6718,10 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
     {
         rw::formatTo( open, sizeof( open ), "<hops shown=\"{}\" total=\"{}\" capped=\"{}\">",
                        shownCount, requestedCount, shownCount < requestedCount ? 1 : 0 );
+    }
+    if( children.find( " via=\"name\"" ) != std::string::npos )
+    {
+        w.write( viaNameLegendComment() );   // FE-B: exactly when a hop's <calls> row carries via="name"
     }
     w.write( open );
     w.write( children );

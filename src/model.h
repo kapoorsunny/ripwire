@@ -752,6 +752,14 @@ struct Reference
     //   `new X()`). Read only by graph.h's FalseEdgeRules. false/"" for every other language and every non-call ref.
     bool          memberCall = false;
     std::string   memberRoot;
+    // FE-B (test/receiverevidencecheck.sh): the rest of a member call's receiver chain, for the receiver-evidence rule
+    //   (graph.h ReceiverEvidence). memberPath is the member names BETWEEN memberRoot and the callee, '.'-joined —
+    //   "bucket" for `this.bucket.listSchemas()`, "req.raw.headers" for `ctx.req.raw.headers.get()`, "" for `root.m()`.
+    //   memberCtor is the class a CONSTRUCTED receiver names, final segment — "Reply" for `new Reply( r ).send()`, Go
+    //   "Merger" for `(&Merger{}).Len()` — with memberRoot "" (a construction has no root identifier). Both "" for every
+    //   other shape and every language that records no member-call shape.
+    std::string   memberPath;
+    std::string   memberCtor;
 };
 
 // A physical dependency: one #include / import directive (file → target). The target is the raw
@@ -901,9 +909,31 @@ enum class LocalBindKind : std::uint8_t
                    //     (`const { stringify } = JSON`); importedName = the member it names, "*" for the whole module. Go:
                    //     var "." is a dot import. fromSymbol kNoNode, spans {0,0}. Read only by graph.h FalseEdgeRules;
                    //     every other binding consumer filters by kind or skips file-scope records. APPENDED (cache u8).
+    // FE-B (test/receiverevidencecheck.sh): the receiver-evidence facts graph.h ReceiverEvidence reads, and NOTHING else.
+    //   Every other binding consumer filters by kind or skips these four by isReceiverEvidenceKind below — a field name
+    //   recorded here is not a local of the method that assigns it, and a type written on a parameter is not a class the
+    //   file "names" for the builtin-method gate. APPENDED (cache u8).
+    RecvType,      // a parameter or local whose class the source states: var = the name, typeName = the class's final
+                   //     segment, importedName = the written type whole. A TS/Python/Go parameter's annotation, a JS
+                   //     `const x = new Foo()`, a Go `var x T` / `x := T{…}` / `x := &T{…}`, and a Go METHOD RECEIVER — the
+                   //     receiver's record sets isFromAssignment (the method's own class, which Go spells nowhere else), and
+                   //     so does a JS `Foo.prototype.m = function …` (var "", typeName Foo): that member's class.
+    MemberType,    // a field whose class the source states: var = the field, typeName = the class's final segment.
+                   //     fromSymbol is the def that states it — a Python method's `self.x = Foo()`, a JS/TS method's
+                   //     `this.x = new Foo()`, a Go struct's `x T` — and the owning class is that def's class. A Go
+                   //     EMBEDDED field (`struct { u.Chars }`) sets isFromAssignment: its methods are promoted.
+    MethodAlias,   // a local bound to an object's method: var = the local, typeName = the object's variable,
+                   //     importedName = the method (Python `feed = parser.feed`).
+    NameAlias,     // a file's local spelling of an imported class: var = the local name, typeName = the name it imports
+                   //     (Python `from m import Stylesheet as Sheet`; JS/TS read their JsImport records instead).
 };
 // The number of LocalBindKind enumerators — the bound readBind validates a cached kind byte against (see kSymKindCount).
-inline constexpr std::size_t kLocalBindKindCount = static_cast<std::size_t>( LocalBindKind::ModuleAlias ) + 1;
+inline constexpr std::size_t kLocalBindKindCount = static_cast<std::size_t>( LocalBindKind::NameAlias ) + 1;
+// FE-B: the four kinds only graph.h ReceiverEvidence reads (see RecvType above).
+inline bool isReceiverEvidenceKind( LocalBindKind k ) noexcept
+{
+    return k == LocalBindKind::RecvType || k == LocalBindKind::MemberType || k == LocalBindKind::MethodAlias || k == LocalBindKind::NameAlias;
+}
 static_assert( enumCountIsExact<LocalBindKind, kLocalBindKindCount>(), "kLocalBindKindCount must name the LAST LocalBindKind enumerator — move it with the append" );
 
 inline constexpr const char* kFnBindLambdaTarget  = "(lambda)";    // parens are illegal in identifiers, so

@@ -1232,7 +1232,7 @@ inline FromTraceResult fromTraceBundleText( const IngestResult& ing, const Graph
             }
 
             const std::vector<NodeId> bodyIds = traceBodyIds( part, hop );   // LB-A: innermost frame, then the top hop row
-            packBodies( m, ing, bodyIds, in.bodyBudgetBytes, g.outOff, g.outTargets, in.compress, in.redact,
+            packBodies( m, ing, bodyIds, in.bodyBudgetBytes, g.outOff, g.outTargets, g.outNameOnly, in.compress, in.redact,
                         /*ranges=*/nullptr, in.notes,                 // L3: the rank-1 body surfaces notes too
                         /*outEmitted=*/nullptr, /*truncateOversizedFirst=*/true, /*withFileContext=*/false,
                         in.rootArg,                                   // R-R: root-relative <b p=…>
