@@ -16,4 +16,8 @@ function viaModule (reply) {
   return replies.respondWith(reply, 'ok')
 }
 
-module.exports = { build, viaModule, Store }
+function make () {
+  return Application.create()
+}
+
+module.exports = { build, viaModule, make, Store }

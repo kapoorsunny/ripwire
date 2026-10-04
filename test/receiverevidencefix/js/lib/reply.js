@@ -40,4 +40,15 @@ function respondWith (reply, body) {
   reply.send(body)
 }
 
-module.exports = { Reply, awaitResult, pipePayload, writePayload, notFound, respondWith }
+// Near miss for --impact inheritance: `direct` reaches send through a construction (proven), so `both`
+// is reached at d=2 by a proven path as well as through respondWith's name-only edge.
+function direct (r) {
+  return new Reply(r).send('x')
+}
+
+function both (r) {
+  direct(r)
+  respondWith(r, 'y')
+}
+
+module.exports = { Reply, awaitResult, pipePayload, writePayload, notFound, respondWith, direct, both }

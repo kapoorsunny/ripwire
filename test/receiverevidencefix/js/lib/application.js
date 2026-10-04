@@ -25,6 +25,10 @@ class Application {
   listSchemas () {
     return []
   }
+
+  static create () {
+    return new Application()
+  }
 }
 
 function respond (ctx) {
@@ -40,4 +44,21 @@ function respondComputed (ctx) {
   ctx['onerror'](new Error('computed'))
 }
 
+// An alias and a destructured binding of the same context member: still no evidence about `ctx`.
+function respondAlias (ctx) {
+  const onerror = ctx.onerror
+  onerror(new Error('alias'))
+}
+
+function respondDestructured (ctx) {
+  const { onerror } = ctx
+  onerror(new Error('destructured'))
+}
+
+// A caller of respond: --impact=onerror reaches it at d=2 only through respond's name-only call.
+function serve (ctx) {
+  return respond(ctx)
+}
+
 module.exports = Application
+module.exports.serve = serve

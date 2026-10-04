@@ -22,3 +22,8 @@ def build(path):
     sheet.update({})
     alias = Sheet()
     return alias.read(path)
+
+
+def clone(styles):
+    """Near miss: a class-name receiver is evidence."""
+    return Styles.copy(styles)

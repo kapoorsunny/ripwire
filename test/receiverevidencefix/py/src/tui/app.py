@@ -5,7 +5,12 @@ class App:
     """A non-self receiver in the class's own file: the file defining App is no evidence."""
 
     def __init__(self):
-        self.screen = Screen()
+        self._screen_stack = [Screen()]
+
+    @property
+    def screen(self):
+        """The top of the screen stack: a property, so `self.screen` carries no receiver evidence."""
+        return self._screen_stack[-1]
 
     def refresh(self):
         return False

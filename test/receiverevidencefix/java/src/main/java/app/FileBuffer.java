@@ -5,4 +5,8 @@ public class FileBuffer extends Buffer {
     public void sync() {
         flush();
     }
+
+    public void drain() {
+        super.flush();
+    }
 }
