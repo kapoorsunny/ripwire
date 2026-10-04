@@ -15,6 +15,16 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Added — `test/mcpreloadasancheck.sh`: MCP index reloads under a sanitizer build
+
+A cached object that points into the MCP server's index dangles when the index is rebuilt in place; a cached
+`ValueRefIndex` once did exactly that (heap-use-after-free after a rebuild that kept its content stamp), and no single-query
+gate can see it. The gate runs one long-lived `--mcp` session on the sanitizer binary for 20 cycles of query, stamp-keeping
+mutation (chmod, a new non-source file, an empty directory), content mutation (file rewrite or the edit verbs), root
+switch, workspace and memory release, and checks every answer against a one-shot CLI run on the same tree state. It
+asserts each rebuild happened (`rebuilt=1`), zero sanitizer reports, and SKIPs by name when no sanitizer build is present.
+It goes red on the build that still had that bug and is green after the fix.
+
 
 ### Added — MCP `grep` rows carry the matched text and a `fetch_body` handle (CLI parity)
 
