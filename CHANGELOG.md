@@ -33,8 +33,9 @@ in a Java class with an outside base drawn to an unrelated class's `flush`.
   implicit receiver's class and bases, a free function in scope, the module a receiver alias names). With none
   proven, every same-file and same-directory candidate is listed — a lone global one too, because one candidate is
   not evidence — and each row carries `via="name"` (MCP: `"via":"name"`) on `--callees`, `--callers`, `--path`,
-  `--connect`'s `<e>`, the `<calls>` rows of `--expand` and `--for`, and MCP `find_symbol`,
-  `find_referencing_symbols`, `impact` and `path_between`. An `--impact` row that no all-proven path reaches inherits
+  `--connect`'s `<e>`, the `<calls>` rows of `--expand` and `--for`, the default map's `<c>` rows (and its
+  `--json` and MCP `analyze` twins), and MCP `find_symbol`, `find_referencing_symbols`, `impact` and
+  `path_between`. An `--impact` row that no all-proven path reaches inherits
   it. A legend sentence rides exactly when such a row does and says what it does not mean: not that the edge is
   false. Rule 3's include-file narrow no longer decides a member call: the file a caller imports says nothing about
   its receiver. Ranking keeps the old ladder's pick (the same-file, else same-directory rung): the extra candidates

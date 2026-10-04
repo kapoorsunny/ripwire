@@ -888,14 +888,15 @@ inline std::string viaNameLegend( bool present, bool impact = false, bool column
 // bit (serialize.h namesOnlyOutAny), and tell the section not to repeat it.
 inline constexpr std::string_view kForCompactViaNameClause =
     "; c via=name: that callee matched by name alone, receiver unproven (NOT a claim the edge is false)";
+// The full dialect's spelling: the same three facts as kViaNameLegend (the mechanism, the listing, the NOT sentence) in the
+// fewest bytes, because every byte of --for's header is un-charged by its token ladder and its tight rungs carry ~0
+// headroom (see kForRootRelPathsLegendShort's measurement in verbs_for.h). ~190 B against kViaNameLegend's ~430 B.
+inline constexpr std::string_view kForViaNameClause =
+    " via=\"name\" on a <c> row: that callee matched by name alone (nothing proves the receiver's class); every by-name "
+    "candidate in reach is listed. It does NOT mean the edge is false.";
 inline std::string forViaNameClause()
 {
-    std::string out = std::string( " " ) + kViaNameLegend;
-    while( !out.empty() && out.back() == ' ' )
-    {
-        out.pop_back();
-    }
-    return out;
+    return std::string( kForViaNameClause );
 }
 // …as its own comment node, for the surfaces whose legend is written beside the rows (a <bodies>/<hops> block's <calls>)
 inline std::string viaNameLegendComment()

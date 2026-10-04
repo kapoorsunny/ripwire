@@ -39,8 +39,8 @@
 # aliased import), an import — and then shows one plain row; or (b) KEEPS ITS ROW WITH AN ON-ROW HEDGE:
 # `via="name"` on the row itself (XML) / `"via":"name"` on the entry (MCP JSON), listing the by-name candidates
 # — never a legend-only hedge, never a silent drop. Every surface shows the same row with the same hedge:
-# --callees, --callers, --impact, --path, --connect, --expand <calls>, --for <calls>, and MCP find_symbol /
-# find_referencing_symbols. A wrong candidate may also disappear (resolved elsewhere, or counted external/
+# --callees, --callers, --impact, --path, --connect, --expand <calls>, --for <calls>, the default map's <c> rows, and
+# MCP find_symbol / find_referencing_symbols / analyze. A wrong candidate may also disappear (resolved elsewhere, or counted external/
 # unresolved), but a TRUE target must stay visible, hedged or not. A SINGLE by-name candidate is hedged too:
 # one candidate is not evidence (ruling D1). An --impact row at d>=2 that no all-proven path reaches inherits
 # the hedge; a row with some all-proven path stays plain (ruling D3). Every surface's --legend=full (and the MCP
@@ -86,8 +86,8 @@
 #            a free / top-level function and a Ruby top-level def; a Ruby included module is contract-only (resolved
 #            or hedged, never a false proven row): Ruby's own lookup is separate work.
 #   (H) propagation and parity: the name-only witness `respondWith → reply.send()` is marked in --callees,
-#            --callers, --impact (d=1), --path, --connect, --expand <calls>, --for <calls>, MCP find_symbol and
-#            find_referencing_symbols; the false witness `respond → ctx.onerror()` is absent-or-marked on every
+#            --callers, --impact (d=1), --path, --connect, --expand <calls>, --for <calls>, the map's <c> rows, MCP
+#            find_symbol, find_referencing_symbols and analyze; the false witness `respond → ctx.onerror()` is absent-or-marked on every
 #            one of them; the --for HOP blocks (<h n=…><calls>) never prove encode → Response.append,
 #            respond → Application.onerror, pipePayload → the test double's on, back → its own module's get;
 #            --impact at d>=2 inherits the hedge (viaModule through respondWith → send; serve through
@@ -150,6 +150,8 @@ rw(){ local r="$1"; shift; ( cd "$CORPUS/$r" && "$BIN" . --no-cache "$@" 2>/dev/
 #   hcalls  <c> rows inside the --for HOP block <h n=ARG>: "n line H" (NOROOT when that hop is not shown)
 #   edges   <e> rows of a connect answer: "f t H"
 #   mcp     the entries of one array (ARG) of an MCP tools/call result: "name file line H"
+#   map     <c> rows of the default MAP: "caller file callee H" (NOROOT without an <r> map root)
+#   mcpmap  the same over the map an MCP tools/call (analyze) returned
 #   legend  DEFINED when the answer's legend comments define via="name" — the mechanism ("name alone") and a
 #           NOT sentence ("does NOT mean") within the definition — else UNDEFINED
 #   mcplegend  the same over an MCP stream: the tools/list description of tool ARG, or the tools/call answer
@@ -227,6 +229,20 @@ elif mode == "mcp":
         print( "NOROOT" ); sys.exit( 0 )
     for e in d[ arg ]:
         print( e.get( "name" ), e.get( "file" ), e.get( "line" ), "name" if e.get( "via" ) == "name" else "-" )
+elif mode in ( "map", "mcpmap" ):
+    if mode == "mcpmap":
+        try:
+            r = json.loads( doc.strip().splitlines()[ -1 ] )
+            doc = r[ "result" ][ "content" ][ 0 ][ "text" ]
+        except Exception:
+            print( "NOROOT" ); sys.exit( 0 )
+    if not re.search( r"<r[ >]", doc ):
+        print( "NOROOT" ); sys.exit( 0 )
+    for f in re.finditer( r'<f [^>]*>(.*?)</f>', doc, re.S ):
+        fp = attr( f.group( 0 )[ :f.group( 0 ).index( ">" ) + 1 ], "p" )
+        for s in re.finditer( r'<s ([^>]*?)(?:/>|>(.*?)</s>)', f.group( 1 ), re.S ):
+            for c in re.findall( r"<c [^>]*>", s.group( 2 ) or "" ):
+                print( attr( "<s " + s.group( 1 ) + ">", "n" ), fp, attr( c, "n" ), hedge( c ) )
 elif mode == "legend":
     text = " ".join( re.findall( r"<!--(.*?)-->", doc, re.S ) )
     print( "DEFINED" if DEF.search( text ) else "UNDEFINED" )
@@ -623,6 +639,41 @@ legend_arm "--connect" "$( answer js connect lib/reply.js:respondWith,lib/reply.
 legend_arm "--expand"  "$( answer js expand lib/reply.js:respondWith --top-k=0 --legend=full )"
 legend_arm "--for"     "$( answer js for "how does respondWith send the reply" --legend=full )"
 
+echo "--- (H) the MAP's <c> rows carry the same bit (the orient map is a surface too)"
+# map_c FILE CALLER FILE CALLEE — the hedge column of that map <c> row ("" when absent; NOROOT FAILs the arm)
+map_c(){
+    P map "$1" || return 1
+    if [ "$PARSED" = "NOROOT" ]; then no "(H) map: no <r> map document to read"; return 1; fi
+    MAPC="$( printf '%s\n' "$PARSED" | awk -v n="$2" -v f="$3" -v c="$4" '$1 == n && $2 == f && $3 == c { print $4 }' | sort -u | tr '\n' ' ' | sed 's/ $//' )"
+}
+map_arms(){
+    local f="$TMP/js.map.xml"
+    rw js --top-k=500 --legend=full >"$f"; printf '%s' "$?" >"$f.rc"
+    ran_ok "(js) the default map" "$f" || return
+    map_c "$f" respondWith lib/reply.js send || return
+    if [ "$MAPC" = "name" ]; then ok "(H) map: respondWith's <c n=\"send\"> is marked via=\"name\""
+    else no "(H) map: respondWith's <c n=\"send\"> is [${MAPC:-absent}], want via=\"name\""; fi
+    map_c "$f" direct lib/reply.js send || return
+    if [ "$MAPC" = "-" ]; then ok "(H) map: near miss — direct's <c n=\"send\"> (new Reply().send) stays plain"
+    else no "(H) map: direct's <c n=\"send\"> is [${MAPC:-absent}], want plain (a constructed receiver proves it)"; fi
+    map_c "$f" respond lib/application.js onerror || return
+    case "$MAPC" in *-*) no "(H) map: respond's <c n=\"onerror\"> is PROVEN (the false witness ctx.onerror())";;
+                   *) ok "(H) map: respond's <c n=\"onerror\"> is absent or marked";; esac
+    legend_arm "map" "$f"
+    # near miss for the legend: a map whose rows carry no name-only <c> pays nothing for it — a bare call to a function
+    # its own file defines is proven by scope, so its <c> is plain and the comment must not ride
+    local g="$TMP/plainmap" gf="$TMP/plainmap.xml"
+    mkdir -p "$g" && printf 'function a() { return b(); }\nfunction b() { return 1; }\nmodule.exports = { a };\n' >"$g/m.js"
+    ( cd "$g" && "$BIN" . --no-cache --top-k=500 --legend=full >"$gf" 2>/dev/null ); printf '%s' "$?" >"$gf.rc"
+    ran_ok "(H) the plain-call map" "$gf" || return
+    map_c "$gf" a m.js b || return
+    if [ "$MAPC" != "-" ]; then no "(H) map near miss: a's <c n=\"b\"> is [${MAPC:-absent}], want a plain row (the premise of this arm)"; return; fi
+    P legend "$gf" || return
+    if [ "$PARSED" = "UNDEFINED" ]; then ok "(H) map near miss: a scope-proven <c n=\"b\"> stays plain and the via legend does not ride"
+    else no "(H) map near miss: the via legend rides a map whose rows carry no via=\"name\""; fi
+}
+map_arms
+
 echo "--- (H) MCP twins (fresh TMPDIR: the MCP cache lives there)"
 mkdir -p "$TMP/mcp"
 # mcp ROOT TOOL SELECTOR OUT — one tools/call (then tools/list); the raw stream into OUT, the exit status into OUT.rc
@@ -670,6 +721,27 @@ mcp_legend(){
 }
 mcp_legend find_symbol lib/reply.js:respondWith
 mcp_legend find_referencing_symbols lib/reply.js:send
+# the MAP's MCP twin (analyze): the same <c> rows, the same bit, the same legend
+mcp_map(){
+    local out="$TMP/mcp.js.analyze" c d
+    printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+        "$( printf '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"analyze","arguments":{"path":"%s"}}}' "$CORPUS/js" )" \
+        | TMPDIR="$TMP/mcp" "$BIN" --mcp >"$out" 2>/dev/null
+    printf '%s' "$?" >"$out.rc"
+    ran_ok "(H) MCP analyze" "$out" || return
+    P mcpmap "$out" || return
+    if [ "$PARSED" = "NOROOT" ]; then no "(H) MCP analyze: no map in the answer"; return; fi
+    c="$( printf '%s\n' "$PARSED" | awk '$1 == "respondWith" && $2 == "lib/reply.js" && $3 == "send" { print $4 }' | sort -u )"
+    d="$( printf '%s\n' "$PARSED" | awk '$1 == "direct" && $2 == "lib/reply.js" && $3 == "send" { print $4 }' | sort -u )"
+    if [ "$c" = "name" ]; then ok "(H) MCP analyze: respondWith's <c n=\"send\"> is marked via=\"name\" (the CLI map's bit)"
+    else no "(H) MCP analyze: respondWith's <c n=\"send\"> is [${c:-absent}], want via=\"name\""; fi
+    if [ "$d" = "-" ]; then ok "(H) MCP analyze: near miss — direct's <c n=\"send\"> stays plain"
+    else no "(H) MCP analyze: direct's <c n=\"send\"> is [${d:-absent}], want plain"; fi
+    P mcplegend "$out" analyze || return
+    if [ "$PARSED" = "DEFINED" ]; then ok "(H) MCP analyze: the answer defines via=\"name\" with a NOT sentence"
+    else no "(H) MCP analyze: the answer does not define via=\"name\" (\"name alone\" + \"does NOT mean\")"; fi
+}
+mcp_map
 
 echo "--- (H) parity: the hedge bit is value-equal across CLI and MCP, and across --callees and --expand"
 # cli_set ROOT VERB SEL — "name@file#H" lines of the CLI answer; mcp_set ROOT TOOL SEL FIELD — the same from MCP
