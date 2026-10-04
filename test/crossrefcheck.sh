@@ -161,7 +161,10 @@ grep -q 'ref="feat-unmerged"' "$TMP/w1" \
 grep -q 'kind="def"' "$TMP/w1" \
     && ok "whereis: classifies the definition site as def" || { no "whereis: no def-kind hit"; head -c 600 "$TMP/w1"; }
 
-"$BIN" "$R" --whereis=computeBudget >"$TMP/w2" 2>/dev/null
+# lean-answers lane: the ordering arms below read the doc-quoting row, a kind="ref" row the DEFAULT listing counts
+# rather than prints — so they read the whole list (--whereis-listing=all, the pre-listing answer), and the twin
+# after them holds the same facts on the default listing.
+"$BIN" "$R" --whereis=computeBudget --whereis-listing=all >"$TMP/w2" 2>/dev/null
 grep -q 'on-head="1"' "$TMP/w2" \
     && ok 'whereis: a live-line symbol reports on-head="1"' || { no 'whereis: expected on-head="1"'; head -c 600 "$TMP/w2"; }
 grep -q 'ref="HEAD"' "$TMP/w2" \
@@ -222,6 +225,17 @@ srcRow="$(  grep -n 'engine\.'       "$TMP/w2rows" | tail -1 | cut -d: -f1 )"
 [ -n "$docRow" ] && [ -n "$srcRow" ] && [ "$docRow" -gt "$srcRow" ] \
     && ok "whereis: every source row (last at $srcRow) precedes the doc row (at $docRow)" \
     || no "whereis: docs interleave with source (doc $docRow, last source $srcRow)"
+
+# TWIN on the default listing (lean-answers lane): the same def rows in the same order (source before the doc), the
+# doc-quoting kind="ref" row not dropped but COUNTED — refs count= equals the whole list's kind="ref" rows.
+"$BIN" "$R" --whereis=computeBudget >"$TMP/w2d" 2>/dev/null
+tr '<' '\n' <"$TMP/w2d" | sed -n 's/^hit ref="\([^"]*\)".* p="\([^"]*\)" l="\([0-9]*\)" kind="\([a-z]*\)".*/\1 \4 \2:\3/p' >"$TMP/w2dall"
+W2REFS="$( grep -c ' ref ' "$TMP/w2all" )"
+{ [ "$( grep ' def ' "$TMP/w2dall" )" = "$( grep ' def ' "$TMP/w2all" )" ] && ! grep -q ' ref ' "$TMP/w2dall" \
+  && [ "$( sed -n 1p "$TMP/w2dall" )" = "HEAD def engine.cpp:3" ] && [ "$W2REFS" -ge 1 ] \
+  && grep -q "<refs count=\"$W2REFS\"" "$TMP/w2d" && grep -q 'on-head="1"' "$TMP/w2d" && grep -q 'head_labels="index"' "$TMP/w2d"; } \
+    && ok "whereis (default listing twin): the def rows of the whole list, source first; the $W2REFS kind=\"ref\" row(s), the doc row among them, counted by <refs count=>" \
+    || { no "whereis (default listing twin): the default lost a def row or miscounted the refs"; cat "$TMP/w2dall"; grep -o '<refs [^>]*>' "$TMP/w2d"; }
 
 # The finding's own repro, on this repo, when it is a git tree deep enough to answer. Skipped rather
 # than failed on a shallow/absent checkout: this arm is a bonus over the fixture arms above, which
@@ -316,7 +330,9 @@ legend_of(){ printf '%s' "$1" | grep -oE '<!--.*?-->' | head -1; }
 
 # L1 (2026-09-19): the CLI default legend is compact; §B8.2/§B12.2/§B11.2 read the FULL legend prose and count real <hit> rows
 # (the compact legend spells row shapes inside its comment), so these documents ask for the full legend.
-W1="$( "$BIN" "$R" --whereis=computeBudget --limit=1 --legend=full 2>/dev/null )"
+# lean-answers lane: the arithmetic below is over the WHOLE list (hits=), so it pages listing=all; the twin after it
+# holds the default listing's own sum (shown + more + refs count = hits).
+W1="$( "$BIN" "$R" --whereis=computeBudget --limit=1 --legend=full --whereis-listing=all 2>/dev/null )"
 WLEG="$( legend_of "$W1" )"
 { printf '%s' "$WLEG" | grep -q 'TRUNCATION' && printf '%s' "$WLEG" | grep -q 'more hits=N'; } \
     && ok "§B8.2 whereis: the legend DEFINES its own <more hits=> remainder" \
@@ -335,13 +351,27 @@ if [ -n "$W_MORE" ]; then
         && ok "§B8.2 whereis: shown($W_SHOWN) + more($W_MORE) == hits($W_HITS), and $W_ROWS rows were really emitted" \
         || no "§B8.2 whereis: shown=$W_SHOWN more=$W_MORE hits=$W_HITS rows=$W_ROWS — the remainder does not add up"
     # past-the-end page: the element must VANISH exactly when nothing is left, never print more="0".
-    WEND="$( "$BIN" "$R" --whereis=computeBudget --limit=1 --offset="$W_HITS" 2>/dev/null )"
+    WEND="$( "$BIN" "$R" --whereis=computeBudget --limit=1 --offset="$W_HITS" --whereis-listing=all 2>/dev/null )"
     printf '%s' "$WEND" | grep -q '<more ' \
         && no "§B8.2 whereis: a past-the-end page still emits a <more> remainder" \
         || ok "§B8.2 whereis: the <more> remainder is absent on a page with nothing left"
 else
     no "§B8.2 whereis: --limit=1 produced no <more hits=> to check (fixture has too few hits)"
 fi
+# TWIN on the default listing: the same arithmetic, the counted refs included — shown + more + refs count == hits.
+W1D="$( "$BIN" "$R" --whereis=computeBudget --limit=1 2>/dev/null )"
+WD_SHOWN="$( printf '%s' "$W1D" | grep -oE '<whereis [^>]*' | grep -oE 'shown="[0-9]+"' | grep -oE '[0-9]+' )"
+WD_HITS="$(  printf '%s' "$W1D" | grep -oE '<whereis [^>]*' | grep -oE ' hits="[0-9]+"' | grep -oE '[0-9]+' )"
+WD_MORE="$(  printf '%s' "$W1D" | grep -oE '<more hits="[0-9]+"' | grep -oE '[0-9]+' )"
+WD_REFS="$(  printf '%s' "$W1D" | grep -oE '<refs count="[0-9]+"' | grep -oE '[0-9]+' )"
+WD_ROWS="$(  printf '%s' "$W1D" | sed 's/<!--.*-->//' | grep -oE '<hit ' | grep -c '' )"
+{ [ -n "$WD_MORE" ] && [ -n "$WD_REFS" ] && [ "$(( WD_SHOWN + WD_MORE + WD_REFS ))" = "$WD_HITS" ] && [ "$WD_ROWS" = "$WD_SHOWN" ]; } \
+    && ok "§B8.2 whereis (default listing twin): shown($WD_SHOWN) + more($WD_MORE) + refs count($WD_REFS) == hits($WD_HITS)" \
+    || no "§B8.2 whereis (default listing twin): shown=$WD_SHOWN more=$WD_MORE refs=$WD_REFS hits=$WD_HITS rows=$WD_ROWS"
+WDEND="$( "$BIN" "$R" --whereis=computeBudget --limit=1 --offset="$WD_HITS" 2>/dev/null )"
+printf '%s' "$WDEND" | grep -q '<more ' \
+    && no "§B8.2 whereis (default listing twin): a past-the-end page still emits a <more> remainder" \
+    || ok "§B8.2 whereis (default listing twin): no <more> past the end (the <refs> count is not a page remainder)"
 
 # the stray-content sibling: force the per-ref file listing (capped at 12) past its cap on its own branch.
 g checkout -q main
@@ -449,6 +479,107 @@ for line in sys.stdin:
                                 || { no "§B11.2 MCP whereis did not inherit the guard"; printf '%s\n' "$MW" | sed 's/.*-->//'; }
 else
     printf '  SKIP  §B11.2 MCP parity (no python3)\n'
+fi
+
+# ── LEAN: the default listing and the tip/date hoist (lean-answers lane, src/crossref.h WhereisListing) ─────────
+# The default lists every kind="def" row and COUNTS the kind="ref" rows in one <refs count= next=> element; the
+# next= (--whereis-listing=refs) lists exactly those rows; --whereis-listing=all is the whole hit list, the uncapped
+# variant the lean answer is graded against. A row on HEAD's commit omits tip=/date= (at= and head_date= carry them).
+# Every assertion below compares the lean answer against the SAME binary's listing=all answer, so the arms read
+# "nothing was lost" directly, not against a remembered byte shape.
+LR="$TMP/lean"; mkdir -p "$LR"
+lg(){ git -C "$LR" "$@" >/dev/null 2>&1; }
+lg init -q -b main; lg config commit.gpgsign false
+printf '# lean fixture\n' >"$LR/README.md"; lg add -A; lg commit -qm root
+# the branch forks from the bare root, so its tree holds ONLY its own definition (the HEAD symbols stay single-tree)
+lg checkout -qb feat-lean
+printf 'int zqLean( int x, int y )\n{\n    return x + y;\n}\n' >"$LR/branch_only.c"
+lg add -A
+GIT_COMMITTER_DATE="2026-02-02T00:00:00Z" GIT_AUTHOR_DATE="2026-02-02T00:00:00Z" lg commit -qm "branch def"
+lg checkout -q main
+printf 'int zqLean( int x );\nint zqDefOnly( void );\n' >"$LR/lean.h"
+printf '#include "lean.h"\nint zqLean( int x )\n{\n    return x + 1;\n}\nint zqDefOnly( void )\n{\n    return 3;\n}\n' >"$LR/lean.c"
+printf '#include "lean.h"\nint useA( void ) { return zqLean( 1 ); }\nint useB( void ) { return zqLean( 2 ); }\n' >"$LR/use.c"
+printf '# notes\n\nzqLean is the entry point; zqMentionOnly is a word no code defines.\n' >"$LR/NOTES.md"
+{ printf '#include "lean.h"\n'; i=0; while [ $i -lt 70 ]; do printf 'int many%d( void ) { return zqLean( %d ); }\n' $i $i; i=$((i+1)); done; } >"$LR/many.c"
+lg add -A; lg commit -qm base
+LHEAD="$( git -C "$LR" rev-parse --short=9 HEAD )"; LFEAT="$( git -C "$LR" rev-parse --short=9 feat-lean )"
+lw(){ "$BIN" "$LR" --whereis="$1" --no-cache "${@:2}" 2>/dev/null; }
+hits_of(){ tr '<' '\n' | grep "^hit " | grep "kind=\"$1\"" | sed 's|/>$||; s|/>.*||'; }
+lroot(){ grep -o '<whereis [^>]*>' | head -1; }
+LDEF="$( lw zqLean )"; LALL="$( lw zqLean --whereis-listing=all --limit=1000 )"
+# (L1) the def rows: every kind="def" row of the whole list, byte for byte, in order — and no kind="ref" row
+[ -n "$( printf '%s' "$LALL" | hits_of def )" ] && [ "$( printf '%s' "$LDEF" | hits_of def )" = "$( printf '%s' "$LALL" | hits_of def )" ] \
+    && [ -z "$( printf '%s' "$LDEF" | hits_of ref )" ] \
+    && ok "LEAN (L1): the default lists every kind=\"def\" row of listing=all, byte for byte, and no kind=\"ref\" row" \
+    || { no "LEAN (L1): the default's def rows differ from listing=all's (or a ref row is listed)"; printf '%s\n' "$LDEF"; }
+# (L2) the count is exact: refs count= == the kind="ref" rows of the whole list
+NREF="$( printf '%s' "$LALL" | hits_of ref | wc -l | tr -d ' ' )"
+CNT="$( printf '%s' "$LDEF" | grep -oE '<refs count="[0-9]+"' | grep -oE '[0-9]+' )"
+[ -n "$CNT" ] && [ "$NREF" -gt 60 ] && [ "$CNT" = "$NREF" ] \
+    && ok "LEAN (L2): <refs count=\"$CNT\"> equals the $NREF kind=\"ref\" rows listing=all prints" \
+    || no "LEAN (L2): refs count='${CNT:-none}' vs $NREF ref rows in listing=all"
+# (L3) next= round-trips: the pasted next= (all its pages) prints exactly listing=all's ref rows, byte for byte
+NXT="$( printf '%s' "$LDEF" | grep -oE '<refs [^>]*next="[^"]*"' | sed 's/.*next="//; s/"$//' )"
+case "$NXT" in "--whereis=zqLean --whereis-listing=refs") ok "LEAN (L3a): next= names the refs listing of the same symbol" ;;
+               *) no "LEAN (L3a): next='$NXT'" ;; esac
+P1="$( lw zqLean --whereis-listing=refs )"; P2="$( lw zqLean --whereis-listing=refs --offset=60 )"
+{ printf '%s' "$P1" | hits_of ref; printf '%s' "$P2" | hits_of ref; } >"$TMP/lean_next"
+printf '%s' "$LALL" | hits_of ref >"$TMP/lean_allref"
+[ -s "$TMP/lean_allref" ] && cmp -s "$TMP/lean_next" "$TMP/lean_allref" && [ -z "$( printf '%s' "$P1" | hits_of def )" ] \
+    && printf '%s' "$P1" | lroot | grep -q ' listing="refs"' && printf '%s' "$P1" | grep -q "<more hits=\"$(( NREF - 60 ))\"/>" \
+    && ok "LEAN (L3b): next= (two pages, the first ending in <more hits=>) reproduces listing=all's ref rows byte for byte" \
+    || { no "LEAN (L3b): the refs listing differs from listing=all's ref rows"; diff "$TMP/lean_next" "$TMP/lean_allref" | head -5; }
+# (L4) zero refs: no <refs>, no listing=, byte-identical to listing=all
+D0="$( lw zqDefOnly )"; A0="$( lw zqDefOnly --whereis-listing=all )"
+[ -n "$( printf '%s' "$D0" | hits_of def )" ] && [ "$D0" = "$A0" ] && ! printf '%s' "$D0" | grep -q '<refs ' && ! printf '%s' "$D0" | lroot | grep -q 'listing=' \
+    && ok "LEAN (L4): a symbol with no ref row prints no <refs> and is byte-identical to listing=all" \
+    || { no "LEAN (L4): the zero-ref answer is not the whole list"; printf '%s\n' "$D0"; }
+# (L5) zero defs: the mentions ARE the answer — every row, no <refs>, identical to listing=all
+M0="$( lw zqMentionOnly )"; MA="$( lw zqMentionOnly --whereis-listing=all )"
+[ -n "$( printf '%s' "$M0" | hits_of ref )" ] && [ "$M0" = "$MA" ] && ! printf '%s' "$M0" | grep -q '<refs ' \
+    && ok "LEAN (L5): a name with no def row lists its mentions (identical to listing=all)" \
+    || { no "LEAN (L5): the zero-def answer hid its mentions"; printf '%s\n' "$M0"; }
+# (L6) the hoist: HEAD-commit rows carry no tip=/date=, the root says at= and head_date=; the branch row keeps both
+HD="$( git -C "$LR" log -1 --format=%cs HEAD )"
+printf '%s' "$LDEF" | lroot | grep -q " head_date=\"$HD\" at=\"$LHEAD\"" \
+    && [ -z "$( printf '%s' "$LALL" | tr '<' '\n' | grep '^hit ref="HEAD"' | grep ' tip=\| date=' )" ] \
+    && printf '%s' "$LALL" | tr '<' '\n' | grep -q "^hit ref=\"feat-lean\" tip=\"$LFEAT\" date=\"2026-02-02\" p=\"branch_only.c\"" \
+    && ok "LEAN (L6): rows on HEAD's commit omit tip=/date= (at=$LHEAD, head_date=$HD); the branch row keeps tip=$LFEAT date=" \
+    || { no "LEAN (L6): the tip/date hoist is wrong"; printf '%s\n' "$LDEF" | lroot; }
+# (L7) the window reads the LISTED rows: --limit=1 on the 3-def answer cuts it (capped=1, <more hits=2>), drops complete=
+L1R="$( lw zqLean --limit=1 )"
+printf '%s' "$L1R" | lroot | grep -q ' shown="1" capped="1" total="3"' && printf '%s' "$L1R" | grep -q '<more hits="2"/>' \
+    && ! printf '%s' "$L1R" | lroot | grep -q 'complete=' && printf '%s' "$LDEF" | lroot | grep -q ' complete="1"' \
+    && ok "LEAN (L7): shown=/capped=/<more> window the def rows; complete= rides the uncut defs listing, not the cut one" \
+    || { no "LEAN (L7): the window does not read the listed rows"; printf '%s\n' "$L1R" | lroot; }
+# (L8) refusals: an unknown value, and the modifier without --whereis
+"$BIN" "$LR" --whereis=zqLean --whereis-listing=bogus >/dev/null 2>&1; rcb=$?
+"$BIN" "$LR" --whereis-listing=all >/dev/null 2>&1; rcn=$?
+[ $rcb -eq 1 ] && [ $rcn -eq 1 ] && ok "LEAN (L8): --whereis-listing=bogus and a bare --whereis-listing refuse (exit 1)" \
+    || no "LEAN (L8): refusal exits $rcb / $rcn (want 1 / 1)"
+# (L9) both legends define what the lean answer carries
+printf '%s' "$LDEF" | grep -oE '<!--.*?-->' | head -1 | grep -q 'listing=defs' \
+    && printf '%s' "$LDEF" | grep -oE '<!--.*?-->' | head -1 | grep -q 'head_date=' && printf '%s' "$LDEF" | grep -oE '<!--.*?-->' | head -1 | grep -q 'refs count=' \
+    && lw zqLean --legend=full | grep -oE '<!--.*?-->' | head -1 | grep -q 'LISTING:.*TIP AND DATE:' \
+    && ok "LEAN (L9): compact and full legends define listing=, head_date=, refs count=" \
+    || no "LEAN (L9): a lean attribute rides undefined"
+# (L10) MCP twin: the same answers over MCP (default, listing all, refs) and the same refusal; one call per session
+mcpw(){ printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"whereis","arguments":{"path":"%s","symbol":"zqLean"%s}}}\n' "$LR" "$1" \
+           | "$BIN" --mcp 2>/dev/null | python3 -c 'import sys,json
+for line in sys.stdin:
+    line=line.strip()
+    if not line: continue
+    d=json.loads(line); c=d.get("result",{}).get("content")
+    if c: print(c[0].get("text",""),end="")
+    elif "error" in d: print("ERROR",d["error"].get("code"),end="")'; }
+if command -v python3 >/dev/null 2>&1; then
+    [ "$( mcpw '' )" = "$( lw zqLean )" ] && [ "$( mcpw ',"listing":"all"' )" = "$( lw zqLean --whereis-listing=all )" ] \
+        && [ "$( mcpw ',"listing":"refs"' )" = "$( lw zqLean --whereis-listing=refs )" ] && [ "$( mcpw ',"listing":"bogus"' )" = "ERROR -32602" ] \
+        && ok "LEAN (L10): MCP whereis default / listing:all / listing:refs are byte-identical to the CLI; listing:bogus refuses -32602" \
+        || no "LEAN (L10): the MCP twin differs from the CLI"
+else
+    printf '  SKIP  LEAN (L10) MCP twin (no python3)\n'
 fi
 
 if command -v xmllint >/dev/null 2>&1; then
