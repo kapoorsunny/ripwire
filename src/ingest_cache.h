@@ -302,7 +302,11 @@ constexpr std::uint32_t kCacheVersion = 28;           // 28: FE-A (test/falseedg
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 143;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 145;          // bump on any grammar/.scm/extraction change
+                                                      // 145 = lane honesty-small-068 (a lane-local number; the train renumbers):
+                                                      //   Go named types get their kind from the type_spec's form (t="type" /
+                                                      //   "functype"), and `type A = B` is now indexed (t="alias") — new defs and
+                                                      //   new kind bytes. 145, not 144: 143's RICH file tag is 144.
                                                       // 143 = 2026-10-04 (train 25 review fixes): two extraction changes —
                                                       //   a declaration named like the global object (`var self = this`, a
                                                       //   parameter `window`) is now a JsShadow binding, and a value-reference

@@ -262,7 +262,7 @@ inline bool namespaceCompatible( RefRole role, SymKind kind ) noexcept
         case RefRole::Type:
         case RefRole::Extends:
         {
-            return kind == SymKind::Class || kind == SymKind::Struct || kind == SymKind::Interface;
+            return kind == SymKind::Class || isStructOrNamedType( kind ) || kind == SymKind::Interface;
         }
         case RefRole::Macro:
         {
@@ -1252,7 +1252,7 @@ inline JavaFieldOwnerGroups buildJavaFieldOwnerGroups( const IngestResult& ing )
         const Symbol& owner = ing.symbols[ b.fromSymbol ];
         if( owner.lang != Lang::Java
             || ( owner.kind != SymKind::Class && owner.kind != SymKind::Interface
-                 && owner.kind != SymKind::Struct ) )
+                 && !isStructOrNamedType( owner.kind ) ) )
         {
             continue;
         }
@@ -1482,7 +1482,7 @@ inline HashMap<std::string, rw::SmallVec<NodeId, 2>> buildJavaTypeMembers( const
     PROFILE_SCOPE_DESCRIBE( "buildGraph/2e: Java Class::method members (issue #74)" );
     HashMap<std::string, rw::SmallVec<NodeId, 2>> members;
     const auto isJavaType = []( const Symbol& s ) {
-        return s.lang == Lang::Java && ( s.kind == SymKind::Class || s.kind == SymKind::Struct || s.kind == SymKind::Interface );
+        return s.lang == Lang::Java && ( s.kind == SymKind::Class || isStructOrNamedType( s.kind ) || s.kind == SymKind::Interface );
     };
     if( std::ranges::none_of( ing.symbols, isJavaType ) )
     {
@@ -2537,7 +2537,7 @@ struct BuiltinMethodGate
 
     static bool isClassLike( const Symbol& s ) noexcept
     {
-        return s.kind == SymKind::Class || s.kind == SymKind::Struct || s.kind == SymKind::Interface
+        return s.kind == SymKind::Class || isStructOrNamedType( s.kind ) || s.kind == SymKind::Interface
             || ( s.lang == Lang::Ruby && s.kind == SymKind::Other );   // a Ruby module, as classNameSet counts it
     }
 
@@ -3005,14 +3005,14 @@ struct FalseEdgeRules
     // the functions defined earlier in that body. A METHOD's bare call does not reach its siblings (that needs `self.`).
     bool callerOwnClass( const Symbol& caller, const Symbol& cand ) const
     {
-        const bool callerIsClass = caller.kind == SymKind::Class || caller.kind == SymKind::Struct || caller.kind == SymKind::Interface;
+        const bool callerIsClass = caller.kind == SymKind::Class || isStructOrNamedType( caller.kind ) || caller.kind == SymKind::Interface;
         return callerIsClass && !cand.scope.empty() && cand.scope == caller.name;
     }
     bool cannotReach( const Reference& r, const Symbol& caller, const Symbol& cand, std::string_view callerDir ) const
     {
         if( r.lang == Lang::C )
         {
-            return cand.kind == SymKind::Class || cand.kind == SymKind::Struct || cand.kind == SymKind::Interface;
+            return cand.kind == SymKind::Class || isStructOrNamedType( cand.kind ) || cand.kind == SymKind::Interface;
         }
         if( memberLike( cand ) && !callerOwnClass( caller, cand ) )
         {
@@ -3959,7 +3959,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     g.rubyBasesUnscoped = rubyBases.disclosure.unscoped;   // ruby_bases_unscoped= (absent at zero)
     {
         const auto isClassLikeK = []( SymKind k ) noexcept
-        { return k == SymKind::Class || k == SymKind::Struct || k == SymKind::Interface; };
+        { return k == SymKind::Class || isStructOrNamedType( k ) || k == SymKind::Interface; };
         PROFILE_SCOPE_DESCRIBE( "buildGraph/2h: CHA-lite inheritance name graph" );
         for( const Reference& ir : ing.references )
         {
@@ -5345,7 +5345,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         for( NodeId typeId : it->second )
         {
             const SymKind k = ing.symbols[ typeId ].kind;
-            if( k != SymKind::Class && k != SymKind::Struct )
+            if( k != SymKind::Class && !isStructOrNamedType( k ) )
             {
                 continue;
             }
@@ -6995,7 +6995,7 @@ inline FieldUseAnswer collectFieldUseSites( const IngestResult& ing, FieldId fie
             return {};
         }
         const Symbol& e = ing.symbols[ encl ];
-        const bool classLike = e.kind == SymKind::Class || e.kind == SymKind::Struct || e.kind == SymKind::Interface;
+        const bool classLike = e.kind == SymKind::Class || isStructOrNamedType( e.kind ) || e.kind == SymKind::Interface;
         return classLike ? std::string_view( e.name ) : std::string_view( e.scope );
     };
     const auto fieldTypeOf = [ & ]( std::string_view owner, std::string_view member ) -> std::string_view
@@ -7198,7 +7198,7 @@ inline std::string memberSelectorUnservedRefusal( const IngestResult& ing, std::
     const std::string_view owner = spec.substr( 0, dot );
     for( const Symbol& s : ing.symbols )
     {
-        const bool classLike   = s.kind == SymKind::Class || s.kind == SymKind::Struct || s.kind == SymKind::Interface;
+        const bool classLike   = s.kind == SymKind::Class || isStructOrNamedType( s.kind ) || s.kind == SymKind::Interface;
         const bool fieldsLang  = s.lang == Lang::Cpp || s.lang == Lang::C || s.lang == Lang::Python;   // queries/{c,cpp,python}/tags.scm carry @definition.field
         if( classLike && s.name == owner && !fieldsLang )
         {
@@ -7503,7 +7503,7 @@ inline QMetrics computeQMetrics( const IngestResult& ing, const Graph& g )
         std::string key;
         for( const Symbol& s : ing.symbols )
         {
-            const bool isClassKind = ( s.kind == SymKind::Class || s.kind == SymKind::Struct || s.kind == SymKind::Interface );
+            const bool isClassKind = ( s.kind == SymKind::Class || isStructOrNamedType( s.kind ) || s.kind == SymKind::Interface );
             if( !isClassKind )
             {
                 continue;

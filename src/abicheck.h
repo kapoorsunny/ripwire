@@ -307,7 +307,7 @@ inline gtl::btree_map<std::string, std::vector<Candidate>> buildCandidates( layo
 
     for( const Symbol& s : ctx.ing.symbols )
     {
-        if( s.kind != SymKind::Struct && s.kind != SymKind::Class && s.kind != SymKind::Interface )
+        if( !isStructOrNamedType( s.kind ) && s.kind != SymKind::Class && s.kind != SymKind::Interface )
         {
             continue;
         }

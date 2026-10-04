@@ -1494,7 +1494,7 @@ inline HashMap<std::string, std::uint32_t> buildElixirModuleIndex( const IngestR
     for( const Symbol& s : ing.symbols )
     {
         if( s.lang != Lang::Elixir || !s.scope.empty() || s.name.empty() || s.fileId >= F
-            || ( s.kind != SymKind::Other && s.kind != SymKind::Class && s.kind != SymKind::Struct && s.kind != SymKind::Interface ) )
+            || ( s.kind != SymKind::Other && s.kind != SymKind::Class && !isStructOrNamedType( s.kind ) && s.kind != SymKind::Interface ) )
         {
             continue;   // only module/protocol/struct containers, never attributes or type declarations
         }
@@ -4668,7 +4668,7 @@ inline void addTypeAliasBases( const IngestResult& ing, HashMap<std::string, std
     HashMap<std::string, char> realClassNames;   // alias names some class-like symbol at a non-alias site also carries
     for( const Symbol& s : ing.symbols )
     {
-        const bool classLike = s.kind == SymKind::Class || s.kind == SymKind::Struct || s.kind == SymKind::Interface;
+        const bool classLike = s.kind == SymKind::Class || isStructOrNamedType( s.kind ) || s.kind == SymKind::Interface;
         if( classLike && aliasNames.find( s.name ) != aliasNames.end() )
         {
             siteKey( key, s.fileId, s.line, s.name );
@@ -4701,7 +4701,7 @@ inline HashMap<std::string, char> classNameSet( const IngestResult& ing )
     for( const Symbol& s : ing.symbols )
     {
         const bool rubyModule = ( s.lang == Lang::Ruby && s.kind == SymKind::Other );
-        if( s.kind == SymKind::Class || s.kind == SymKind::Struct || s.kind == SymKind::Interface || rubyModule )
+        if( s.kind == SymKind::Class || isStructOrNamedType( s.kind ) || s.kind == SymKind::Interface || rubyModule )
         {
             classNames.try_emplace( s.name, '\0' );
         }
@@ -4995,7 +4995,7 @@ inline HashMap<std::string, std::vector<std::string>> buildUsingReexports( const
         }
         const Symbol& cls = ing.symbols[ ur.fromSymbol ];
         const std::string_view base = namesplit::stripTemplateArgs( ur.qualifier );
-        if( ( cls.kind != SymKind::Class && cls.kind != SymKind::Struct ) || base.empty() || base == ur.calleeName || base == cls.name )
+        if( ( cls.kind != SymKind::Class && !isStructOrNamedType( cls.kind ) ) || base.empty() || base == ur.calleeName || base == cls.name )
         {
             continue;   // not at class scope, an inheriting constructor, or a class naming itself
         }

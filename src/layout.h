@@ -1476,7 +1476,7 @@ inline AggIndex buildAggIndex( const IngestResult& ing )
     AggIndex byName;
     for( const Symbol& s : ing.symbols )
     {
-        if( s.kind == SymKind::Struct || s.kind == SymKind::Class || s.kind == SymKind::Interface )
+        if( isStructOrNamedType( s.kind ) || s.kind == SymKind::Class || s.kind == SymKind::Interface )
         {
             byName[ s.name ].push_back( s.id );
         }

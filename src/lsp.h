@@ -358,6 +358,9 @@ inline int lspKindOf( rw::SymKind k ) noexcept
         case rw::SymKind::Macro:     return 14;   // Constant
         case rw::SymKind::Field:     return 8;    // Field
         case rw::SymKind::ModuleScope: return 2;  // Module — LSP's own word for a file's top-level scope
+        case rw::SymKind::NamedType: return 5;    // Class — LSP has no defined-type/alias kind; gopls files a non-struct named type here too
+        case rw::SymKind::Alias:     return 5;    // Class (as above)
+        case rw::SymKind::FuncType:  return 5;    // Class (as above)
         case rw::SymKind::Other:     break;
     }
     return 13;   // Variable — the neutral bucket
@@ -377,6 +380,9 @@ inline const char* lspKindWord( rw::SymKind k ) noexcept
         case rw::SymKind::Macro:     return "macro";
         case rw::SymKind::Field:     return "field";
         case rw::SymKind::ModuleScope: return "module scope";
+        case rw::SymKind::NamedType: return "type";
+        case rw::SymKind::Alias:     return "type alias";
+        case rw::SymKind::FuncType:  return "function type";
         case rw::SymKind::Other:     break;
     }
     return "symbol";

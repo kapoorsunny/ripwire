@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-10-04, lane honesty-small-068: RE-DERIVED with UPDATE_GOLDEN=1 (hash a4e37a094b…735858). kParserVer 143 -> 145 (Go named
+#   types get their kind from the type_spec form and `type A = B` is indexed; 145 because 143's full-use file tag is 144)
+#   with quality.h's mirror; one hashed quality.h predicate reads isStructOrNamedType (behaviour-identical: the new kinds
+#   admit exactly what Struct did). kQSnapCacheScheme stays 17. A lane-local number: the train renumbers.
 # 2026-10-04, train 25 review fixes: RE-DERIVED with UPDATE_GOLDEN=1 (hash 32240f4552…2dafcc). kParserVer 141 -> 143 (two
 #   extraction changes: a declaration named like the JS global object is a JsShadow binding; value-reference slot text
 #   is cut on a UTF-8 boundary and JS string keys are capped) with quality.h's mirror; 143 because 141's full-use file

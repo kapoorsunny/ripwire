@@ -11,7 +11,7 @@
 //   EXPR    := SOURCE | FILTER | CLOSURE | JOIN
 //   SOURCE  := name( "STR" )            symbols whose name == STR (unions same-name defs, like --callers)
 //            | all                       every symbol  (parens optional: `all` or `all()`)
-//   FILTER  := kind( EXPR , KIND )       keep nodes of KIND  (fn|method|cls|struct|iface|var|sec|macro|modscope)
+//   FILTER  := kind( EXPR , KIND )       keep nodes of KIND  (fn|method|cls|struct|iface|var|sec|macro|modscope|type|alias|functype)
 //            | cx(   EXPR , INT )         keep nodes with cyclomatic complexity >= INT
 //            | fanin(EXPR , INT )         keep nodes with in-degree (caller count) >= INT
 //            | file( EXPR , "RE" )        keep nodes whose ROOT-RELATIVE file path (the p= the verb prints) matches the
@@ -63,6 +63,9 @@ inline bool kindOfWord( std::string_view w, SymKind& out ) noexcept
     if( w == "sec"    ) { out = SymKind::Section;   return true; }
     if( w == "macro"  ) { out = SymKind::Macro;     return true; }   // macro-edges round: t="macro" is queryable like every other kind
     if( w == "modscope" ) { out = SymKind::ModuleScope; return true; }   // #60: so a query can select the file-scope owners, or not(kind(all,modscope)) them out
+    if( w == "type"     ) { out = SymKind::NamedType;   return true; }   // honesty-small-068: every t= the map emits is queryable
+    if( w == "alias"    ) { out = SymKind::Alias;       return true; }
+    if( w == "functype" ) { out = SymKind::FuncType;    return true; }
     return false;
 }
 
@@ -514,7 +517,7 @@ struct Eval
                     SymKind           k  = SymKind::Other;
                     if( !kindOfWord( kw, k ) )
                     {
-                        fail( "unknown kind '" + kw + "' (use fn|method|cls|struct|iface|var|sec|macro|modscope)" );
+                        fail( "unknown kind '" + kw + "' (use fn|method|cls|struct|iface|var|sec|macro|modscope|type|alias|functype)" );
                     }
                     result = filterKind( std::move( set ), k );
                 }

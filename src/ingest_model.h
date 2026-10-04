@@ -44,6 +44,12 @@ inline void dedupRawDefs( std::vector<RawDef>& rawDefs )
             case SymKind::Section:   return 0;   // each comes from its own single capture (a #define, a heading or data key), so
             case SymKind::Other:     return 0;   // neither collides with a code kind on one name byte
             case SymKind::ModuleScope: return 0; // minted after this pass runs; it can never reach the dedup
+            // Go's type_spec fires the generic @definition.definedtype AND, for `type F func(...)`, @definition.functype on the
+            // same name byte (struct/interface specs fire their own pattern too): the form-specific kind must win, and a
+            // struct/interface must beat the generic defined type. An alias is its own node (type_alias) and never collides.
+            case SymKind::FuncType:  return 2;
+            case SymKind::NamedType: return 1;
+            case SymKind::Alias:     return 1;
         }
         return 0;
     };

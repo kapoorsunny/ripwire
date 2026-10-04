@@ -19,8 +19,20 @@
 (method_elem
   name: (field_identifier) @name) @definition.method
 
+;; honesty-small-068: a named type's KIND comes from its `type:` field — the form the grammar parsed — never a blanket
+;; "struct". `type TestName string`, `type L[T any] []T`, `type W Other` are defined types (t="type"); `type F func(...)`
+;; is a func type (t="functype"); struct_type / interface_type keep the two type_declaration patterns below (their
+;; higher dedup specificity wins over this generic one on the same name byte). `type A = B` parses as `type_alias`, a
+;; different node, which the generic pattern never matched — so aliases were not indexed at all before; they are t="alias".
 (type_spec
-  name: (type_identifier) @name) @definition.type
+  name: (type_identifier) @name) @definition.definedtype
+
+(type_spec
+  name: (type_identifier) @name
+  type: (function_type)) @definition.functype
+
+(type_alias
+  name: (type_identifier) @name) @definition.alias
 
 (type_declaration (type_spec name: (type_identifier) @name type: (interface_type))) @definition.interface
 

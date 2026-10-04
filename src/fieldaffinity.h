@@ -325,7 +325,7 @@ inline std::vector<ModeledAgg> modelAllAggregates( layout::ModelCtx& ctx, std::s
 
     for( const Symbol& s : ctx.ing.symbols )
     {
-        if( s.kind != SymKind::Struct && s.kind != SymKind::Class && s.kind != SymKind::Interface )
+        if( !isStructOrNamedType( s.kind ) && s.kind != SymKind::Class && s.kind != SymKind::Interface )
         {
             continue;
         }
