@@ -197,6 +197,8 @@
 "forrankordercheck.sh": 77.9,
 "forrootlegendcheck.sh": 8.6,
 "forsectioncollapsecheck.sh": 5.2,
+"forsigspancheck.sh": 6.0,
+"forspinecheck.sh": 8.0,
 "freshclonecheck.sh": 170.8,
 "freshnesscheck.sh": 4.4,
 "g1configcheck.sh": 0.8,
