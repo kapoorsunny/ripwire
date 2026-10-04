@@ -16,6 +16,26 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 ## [Unreleased]
 
 
+### Added — `--for` rows say where a definition ends (`e=`); code ranks above the docs that repeat a question
+
+- **`e=` on `<d>` rows.** A `--for` signature row carried only `l=`, the line of the definition's name, so "which body
+  holds line N" was not answerable from the row. Every `<d>` row of a `--for` answer (CLI XML, `--json` as `"e"`, and the
+  MCP `for` tool) now carries `e=`, the 1-based line where that definition ends, body-inclusive, right after `l=`. It
+  is ABSENT — never 0, never a guess — when the extent is not known: a markdown or config row, a module-scope row, a
+  row flagged `extent_suspect=`, or a span the file's current bytes cannot hold. `l=` keeps its meaning, so a
+  definition can start above `l=` (a return type on the line before, a decorator). The attribute is exempt from the
+  signature-row byte budget, so a ceiling admits the same rows it admitted before; it costs about 8 bytes per row.
+  `--pack-signatures`, `--pack-task`, `--from-trace` and the map keep their bytes.
+- **Code above docs.** On a question that does not ask about docs, every scored markdown row now ranks after every
+  scored code row (the doc rows keep their own order and stay in the answer; they fill only slots no code row
+  competes for). A question that names docs (`doc…`, `readme`, `guide`, `tutorial`, `manual`, `markdown`, `wiki`,
+  `faq`, `howto`, a change or translation cue, or a named `.md`/`.rst` file) keeps the plain score order. The answer
+  says when the rule moved anything: ` [docs after code: N doc rows ranked below every code row; …]`. Routed path
+  only (`--no-route` restores the old order); `--for` and MCP `for` only.
+
+Gate: `forsigspancheck` (fixture `test/forcompletefix`, C/JS/Python/TS).
+
+
 ### Added — MCP `grep` rows carry the matched text and a `fetch_body` handle (CLI parity)
 
 The MCP `grep` hit row was `{file, line, in}`: no matched text, so an agent re-read every file it had just searched, and

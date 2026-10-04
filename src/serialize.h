@@ -4221,6 +4221,96 @@ inline std::string sigRowHead( const IngestResult& ing, NodeId id, const SigRowF
     return head;
 }
 
+// ── e= — WHERE A DEFINITION ENDS (the --for lens rows; gate test/forsigspancheck.sh) ──────────────────
+// l= is the line of a definition's NAME. A reader asking "which body holds line N" also needs the LAST line, and a
+// graded answer lost credit for an item inside a function because its row carried only l=. e= is that last line:
+// the parser's body-inclusive span end (Symbol::endByte), counted in the file's current bytes.
+//
+// It is printed ONLY when the extent is known. Unknown — e= absent, never 0 and never a guess — for:
+//   * a row that is not a code definition: a markdown heading, a config key (isCodeLang), a module-scope owner
+//     (synthetic: no body by construction);
+//   * a row extent_suspect= flags (its span may be a parse-recovery artifact: kExtentSuspectRowLegend);
+//   * a span the file's bytes cannot hold, or one that ends above its own name line.
+// What e= does NOT mean: that every line in l..e belongs to this definition alone (a nested definition shares
+// them), or that the definition starts at l= (a return type or decorator can sit above the name).
+//
+// The file's line breaks, built once per file by the caller and only when a row asks for e=.
+inline std::vector<std::uint32_t> lineBreaksOf( std::string_view src )
+{
+    std::vector<std::uint32_t> breaks;
+    for( std::size_t at = src.find( '\n' ); at != std::string_view::npos; at = src.find( '\n', at + 1 ) )
+    {
+        breaks.push_back( std::uint32_t( at ) );
+    }
+    return breaks;
+}
+
+// The symbol-table half of defEndLine's rule (no file bytes): may this row carry e= at all? The legend's present-only bit.
+inline bool mayCarryEndLine( const Symbol& s ) noexcept
+{
+    return isCodeLang( s.lang ) && s.kind != SymKind::Section && s.kind != SymKind::ModuleScope && s.extentSuspect == 0
+        && s.endByte > s.sigStartByte;
+}
+
+// The 1-based e= value of `s` against its file (`breaks` from lineBreaksOf over `srcSize` bytes), or 0 = unknown.
+inline std::uint32_t defEndLine( const Symbol& s, const std::vector<std::uint32_t>& breaks, std::size_t srcSize ) noexcept
+{
+    if( !mayCarryEndLine( s ) || s.endByte > srcSize )
+    {
+        return 0;   // not a code definition with a trusted span, or a span the current bytes cannot hold
+    }
+    const std::uint32_t lastByte = s.endByte - 1;   // the definition's own last byte; a '\n' there ends ITS line
+    const std::size_t   before   = std::size_t( std::lower_bound( breaks.begin(), breaks.end(), lastByte ) - breaks.begin() );
+    const std::uint32_t endLine  = std::uint32_t( before ) + 1u;
+    ENSURES( endLine >= 1u, "a line number is 1-based" );
+    return endLine >= s.line ? endLine : 0u;
+}
+
+// The legend clauses defining e=, present-only (a document whose rows can carry one), in both --for dialects and the MCP
+// twin; gate test/forsigspancheck.sh (L). Each says what the attribute does NOT mean: absent is unknown (never a 0), and
+// l= stays the NAME's line.
+inline constexpr std::string_view kForCompactEndLineLegend =
+    "; d e= last line of the definition (absent = extent unknown, never 0; l= is its name's line)";
+inline constexpr std::string_view kForEndLineLegend =
+    "; e= on a d row: the 1-based line where that definition ends, body-inclusive; absent when the extent is not known "
+    "(extent_suspect, docs, config), never 0; l= is the line of the definition's name, so a definition can start above l=";
+
+// The " e=\"N\"" run, spliced into a rendered <d …> head right after its l= value (the head always opens `<d l="N"`,
+// sigRowHead). Kept OUT of the head the budget ledger measures, so the ranked set a row budget admits is the one it
+// admitted before e= existed (owner ruling: the attribute is exempt from the signature-row budget; its bytes are
+// reported, explain-or-fail, never traded for a row).
+inline void writeSigHeadWithEnd( XmlWriter& w, std::string_view head, std::uint32_t endLine )
+{
+    if( endLine == 0 )
+    {
+        w.write( head );
+        return;
+    }
+    ASSUME( head.starts_with( "<d l=\"" ) );
+    const std::size_t lClose = head.find( '"', 6 );   // the closing quote of l="N"
+    ASSUME( lClose != std::string_view::npos );
+    char eAttr[ 24 ];
+    rw::formatTo( eAttr, sizeof( eAttr ), " e=\"{}\"", endLine );
+    w.write( head.substr( 0, lClose + 1 ) );
+    w.write( eAttr );
+    w.write( head.substr( lClose + 1 ) );
+}
+
+// The --for lens's own serving rules on the rank-adaptive path, one flags value so a caller states which it wants:
+// LB-A's relevance floor, and e= on every row. --for (CLI) and MCP `for` pass ForLens; --pack-task and --from-trace
+// pass None (their rows keep their bytes).
+enum class SigLensRules : std::uint8_t
+{
+    None           = 0,
+    RelevanceFloor = 1,
+    EndLine        = 2,
+    ForLens        = 3,
+};
+inline constexpr bool hasSigLensRule( SigLensRules set, SigLensRules rule ) noexcept
+{
+    return ( std::uint8_t( set ) & std::uint8_t( rule ) ) != 0;
+}
+
 // ── LB-A (r10 GitNexus round) — THE RELEVANCE FLOOR ──────────────────────────────────────────────────
 // `order` is already sorted by (score desc, id asc), so every row that scored ZERO forms one contiguous
 // TAIL. This walks that tail off the kept head and returns the shortened count.
@@ -4610,9 +4700,11 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                                                                             //   56% over a tight --token-budget the JSON mode honored.
                             std::string_view rootArg = {},   // R-E (2026-08-17): same single-root-only root
                                                              // argument serialize() takes — see its comment.
-                            bool hasRelevanceFloor = false,  // LB-A: drop the zero-score TAIL of the kept head rather
-                                                             //   than padding the quota with it (relevanceFlooredKeep
-                                                             //   above). Off ⇒ byte-identical to the pre-LB-A path.
+                            SigLensRules lensRules = SigLensRules::None,   // the --for lens's rules (SigLensRules): RelevanceFloor =
+                                                             //   LB-A, drop the zero-score TAIL of the kept head rather than
+                                                             //   padding the quota with it (relevanceFlooredKeep above);
+                                                             //   EndLine = e= on every rank-adaptive row (defEndLine). None ⇒
+                                                             //   byte-identical to the path before either rule.
                             std::size_t* droppedPositiveOut = nullptr,   // A2 (survey card, 2026-09-03): how many
                                                              //   POSITIVE-scored candidates (rank>0) within the kept
                                                              //   head never reached the emitted <sigs> — cut either
@@ -4677,7 +4769,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
     }
     sortutil::radixSortByScoreDescId( order, rank );
     std::size_t keep = std::min<std::size_t>( topN > 0 ? std::size_t( topN ) : S, S );
-    if( hasRelevanceFloor )
+    if( hasSigLensRule( lensRules, SigLensRules::RelevanceFloor ) )
     {
         keep = relevanceFlooredKeep( order, rank, keep );   // LB-A: shrink, never pad
     }
@@ -4750,6 +4842,8 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             bool          positive   = false;   // A2: rank[id] > 0 at collection time (the disclosure's own definition of "positive")
             bool          hadDoc     = false;   // the source HAS a doc comment here (before the rank tiers) — docs_dropped= counts
                                                 //   the shown rows where this is true and `doc` is empty at emission
+            std::uint32_t endLine    = 0;       // e= (defEndLine), 0 = not printed; spliced at emission, OUTSIDE `head` and so
+                                                //   outside every byte the gate and the ladder charge (writeSigHeadWithEnd)
         };
         std::vector<SigFile>  sigFiles;
         std::vector<SigEntry> entries;
@@ -4791,6 +4885,8 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             std::vector<NodeId>& syms = buckets[f];
             std::sort( syms.begin(), syms.end(), [ & ]( NodeId a, NodeId b )
             { return ing.symbols[a].sigStartByte < ing.symbols[b].sigStartByte; } );
+            const std::vector<std::uint32_t> lineBreaks = hasSigLensRule( lensRules, SigLensRules::EndLine ) ? lineBreaksOf( src )
+                                                                                                            : std::vector<std::uint32_t>{};
 
             SigFile sf;
             sf.fileId    = f;
@@ -4879,6 +4975,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                 e.notes      = renderNoteChildren( noteIndex, symbolNoteTarget( noteIndex, ing, s ), esc );   // L3/D5 key + W3-N2 pre-render
                 e.positive   = rank[id] > 0.0f;   // A2: this symbol's own score, at collection time
                 e.hadDoc     = hadDoc;
+                e.endLine    = hasSigLensRule( lensRules, SigLensRules::EndLine ) ? defEndLine( s, lineBreaks, src.size() ) : 0u;
                 entries.push_back( std::move( e ) );
                 ++sf.liveCount;
             }
@@ -4997,7 +5094,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                 continue;
             }
             pushShownSigId( shownIdsOut, order, e.globalRank );   // lane 2
-            w.write( e.head.c_str() );
+            writeSigHeadWithEnd( w, e.head, e.endLine );            // e= after l=, when the lens asked and the extent is known
             if( !e.doc.empty() ) { w.write( "<doc>" );  w.write( escapeXml( e.doc, esc ) );  w.write( "</doc>" ); }
             w.write( escapeXml( e.sig, esc ) );
             w.write( e.notes );                                                // L3: symbol notes on this <d> (inert when null)
@@ -8932,6 +9029,8 @@ struct JsonSigEntry
     bool          dropped    = false;
     bool          positive   = false;   // A2: rank[id] > 0 at collection time — the XML sibling's own field
     bool          hadDoc     = false;   // the source has a doc comment here (before the rank tiers) — the XML sibling's field
+    std::uint32_t endLine    = 0;       // "e" (defEndLine), 0 = no key; spliced at emission, outside `head` and every charged
+                                        //   byte (the XML sibling's SigEntry::endLine, same exemption)
 };
 
 // §B1.3: how many notes this array-emitter matched, and how many survived the ladder — the caller pairs
@@ -9001,6 +9100,9 @@ struct JsonSigLens
                                                                        // `notes` array on the row/file the XML
                                                                        // sibling hangs <note> children on.
                                                                        // nullptr ⇒ INERT (byte-identical).
+    bool                              endLines            = false;     // the XML sibling's SigLensRules::EndLine: an "e"
+                                                                       // key (defEndLine) on every row whose extent is
+                                                                       // known — --for only; off ⇒ byte-identical.
 };
 
 // One row's `{"l":…` opening through its flag fields — everything EXCEPT doc/sig, which the ladder mutates
@@ -9149,6 +9251,7 @@ inline std::size_t collectJsonSigEntries( const IngestResult& ing, const std::ve
         std::vector<NodeId>& syms = buckets[f];
         std::sort( syms.begin(), syms.end(), [ & ]( NodeId a, NodeId b )
         { return ing.symbols[a].sigStartByte < ing.symbols[b].sigStartByte; } );
+        const std::vector<std::uint32_t> lineBreaks = lens.endLines ? lineBreaksOf( src ) : std::vector<std::uint32_t>{};
 
         JsonSigFile sf;
         sf.fileId     = f;
@@ -9205,6 +9308,7 @@ inline std::size_t collectJsonSigEntries( const IngestResult& ing, const std::ve
             e.noteCount  = appendJsonNoteArray( e.notes, lens.noteIndex, symbolNoteTarget( lens.noteIndex, ing, s ) );   // §B1.3
             e.positive   = rank && (*rank)[id] > 0.0f;   // A2: the XML sibling's own field, same definition
             e.hadDoc     = hadDoc;
+            e.endLine    = lens.endLines ? defEndLine( s, lineBreaks, src.size() ) : 0u;
             outEntries.push_back( std::move( e ) );
             ++sf.liveCount;
         }
@@ -9387,6 +9491,16 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
         }
         first = false;
         std::string row = e.head;
+        if( e.endLine > 0 )
+        {
+            // "e" right after "l" — the XML sibling's e= position (writeSigHeadWithEnd); the head always opens {"l":N
+            ASSUME( row.starts_with( "{\"l\":" ) );
+            const std::size_t lEnd = row.find( ',' );
+            ASSUME( lEnd != std::string::npos );
+            char eKey[ 24 ];
+            rw::formatTo( eKey, sizeof( eKey ), ",\"e\":{}", e.endLine );
+            row.insert( lEnd, eKey );
+        }
         if( !e.doc.empty() )
         {
             appendJsonStrField( row, ",\"doc\":", e.doc );

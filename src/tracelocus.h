@@ -1219,7 +1219,7 @@ inline FromTraceResult fromTraceBundleText( const IngestResult& ing, const Graph
                             /*rankAdaptivePayload=*/true, sigsBudget,
                             in.notes,                                // L3: field-notes surfacing (inert when null)
                             in.rootArg,                              // R-R: root-relative <f p=…>
-                            /*hasRelevanceFloor=*/false, /*droppedPositiveOut=*/nullptr, /*shownIdsOut=*/nullptr,
+                            rw::SigLensRules::None,   /*droppedPositiveOut=*/nullptr, /*shownIdsOut=*/nullptr,
                             /*cappedOut=*/nullptr, /*topRowNext=*/{}, &sigsCut );
             // cut-fix lane A: the <sigs> tag's cut readings (docs_dropped=, shrunk-not-dropped), the --for twin's clauses
             // verbatim, as a comment right after the block they define: this lens's header is priced before the section

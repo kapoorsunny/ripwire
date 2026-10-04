@@ -1039,7 +1039,7 @@ inline RankingSection renderRankingWithFar( const IngestResult& ing, const Ranki
                         /*rankAdaptivePayload=*/true, /*payloadBudgetBytes=*/ri.sigsBudget,
                         /*noteIndex=*/nullptr,       // notes are a DEDICATED section (4), never inline here (avoids double-emit)
                         ri.in->rootArg,
-                        /*hasRelevanceFloor=*/false, // R2: eligibleIds is ALREADY the curated set (d0∪d1 depth mask),
+                        rw::SigLensRules::None,      // no LB-A floor, no e=. R2: eligibleIds is ALREADY the curated set (d0∪d1 depth mask),
                                                      //   not a floor-narrowed topN — droppedPositiveCount re-checks
                                                      //   rank>0 per symbol regardless, so this is unaffected either way
                         &out.droppedPositive,        // A2: exact count, see droppedPositiveCount (serialize.h)

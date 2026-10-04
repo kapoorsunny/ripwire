@@ -881,6 +881,93 @@ inline std::vector<float> docNoiseSymbolMultipliers( const IngestResult& ing, st
     return mul;
 }
 
+// ── CODE ABOVE DOCS (--for and MCP `for`, routed path only; gate test/forsigspancheck.sh (R)) ────────────────
+// Markdown headings that repeat a question's words used to fill the ranked rows ABOVE the code that defines the
+// answer (on one graded answer about half of the shown rows were headings). A question about CODE now ranks every
+// positive-score doc row after every positive-score non-doc row: the doc rows keep their own order and stay
+// positive (nothing is dropped, they still fill any slot no code row competes for), only their place moves.
+// A question that ASKS about docs keeps the plain score order: a docs cue (kDocsQuestionCues), a change or
+// translation cue (the two doc-noise lists above: those questions are about prose too), or a named doc file.
+// A false cue is the cheap side to be wrong on — it restores the old order.
+inline constexpr DocNoiseCue kDocsQuestionCues[] = { { "doc", true },      { "readme", true }, { "guide", true }, { "tutorial", true },
+                                                     { "manual", true },   { "markdown", false }, { "wiki", false }, { "faq", false },
+                                                     { "howto", false } };
+// The scale that places the best doc row strictly below the weakest code row: half of it, so float rounding can
+// never land a doc row ON a code row's score (the (score desc, id asc) order would then interleave them by id).
+inline constexpr float kDocsAfterCodeGap = 0.5f;
+static_assert( kDocsAfterCodeGap > 0.f && kDocsAfterCodeGap < 1.f, "doc rows land strictly below the weakest code row, and stay positive" );
+
+inline bool taskAsksAboutDocs( std::string_view task )
+{
+    const std::string lowerTask = queryshape::detail::lowerAscii( task );
+    if( lowerTask.find( ".md" ) != std::string::npos || lowerTask.find( ".rst" ) != std::string::npos )
+    {
+        return true;   // a named doc file (the B8 mention anchor lifts it; this rule must not push it back down)
+    }
+    return taskHasCue( lowerTask, kDocsQuestionCues ) || taskHasCue( lowerTask, kChangeQuestionCues )
+        || taskHasCue( lowerTask, kTranslationQuestionCues );
+}
+
+// Apply the rule to a final lens rank. Returns how many doc rows it MOVED (scored at or above the weakest code row
+// before; 0 ⇒ nothing changed, byte-identical). The caller discloses a non-zero count in the bundle's note.
+inline std::size_t applyCodeAboveDocs( const IngestResult& ing, std::string_view task, std::vector<float>& rank )
+{
+    EXPECTS( rank.size() <= ing.symbols.size(), "one score per symbol at most" );
+    if( taskAsksAboutDocs( task ) )
+    {
+        return 0;
+    }
+    float       minCode = 0.f;
+    float       maxDoc  = 0.f;
+    bool        anyCode = false;
+    for( std::size_t i = 0; i < rank.size(); ++i )
+    {
+        if( rank[i] <= 0.f )
+        {
+            continue;
+        }
+        if( ing.symbols[i].lang == Lang::Markdown )
+        {
+            maxDoc = std::max( maxDoc, rank[i] );
+        }
+        else if( !anyCode || rank[i] < minCode )
+        {
+            minCode = rank[i];
+            anyCode = true;
+        }
+    }
+    if( !anyCode || maxDoc <= 0.f || maxDoc < minCode )
+    {
+        return 0;   // no doc row, no code row, or every doc row already below every code row
+    }
+    const float scale = minCode * kDocsAfterCodeGap / maxDoc;   // maxDoc >= minCode > 0 ⇒ 0 < scale <= kDocsAfterCodeGap
+    std::size_t moved = 0;
+    for( std::size_t i = 0; i < rank.size(); ++i )
+    {
+        if( rank[i] > 0.f && ing.symbols[i].lang == Lang::Markdown )
+        {
+            moved += rank[i] >= minCode ? 1u : 0u;
+            rank[i] = std::max( rank[i] * scale, std::numeric_limits<float>::min() );   // stays positive: still a scored row
+        }
+    }
+    ENSURES( moved > 0, "maxDoc >= minCode, so the best doc row moved" );
+    return moved;
+}
+
+// The bundle note for a moved count (" [docs after code: N …]"), "" at zero — the same free-text channel the doc-mention
+// note rides, so both dialects and the compact legend carry it verbatim.
+inline std::string docsAfterCodeNote( std::size_t moved )
+{
+    if( moved == 0 )
+    {
+        return {};
+    }
+    char nb[ 140 ];
+    rw::formatTo( nb, sizeof( nb ), " [docs after code: {} doc row{} ranked below every code row; a question naming docs keeps score order]",
+                  moved, moved == 1 ? "" : "s" );
+    return nb;
+}
+
 // Order a file-id list by a per-id KEY descending, PATH ascending as the tiebreak — the shared
 // "most-consequential-first, and deterministically so" ordering the first-screen verbs need (§P11.7
 // --pr-context by blast radius, §P11.8 --tree by best-symbol rank). Templated on the key because one of

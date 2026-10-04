@@ -41,10 +41,15 @@
 #   (H)  hop slots: TS — contextHost (only callee: a name-only `bag.lookup()`) has no <h> row; createContext keeps
 #        one. Python — Downloader.pull (only callee: a name-only `source.fetch_entry()`) has no <h> row; fetch_entry
 #        keeps one. C near miss — Sampler_collectAll keeps its <h> row. <h> rows follow the <d> rows' r= order.
-#   (R)  code over docs: TS "How is a per-request context created?" — createContext and the class Context rank above
-#        every docs/context.md row, and md rows <= 25% of the shown rows. Twin: "Where do the docs describe the
-#        context lifecycle?" keeps a docs row in its top five.
+#        The two "no <h> row" arms need the receiver-evidence hedge (a name-only row marked via="name"); on a binary
+#        without it they SKIP by name ("expects FE-B"), detected on this fixture — never a silent PASS.
+#   (R)  code over docs: TS "How is a per-request context created?" — createContext and the class Context, and every
+#        other code row, rank above every docs/context.md row; md rows <= 25% of the shown rows unless no code row was
+#        displaced (the window holds fewer than 40 rows and <sigs> is not cut); the answer carries the
+#        " [docs after code: N …]" note. Twin: "Where do the docs describe the context lifecycle?" keeps a docs row in
+#        its top five.
 #   (J)  dialect parity: --for --json "sigs" entries carry "e" equal to the XML rows' e= (and none where XML has none).
+#   (M)  the MCP `for` twin: the same e= on the C rows, none on the extent_suspect rows, and a legend clause for e=.
 #   (L)  legend: --legend=full defines e= and says what it does NOT mean (absent = unknown, not 0; l= is the name's
 #        line, not the definition's first line).
 #   (K)  the predicates can fail: a row with e= < l=, a row with e= on an md row, a missing e= on a code row, and a
@@ -88,9 +93,12 @@ def ctx_ok( doc ):
     return re.search( r"<ctx [^>]*>", doc ) is not None and "<sigs" in doc
 def drows( doc ):
     """[(open tag, attrs)] of every <d …> row, in document order."""
-    return [ ( t, attrs( t ) ) for t in re.findall( r"<d\s[^>]*>", doc ) ]
+    return [ ( t, attrs( t ) ) for t in re.findall( r"<d\s[^>]*>", strip_comments( doc ) ) ]
 def hrows( doc ):
-    return [ attrs( t ) for t in re.findall( r"<h\s[^>]*>", doc ) ]
+    return [ attrs( t ) for t in re.findall( r"<h\s[^>]*>", strip_comments( doc ) ) ]
+def strip_comments( doc ):
+    # legend text inside <!-- --> spells row shapes (`<d cx= ccx=>`); only real elements are rows
+    return re.sub( r"<!--.*?-->", "", doc, flags=re.S )
 def is_doc_row( a ):
     return a.get( "p", "" ).endswith( ( ".md", ".markdown", ".rst", ".txt" ) )
 PY
@@ -243,14 +251,30 @@ sys.exit( 0 if good else 1 )
 PY
     [ $? -eq 0 ] || { fail=1; return 1; }
 }
+# CAPABILITY (checklist 17): the "only name-only edges" premise needs the receiver-evidence hedge — a binary that marks a
+# call bound by name alone via="name". Detected here, on this fixture: Downloader.pull's `source.fetch_entry( url )` is
+# such a call. A binary without the hedge cannot tell that edge from a proven one, so the two nohop arms SKIP BY NAME;
+# every other arm (the near misses, rank order) runs either way.
+FEB="$TMP/py.callers.fetch_entry.xml"; run py "$FEB" --callers=fetch_entry
+FEB_ON=0
+if ran_ok "$FEB" "H premise"; then
+    if ! grep -q '<callers ' "$FEB" || ! grep -q 'n="pull"' "$FEB"; then
+        no "H premise: --callers=fetch_entry did not answer with the pull row (cannot decide the hedge capability)"
+    elif grep -Eq '<s [^>]*n="pull"[^>]*via="name"|<s [^>]*via="name"[^>]*n="pull"' "$FEB"; then
+        FEB_ON=1
+    fi
+fi
+nohop_or_skip(){
+    if [ "$FEB_ON" = 1 ]; then hopcheck "$@"; else printf '  SKIP  %s: expects FE-B (this binary marks no name-only row via="name")\n' "$2"; fi
+}
 if ran_ok "$TE" "H/TS"; then
-    hopcheck "$TE" "H/TS getter with a name-only edge" nohop contextHost
+    nohop_or_skip "$TE" "H/TS getter with a name-only edge" nohop contextHost
     hopcheck "$TE" "H/TS near miss" hop createContext
     hopcheck "$TE" "H/TS order" order -
 fi
 PH="$( ask py fetch 'How does the lookup cache fetch or evict an entry?' )"
 if ran_ok "$PH" "H/PY"; then
-    hopcheck "$PH" "H/PY untyped-parameter caller" nohop pull
+    nohop_or_skip "$PH" "H/PY untyped-parameter caller" nohop pull
     hopcheck "$PH" "H/PY near miss" hop fetch_entry
     hopcheck "$PH" "H/PY order" order -
 fi
@@ -262,15 +286,24 @@ fi
 echo "(R) the defining code outranks the docs that describe it"
 if ran_ok "$TE" "R"; then
     python3 - "$TMP/rows.py" "$TE" <<'PY'
-import sys
+import re, sys
 exec( open( sys.argv[ 1 ] ).read() )
-rows = [ a for _, a in drows( load( sys.argv[ 2 ] ) ) if a.get( "r", "" ).isdigit() ]
+doc = load( sys.argv[ 2 ] )
+rows = [ a for _, a in drows( doc ) if a.get( "r", "" ).isdigit() ]
 code = [ int( a[ "r" ] ) for a in rows if ( a.get( "n" ), a.get( "p" ) ) in ( ( "createContext", "src/application.ts" ), ( "Context", "src/context.ts" ) ) ]
 docs = [ int( a[ "r" ] ) for a in rows if is_doc_row( a ) ]
 bad = []
 if len( code ) != 2: bad.append( "premise: createContext and class Context are not both shown (%s)" % code )
 elif docs and max( code ) > min( docs ): bad.append( "a docs row r=%d ranks above defining code r=%d" % ( min( docs ), max( code ) ) )
-if rows and 4 * len( docs ) > len( rows ): bad.append( "%d of %d shown rows are docs (> 25%%)" % ( len( docs ), len( rows ) ) )
+# docs <= 25% of the shown rows — unless no code row could have been displaced: the window is not full (fewer rows than
+# the 40-row lens head) and <sigs> is not cut, so every positive code row is already shown ABOVE the docs (rule 5: a doc
+# row filling a slot no code row competes for is information, never a cut).
+sigs = re.search( r"<sigs[^>]*>", doc )
+windowOpen = len( rows ) < 40 and sigs is not None and 'capped="1"' not in sigs.group( 0 )
+if code and docs and min( docs ) < max( r for r in ( int( a[ "r" ] ) for a in rows if not is_doc_row( a ) ) ):
+    bad.append( "a docs row r=%d ranks above a code row" % min( docs ) )
+if rows and 4 * len( docs ) > len( rows ) and not windowOpen: bad.append( "%d of %d shown rows are docs (> 25%%) in a full or cut window" % ( len( docs ), len( rows ) ) )
+if docs and " [docs after code: " not in doc: bad.append( "the docs moved below code but the answer has no [docs after code: N] note" )
 if bad:
     for b in bad: print( "  FAIL  R: %s" % b )
     sys.exit( 1 )
@@ -311,6 +344,34 @@ diff = sorted( k for k in common if x[ k ] != js[ k ] )
 if diff:
     print( "  FAIL  J: XML/JSON e= differ on %s" % diff[ :4 ] ); sys.exit( 1 )
 print( "  PASS  J: %d shared rows agree on e=" % len( common ) )
+PY
+    [ $? -eq 0 ] || fail=1
+fi
+
+echo "(M) the MCP for twin carries the same e= values, with the same exclusions"
+MC="$TMP/mcp.c.json"; mkdir -p "$TMP/mcphome"
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+               '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"for","arguments":{"path":"'"$CORPUS/c"'","task":"How does the sampler compute the average reading window?"}}}' \
+  | ( cd "$CORPUS/c" && TMPDIR="$TMP/mcphome" "$BIN" --mcp >"$MC" 2>/dev/null ); printf '%s' "$?" >"$MC.rc"
+if ran_ok "$MC" "M"; then
+    python3 - "$TMP/rows.py" "$MC" "$CORPUS/c" <<'PY'
+import json, os, sys
+exec( open( sys.argv[ 1 ] ).read() )
+lines = [ l for l in open( sys.argv[ 2 ], encoding="utf-8", errors="replace" ) if l.strip() ]
+try:
+    text = json.loads( lines[ -1 ] )[ "result" ][ "content" ][ 0 ][ "text" ]
+except Exception as err:
+    print( "  FAIL  M: no readable MCP for answer (%s)" % err ); sys.exit( 1 )
+rows = { a.get( "n" ) + "@" + a.get( "p", "" ) + ":" + a.get( "l", "" ): a for _, a in drows( text ) }
+want = { "Sampler_average@src/window.c:6": "14", "Sampler_scale@src/window.c:3": "3" }
+bad = [ "%s e=%r, expected %s" % ( k, rows[ k ].get( "e" ) if k in rows else "(row absent)", v ) for k, v in want.items() if k not in rows or rows[ k ].get( "e" ) != v ]
+bad += [ "%s is extent_suspect and carries e=" % k for k, a in rows.items() if "extent_suspect" in a and "e" in a ]
+if "e=" not in " ".join( __import__( "re" ).findall( r"<!--(.*?)-->", text, __import__( "re" ).S ) ):
+    bad.append( "the MCP answer defines no e= in its legend" )
+if bad:
+    for b in bad: print( "  FAIL  M: %s" % b )
+    sys.exit( 1 )
+print( "  PASS  M: MCP for rows carry the CLI's e= values; suspect rows none; legend defines e=" )
 PY
     [ $? -eq 0 ] || fail=1
 fi
