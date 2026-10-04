@@ -2612,7 +2612,8 @@ inline std::string_view annotatedClass( TSNode node, std::string_view src )
 inline void pushEvidenceBind( BindCtx& cx, LocalBindKind kind, std::string_view var, std::string_view type, std::string_view imported,
                               std::uint32_t at, bool flag )
 {
-    EXPECTS( isReceiverEvidenceKind( kind ), "only the receiver-evidence kinds ride this emitter" );
+    EXPECTS( kind == LocalBindKind::RecvType || kind == LocalBindKind::MemberType || kind == LocalBindKind::MethodAlias || kind == LocalBindKind::NameAlias,
+             "only the receiver-evidence kinds ride this emitter" );
     if( type.empty() || ( var.empty() && !( kind == LocalBindKind::RecvType && flag ) ) )
     {
         return;   // a nameless record is kept only for a method's own class (Go `func (T) m()`, JS `T.prototype.m = …`)

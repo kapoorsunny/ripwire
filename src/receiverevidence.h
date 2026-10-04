@@ -61,6 +61,15 @@ inline bool memberNeverReachesFreeFunction( Lang l ) noexcept
         || l == Lang::CSharp || l == Lang::Swift;
 }
 
+// the languages where `Cls.m()` is a call on the CLASS (a static or an unbound method): C++ spells that `Cls::m()` (a
+// qualifier, the canonical tier's), so a C++/C/Rust receiver spelled like a class is a variable or a member; Ruby's class
+// receivers are its own lookup's question
+inline bool classNameReceiverLang( Lang l ) noexcept
+{
+    return l == Lang::JavaScript || l == Lang::TypeScript || l == Lang::Python || l == Lang::Java || l == Lang::Kotlin
+        || l == Lang::CSharp || l == Lang::Swift;
+}
+
 // a call written ON a receiver — every language's member shape: Python/C++/Ruby record a RecvKind, the rest memberCall
 inline bool isMemberCallRef( const Reference& r ) noexcept
 {
@@ -98,6 +107,7 @@ struct ReceiverEvidence
     mutable std::vector<std::string_view>                 frontier;
     mutable rw::SmallVec<NodeId, 2>                       found;
     bool                                                  active = false;
+    const HashMap<std::string, char>*                     localNames = nullptr;   // graph.h FieldNarrowTables::localNameSet
 
     ReceiverEvidence( const IngestResult& i, const HashMap<std::string, std::vector<std::string>>& up, const HashMap<std::string, char>& classes )
         : ing( i ), chaUp( up ), classNames( classes ) {}
@@ -350,6 +360,30 @@ struct ReceiverEvidence
         }
         return nullptr;
     }
+    // is `name` a parameter or local of `from` or of a function enclosing it (any binding the extractor recorded)
+    bool isLocalName( NodeId from, std::string_view name ) const
+    {
+        if( localNames == nullptr )
+        {
+            return false;
+        }
+        NodeId cur = from;
+        for( int depth = 0; depth < 8 && cur != kNoNode; ++depth )
+        {
+            if( localNames->contains( keyOf( cur, '#', name ) ) || localType.contains( keyOf( cur, '#', name ) ) )
+            {
+                return true;
+            }
+            cur = enclosingFn( cur );
+        }
+        return false;
+    }
+    // a receiver root that names a CLASS at this site: a class-name receiver language, a class of that name, and no local
+    // of the caller hiding it (`Interval = make(); Interval.validate( v )`)
+    bool namesClass( const Reference& r, std::string_view root, std::string_view cls ) const
+    {
+        return classNameReceiverLang( r.lang ) && classNames.contains( std::string( cls ) ) && !isLocalName( r.fromSymbol, root );
+    }
     // the class owning the caller — the caller's own owner, else the nearest enclosing function's (a closure in a method)
     std::string_view callerClass( NodeId from ) const
     {
@@ -530,7 +564,7 @@ struct ReceiverEvidence
             return unalias( r.fileId, *t );
         }
         const std::string_view cls = unalias( r.fileId, root );
-        if( classNames.contains( std::string( cls ) ) && !localType.contains( keyOf( r.fromSymbol, '#', root ) ) )
+        if( namesClass( r, root, cls ) )
         {
             isStatic = true;
             return cls;

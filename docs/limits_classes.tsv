@@ -142,4 +142,5 @@ kType3MaxTokensForLcs	INDEXING
 kUnitComplexityLowRiskMax	BOUNDARY
 kUnitInterfacingLowRiskMax	BOUNDARY
 kUnitSizeLowRiskMax	BOUNDARY
+kWalkCap	INDEXING
 kWhereisHits	OUTPUT

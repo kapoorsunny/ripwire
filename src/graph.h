@@ -4070,6 +4070,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     ReceiverEvidence         recvEv( ing, chaUp, classNames );
     {
         PROFILE_SCOPE_DESCRIBE( "buildGraph/2i: receiver-evidence tables" );
+        recvEv.localNames = &fieldNarrow.localNameSet;
         recvEv.build();
     }
     HashMap<std::uint64_t, char> nameOnlyEdges;   // (from<<32|to) of an edge some call bound by NAME ALONE (no receiver evidence)
@@ -4112,6 +4113,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 const std::string_view callerCls = recvEv.callerClass( ref.fromSymbol );
                 return !callerCls.empty() && !owner.empty() && owner != callerCls && recvEv.inCone( callerCls, owner );
             }
+            if( recvEv.isLocalName( ref.fromSymbol, ch.root ) || externalVeto.hasLocal( ref, ch.root ) )
+            {
+                return false;   // a parameter or local spelled like the module alias hides it (`alias = make(); alias.run()`)
+            }
             if( recvEv.moduleNames( ref, ch.root, c ) )
             {
                 return true;
@@ -4124,8 +4129,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                     return true;
                 }
             }
-            return !owner.empty() && classNames.contains( std::string( ch.root ) ) && recvEv.typedLocal( ref.fromSymbol, ch.root ) == nullptr
-                && recvEv.inCone( ch.root, owner );   // a class-name receiver: the class or a base (`Cls.create()`, `Base.m( self )`)
+            const std::string_view cls = recvEv.unalias( ref.fileId, ch.root );
+            return !owner.empty() && recvEv.namesClass( ref, ch.root, cls ) && recvEv.inCone( cls, owner );   // a class-name receiver: the class or a base
         }
         if( implicitReceiverLang( ref.lang ) )
         {
@@ -4814,6 +4819,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // member call's included-file ones) instead of one locality pick, each edge marked via="name" — D1 holds a single
         // candidate to the same rule, because one candidate is not evidence.
         bool nameOnly = false;
+        bool nameOnlyAnyFile = false, nameOnlyAnyDir = false;   // which rung the classic ladder would have stopped at (rank weight)
         if( hedgeEligible && !narrowed && !cand.empty() && r.lang != Lang::Elixir )
         {
             provedScratch.clear();
@@ -4930,7 +4936,16 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                         anyDir  = anyDir || dir;
                     }
                 }
-                tierConf = anyFile ? 1.0f : anyDir ? 0.5f : 0.2f;
+                for( NodeId c : memberRule3 )   // the included file's candidates, even where reachableByName set them aside
+                {
+                    if( std::find( tier.begin(), tier.end(), c ) == tier.end() )
+                    {
+                        tier.push_back( c );
+                    }
+                }
+                tierConf        = anyFile ? 1.0f : anyDir ? 0.5f : 0.2f;
+                nameOnlyAnyFile = anyFile;
+                nameOnlyAnyDir  = anyDir;
                 if( tier.empty() )
                 {
                     if( cand.size() == 1 && !localsYield )
@@ -5335,7 +5350,25 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 }
             }
         }
-        const float base = conf / float( nReal );              // split over real (non-self) targets
+        // FE-B: a name-only tier LISTS every candidate in reach, but RANK keeps the classic ladder's pick — the rung it would
+        // have stopped at (same file, else same directory) shares the call's weight as before, and the extra hedged
+        // candidates ride at a tenth of a share: a guess is listed, not let to move PageRank.
+        const std::uint32_t rdirE   = fileDir[ r.fileId ];
+        const auto          classic = [ & ]( NodeId to ) -> bool
+        {
+            if( !nameOnly || ( !nameOnlyAnyFile && !nameOnlyAnyDir ) )
+            {
+                return true;
+            }
+            return nameOnlyAnyFile ? ing.symbols[ to ].fileId == r.fileId : fileDir[ ing.symbols[ to ].fileId ] == rdirE;
+        };
+        std::size_t nClassic = 0;
+        for( NodeId c : tier )
+        {
+            nClassic += ( c != r.fromSymbol && classic( c ) ) ? 1u : 0u;
+        }
+        const bool  allClassic = nClassic == 0;   // the classic rung held only the caller: every target shares the weight
+        const float base = conf / float( allClassic ? nReal : nClassic );   // split over real (non-self) targets
         // a qualified written type decided this site by its last name — Rule 2 or 2b narrowed on it, or CHA-lite pruned by it — so every edge it
         // commits is prov="final-segment" (resolve.h finalSegmentTypeAt, fieldFinalSegmentAt); never a class-identity CLAIM, whose one class was verified
         const bool  finalSegmentType = ( ( receiverTypeNarrowed || censusCone ) && !identityClaim && narrower.finalSegmentTypeAt( r ) )
@@ -5348,7 +5381,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
             const std::uint64_t ekey = ( std::uint64_t( r.fromSymbol ) << 32 ) | to;
             EdgeAcc& e = acc[ ekey ];
-            e.confSum += base;
+            e.confSum += ( allClassic || classic( to ) ) ? base : base * 0.1f;
             e.nref    += 1;
             if( splitPick )
             {

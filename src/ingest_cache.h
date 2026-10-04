@@ -308,11 +308,11 @@ constexpr std::uint32_t kCacheVersion = 29;           // 29: FE-B (test/receiver
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 142;          // bump on any grammar/.scm/extraction change
-                                                      // 142 = lane FE-B (receiver evidence): member calls record memberPath/memberCtor and
+constexpr std::uint32_t kParserVer    = 145;          // bump on any grammar/.scm/extraction change
+                                                      // 145 = lane FE-B (receiver evidence): member calls record memberPath/memberCtor and
                                                       //   Java/Kotlin/C#/Swift member calls are memberCall; typed parameters/locals, field types
                                                       //   method aliases and aliased class imports are RecvType/MemberType/MethodAlias/NameAlias
-                                                      //   bindings. Above train 25's 141;
+                                                      //   bindings. Above train 25's 143/144 (rich);
                                                       //   the train renumbers.
                                                       // 141 = 2026-10-04 (train 25): cache-key hygiene above every branch build's number.
                                                       //   Two merged lanes changed extraction under their own numbers: FE-A 134/135

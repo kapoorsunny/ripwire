@@ -5566,6 +5566,9 @@ struct CalleeCallsSink
     // FE-B: Graph::outNameOnly (parallel to outTargets), so a callee row whose edge is name-only carries via="name" — the
     // same bit --callees prints. nullptr / empty ⇒ no row is marked.
     const std::vector<std::uint8_t>* nameOnly = nullptr;
+    // FE-B: set once the block's caller has been charged the via="name" legend comment it will write (packBodies/packHops
+    // write it ahead of the rows, after the walk) — so the budget the walk honours already holds those bytes
+    bool*                            viaLegendCharged = nullptr;
 };
 
 // The <calls> wrapper, written in front of the rows it describes (they have to be walked before `shown`
@@ -5802,6 +5805,11 @@ inline void emitCalleeCallsBlock( std::string& out, NodeId id, const std::vector
         }
         const Symbol& cs = ing.symbols[cid];
         const bool    via = viaOf( cid );
+        if( via && sink.viaLegendCharged != nullptr && !*sink.viaLegendCharged )
+        {
+            used += viaNameLegendComment().size();   // the legend this row pulls in, charged before the row
+            *sink.viaLegendCharged = true;
+        }
 
         // COMPACT: the names-only rendering — see collectCalleeNameRow above for what it does and does not do.
         if( sink.namesOnly )
@@ -6203,6 +6211,7 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
                                                                             //   --expand; nullptr (--around/--exemplar) ⇒ node-id order.
                                                                             //   See CalleeCallsSink::rank.
 {
+    bool viaLegendCharged = false;   // FE-B: the via="name" legend has been charged against the budget (CalleeCallsSink)
     // budgetBytes == 0 ⇒ UNLIMITED (A3-F2): the MCP `exemplar` verb has no byte budget, and 0 must never
     // mean "cap at zero bytes" (the cap fired before the first body and emitted a bare <bodies></bodies>).
     // Matches buildRecall's "0 = no cap" convention; the CLI always passes a real budget (default 64 KB).
@@ -6499,7 +6508,7 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
         // total=/shown=/capped= block — see emitCalleeCallsBlock above; `calleeRank` decides which
         // rows survive when it CUTS one, which is far from rare here (CalleeCallsSink::rank).
         emitCalleeCallsBlock( piece, id, outOff, outTargets, ing, contentOf, esc, used, budgetBytes,
-                              CalleeCallsSink{ redact, record ? &record->calls : nullptr, /*namesOnly=*/false, calleeRank, &outNameOnly } );
+                              CalleeCallsSink{ redact, record ? &record->calls : nullptr, /*namesOnly=*/false, calleeRank, &outNameOnly, &viaLegendCharged } );
         const std::string bodyNotes = renderNoteChildren( noteIndex, symbolNoteTarget( noteIndex, ing, s ), esc );   // L3/D5
         piece += bodyNotes;
         used += bodyNotes.size();                                                                   // W3-N2: same charge-never-trim rule
@@ -6613,6 +6622,7 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
                       const std::vector<float>* rank = nullptr, // query relevance, for ordering a CUT callee listing
                       std::string_view rootArg = {} )           // R-E: same single-root-only root= every verb takes
 {
+    bool viaLegendCharged = false;   // FE-B: the via="name" legend has been charged against the budget (CalleeCallsSink)
     if( budgetBytes == 0 )                                      // 0 ⇒ UNLIMITED, packBodies' own convention
     {
         budgetBytes = SIZE_MAX;
@@ -6697,7 +6707,7 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
         // the 1-hop callee signatures — the identical block a body carries, charged against the same
         // running `used` so the row identity bytes and the edge bytes share one budget.
         emitCalleeCallsBlock( row, id, outOff, outTargets, ing, contentOf, esc, used, budgetBytes,
-                              CalleeCallsSink{ redact, /*recorded=*/nullptr, /*namesOnly=*/true, rank, &outNameOnly } );
+                              CalleeCallsSink{ redact, /*recorded=*/nullptr, /*namesOnly=*/true, rank, &outNameOnly, &viaLegendCharged } );
         row += "</h>";
         children += row;
         ++shownCount;

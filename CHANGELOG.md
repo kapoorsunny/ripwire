@@ -40,7 +40,7 @@ in a Java class with an outside base drawn to an unrelated class's `flush`.
   its receiver.
 - Measured on the round-1 comparison-table calls for this tool: see the lane report; the gate is
   `test/receiverevidencecheck.sh` (every surface, CLI/MCP parity, census conservation, and near misses
-  for every evidence rule). Ingest records the receiver chain (`kParserVer` 142, `kCacheVersion` 29), so a cache
+  for every evidence rule). Ingest records the receiver chain (`kParserVer` 145, `kCacheVersion` 29), so a cache
   written by an earlier build is re-parsed.
 
 
