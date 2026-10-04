@@ -16,6 +16,30 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 ## [Unreleased]
 
 
+### Fixed — `--path` no longer says "no directed call path" when its search met a call the graph has no edge for
+
+`--path=A,B` and the MCP `path_between` verb answered `reachable="0" hint="no directed call path"` whenever the search over
+resolved call edges did not reach `B`, even when that search had passed a call the graph keeps no edge for: a call the
+resolver declined (several candidates, none local, nothing chose one), an unresolved call, a function handed off as a
+value (`.then( handleResponse )`), or a call through a parameter. Any of those can be the missing hop. Such an answer now
+says the search was incomplete: `searched=` (the symbols it reached), `gaps="declined:D,unresolved:U,value:V,through:T"`,
+`gap_syms=` with up to three `<gap t= n= p= gaps=>` rows (nearest `from=` first, `gap_syms_capped="1"` past that) and a
+`next=` that expands their bodies. A `<gap>` row is where the search could not see, never a hop. Ambiguous calls are not
+counted (every candidate has an edge the search follows), nor are calls to names defined nowhere in the tree. When the
+search met no such call the answer is unchanged, byte for byte. The legend dictionary gains three entries. Gate:
+`test/pathgapcheck.sh`.
+
+### Fixed — a Go named type's `t=` says what it is: `type`, `functype` or `alias`, not `struct`
+
+Every Go `type_spec` was labelled `t="struct"`, so `type TestName string` and `type F func(...)` read as structs, and
+`type A = B` was not indexed at all. The kind now follows the written form: a struct is `t="struct"`, an interface
+`t="iface"`, a func type `t="functype"`, an alias `t="alias"` (now indexed), and every other defined type (`string`,
+`[]T`, `map`, `chan`, a pointer, an array, another named type, a generic over any of these) `t="type"`. Grouped
+`type ( … )` blocks and generic types follow the same rule. The three new kinds behave as `struct` did everywhere else (a
+conversion `TestName( s )` keeps its caller edge), `--graph-query`'s `kind()` accepts them, and the map's `--legend=full`
+gains a clause for them only on a tree that has one. Only Go is split: other languages' typedefs, aliases and enums still
+read `t="struct"`. `kParserVer` 143 → 145, so every ingest cache is re-indexed once. Gate: `test/gokindcheck.sh`.
+
 ### Added — MCP `grep` rows carry the matched text and a `fetch_body` handle (CLI parity)
 
 The MCP `grep` hit row was `{file, line, in}`: no matched text, so an agent re-read every file it had just searched, and
@@ -521,7 +545,7 @@ above 141's full-use file tag 142, so no cache such a build wrote is read as thi
 (the function-literal fix's record changes, then the false-edge fix's member-call fields) and `kQSnapCacheScheme` 15 → 17
 (the `--quality-delta` error-masking and placeholder changes, then the dead kind agreeing with `--dead-code` on functions
 held as values). Every ingest cache written by an earlier build is refused and re-indexed once, and every
-cached quality snapshot is recomputed. The session legend dictionary is `dictv=04d7833c60d2d5bd entries=784`.
+cached quality snapshot is recomputed. The session legend dictionary is `dictv=cbadf4aa6acda0c2 entries=787`.
 
 ### Fixed — a call the language resolves outside the tree no longer binds to a same-named in-repo definition
 
