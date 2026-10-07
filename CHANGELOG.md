@@ -29,14 +29,16 @@ implementor rows it LISTED after narrowing to its own files (`implementors="1"` 
   bound to no definition, a use as a value, or a kind used by reading or naming it (a variable, class, struct,
   interface). `floor_next=` (rows) / `next=` (`--safe-delete`) is the call that lists the rest — the uses verb, or the
   literal grep where the language's reads are never indexed. A count with no such evidence stays a plain total: a
-  static function nobody calls still reads `callers="0" risk="none-found" dead_code_candidate="1"`.
+  static function nobody calls still reads `callers="0" risk="none-found" dead_code_candidate="1"`, and a recursive
+  function's call to itself counts as bound (the graph records no self-edge).
 - **`--safe-delete`.** `uses_floor="1"` when the definition's uses are reads or type mentions this run did not index,
   and `risk="unmodelled"` (new value) when nothing was found for such a kind — never `none-found`. Each caller row
   carries `sites_l=`, the ascending call-site lines spelled like the symbol (the edit-check verb's own pass), beside
   `p=`, which stays the line where the caller is defined.
 - **`--for` `<lego>`.** `implementors=` is now the lego verb's own count; a shorter list adds `implementors_shown=` and
   `implementors_next="--lego=FILE:NAME"`. The MCP `for` twin now narrows its `<lego>` block with the root prefix the
-  CLI passes; before, it compared root-relative rows against absolute paths and served no `<lego>` at all.
+  CLI passes; before, it compared root-relative rows against absolute paths and served no `<lego>` at all, so MCP
+  `for` answers on a tree with interfaces now carry that block (up to 12 rows), as the CLI's always did.
 - Every new attribute is defined present-only in the answer that carries it (compact and full dialects). Answers
   without one are byte-identical (34 argv across three corpora). Gate: `countfloorcheck`.
 
