@@ -16,8 +16,22 @@
 #   vacuous-assert — Bash, test-script paths only: an ABSENCE assertion (grep -q PAT whose match is the failure
 #                    branch) read off a command whose failure is never checked, so a crash reads as PASS.
 #                    REPORT-ONLY.
-# Like every kind, a row fires only on what THIS change introduced (a count that grew against the baseline),
-# never on pre-existing debt; each facet has near-miss negatives the new code could plausibly mis-handle.
+# Like every kind, a row fires only on what THIS change introduced, never on pre-existing debt: a site is new
+# when its normalized text is not among the baseline's sites of that facet (repo-wide), so an untouched,
+# MOVED or RENAMED mismatch gives no row and a swap (one fixed, one added in the same function) still does.
+# was/now count the anchor's offending sites. Each facet has near-miss negatives the new code could plausibly
+# mis-handle.
+#
+# format-arity is the ONE exception to "new-symbol rows never gate": new-symbol rows never gate, except
+# defect-shape format-arity (§1 freshbad, §5 legend/help/MCP/skill/docs arms). Every surface that applies the
+# exit predicate (XML gating=, --json and MCP "gating", --ack-only=gating) must agree on it (§1 ackgating, §5).
+#
+# Stated floors (no row is not a verdict on these): Python %-formatting and f-strings; a format held in a
+# named constant, a macro, a pack expansion or a runtime/vformat wrapper; an unqualified format()/print();
+# the std::print ostream overload; a dedup whose sort reads severity in the MILD-first direction, or whose
+# predicate/comparator is a named function (skipped, never guessed); a utf8 cut with no ellipsis; and the
+# utf8/dedup fixtures cannot see an exit-only bug on their own (their clone near-misses gate duplication) —
+# §4 vac and §5 both carry the exit judgment for the report-only facets.
 #
 # Every absence assertion in this gate is read off a delta run that SUCCEEDED (rc 0 or 2 and a
 # <quality-delta root) — the very shape §4 detects. Operates in temp dirs; the repo is never touched.
@@ -57,6 +71,20 @@ fx_run(){    # NAME [extra args] → QD_OUT, QD_RC, QD_OK (1 only when the run s
     else
         no "$( basename "$d" ): the delta run failed (rc=$QD_RC) — no assertion below reads an absence off it"
     fi
+}
+fx_run_ref(){  # NAME RANGE [extra args] → the same as fx_run, in ref-pair mode (--quality-delta=A..B)
+    local d="$WORK/$1" range="$2"; shift 2
+    QD_OUT="$( cd "$d" && "$BIN" . --quality-delta="$range" --no-cache "$@" 2>/dev/null )"
+    QD_RC=$?
+    QD_OK=0
+    if { [ "$QD_RC" = 0 ] || [ "$QD_RC" = 2 ]; } && printf '%s' "$QD_OUT" | grep -q '<quality-delta '; then
+        QD_OK=1
+    else
+        no "$( basename "$d" ) $range: the delta run failed (rc=$QD_RC) — no assertion below reads an absence off it"
+    fi
+}
+fx_copy(){   # SRC DST → a fresh copy of a fixture (its working-tree edit included), so an ack run cannot leak into later arms
+    rm -rf "$WORK/$2" && cp -R "$WORK/$1" "$WORK/$2" || no "$2: fixture copy failed"
 }
 ds_rows(){ printf '%s' "$QD_OUT" | tr '>' '\n' | grep '<r kind="defect-shape" '; }                       # every defect-shape row
 ds_row(){  ds_rows | grep "defect=\"$1\"" | grep " sym=\"$2\""; }                                           # FACET SYM
@@ -137,11 +165,16 @@ gating_split(){  # LABEL MIN_FORMAT_ARITY_GATING — who gates. The near-miss fu
 #   literal, a member function that happens to be called format, a commented-out call, a char argument '{'.
 fx_init fmt_cpp
 mkdir -p "$WORK/fmt_cpp/src"
-FMT_HDR='#include <cstdio>
+FMT_HDR='#include <chrono>
+#include <cinttypes>
+#include <cstdio>
 #include <format>
+#include <iostream>
 #include <iterator>
+#include <locale>
 #include <print>
 #include <string>
+#include <utility>
 #include <fmt/format.h>
 
 namespace rw
@@ -152,7 +185,9 @@ template<class S> void emitRaw( std::FILE* stream, const S& text );
 }
 
 #define FMT_PAIR "{} {}"
+#define PAIR a, b
 constexpr const char* kFmt = "{} and {}";
+std::string format( const char* f, int a );
 
 struct Log
 {
@@ -175,7 +210,7 @@ std::string dynwidthbad( const std::string& s, int w ) { return std::format( "{:
 void printstream( int a, int b ) { std::print( stderr, "{} {}\n", a, b ); }
 std::string fmtns( int a, int b ) { return fmt::format( "{} {}", a, b ); }
 std::string escaped( int a ) { return std::format( "{}", a ); }
-std::string spec( int a, double d, int b ) { return std::format( "{} {} {}", a, d, b ); }
+std::string spec( int a, double d, int b, std::chrono::sys_days t, const std::string& s ) { return std::format( "{} {} {} {} {}", a, d, b, t, s ); }
 std::string posok( int a, int b ) { return std::format( "{} {}", a, b ); }
 std::string dynwidth( const std::string& s, int w, double d, int p ) { return std::format( "{} {} {} {}", s, w, d, p ); }
 std::string nonliteral( int a, int b ) { return std::format( "{} {}", a, b ); }
@@ -189,10 +224,23 @@ std::string commented( int a ) { return std::format( "{}", a ); }
 std::string charlit( int a ) { return std::format( "{}", a ); }
 void printok( int a ) { std::println( "{}", a ); }
 void raw() { rw::emitRaw( stdout, "plain" ); }
+std::string localebad( int a, int b ) { return std::format( std::locale( "C" ), "{} {}", a, b ); }
+std::string unrefpos( int a, int b ) { return std::format( "{0} {1}", a, b ); }
+template<class... A> std::string packexp( A&&... a ) { return std::format( "{}", std::forward<A>( a )... ); }
+std::string runtimefmt( int a ) { return std::format( std::runtime_format( "{}" ), a ) + fmt::format( fmt::runtime( "{}" ), a ); }
+std::string pairmacro( int a, int b ) { return std::format( "{}", a + b ); }
+std::string pricat( std::uint64_t a ) { return std::format( "{}", a ); }
+std::string unqualified( int a ) { return format( "{}", a ); }
+void ostreamprint( int a ) { std::print( std::cout, "{}", a ); }
+std::string formattonok( int a, int b ) { char out[16]; std::format_to_n( out, 10, "{}", a + b ); return out; }
+std::string posnested( const std::string& s, int w ) { return std::format( "{}", s ); }
+std::string swapped( int a, int b ) { return std::format( "{} {}", a, b, b ) + std::format( "{}", a ); }
+std::string moved( int a ) { return std::format( "m={}", a, a ); }
 std::string legacy( int a ) { return std::format( "{} {}", a, a, a ); }
 int drive() { return 0; }
 EOF
 } >"$WORK/fmt_cpp/src/fmt.cpp"
+printf '#include <format>\n#define LOGF( ... ) std::format( "{}", __VA_ARGS__ )\n' >"$WORK/fmt_cpp/src/vamacro.h"
 fx_commit fmt_cpp
 { printf '%s' "$FMT_HDR"; cat <<'EOF'
 std::string extra( int a, int b ) { return std::format( "a={} b={}", a, b, a + b ); }
@@ -210,7 +258,7 @@ std::string dynwidthbad( const std::string& s, int w ) { return std::format( "{:
 void printstream( int a, int b ) { std::print( stderr, "{} {}\n", a ); }
 std::string fmtns( int a, int b ) { return fmt::format( "{} {}", a ); }
 std::string escaped( int a ) { return std::format( "{{literal}} {} }}{{", a ); }
-std::string spec( int a, double d, int b ) { return std::format( "{:>8} {:.2f} {:#x}", a, d, b ); }
+std::string spec( int a, double d, int b, std::chrono::sys_days t, const std::string& s ) { return std::format( "{:>8} {:.2f} {:#x} {:%Y-%m-%d} {:*^10}", a, d, b, t, s ); }
 std::string posok( int a, int b ) { return std::format( "{0} and {0} and {1}", a, b ); }
 std::string dynwidth( const std::string& s, int w, double d, int p ) { return std::format( "{:>{}} {:{}.{}f}", s, w, d, w, p ); }
 std::string nonliteral( int a, int b ) { return std::format( kFmt, a, b, a ) + std::vformat( kFmt, std::make_format_args( a, b, a ) ); }
@@ -228,12 +276,25 @@ std::string commented( int a )
 std::string charlit( int a ) { return std::format( "{}{}", '{', a ); }
 void printok( int a ) { std::println( "{} {}", a, a ); }
 void raw() { rw::emitRaw( stdout, "{} {} {}" ); }
+std::string localebad( int a, int b ) { return std::format( std::locale( "C" ), "{} {}", a, b, a ); }
+std::string unrefpos( int a, int b ) { return std::format( "{1}", a, b ); }
+template<class... A> std::string packexp( A&&... a ) { return std::format( "{} {}", std::forward<A>( a )... ); }
+std::string runtimefmt( int a ) { return std::format( std::runtime_format( "{} {}" ), a ) + fmt::format( fmt::runtime( "{} {}" ), a ); }
+std::string pairmacro( int a, int b ) { return std::format( "{} {}", PAIR ); }
+std::string pricat( std::uint64_t a ) { return std::format( "{} " PRIu64, a ); }
+std::string unqualified( int a ) { return format( "{} {}", a ); }
+void ostreamprint( int a ) { std::print( std::cout, "{} {}", a ); }
+std::string formattonok( int a, int b ) { char out[16]; std::format_to_n( out, 10, "{} {}", a, b ); return out; }
+std::string posnested( const std::string& s, int w ) { return std::format( "{0:>{1}}", s, w ); }
+std::string swapped( int a, int b ) { return std::format( "{} {}", a, b ) + std::format( "{}", a, b ); }
 std::string legacy( int a ) { return std::format( "{} {}", a, a, a ); }
 std::string freshbad( int a ) { return std::format( "{}", a, a ); }
 std::string freshok( int a ) { return std::format( "{} {}", a, a ); }
 int drive() { return 1; }
 EOF
 } >"$WORK/fmt_cpp/src/fmt.cpp"
+printf '#include <format>\n#define LOGF( ... ) std::format( "{} {}", __VA_ARGS__ )\n' >"$WORK/fmt_cpp/src/vamacro.h"
+printf '#include <format>\n#include <string>\nstd::string movedRenamed( int a ) { return std::format( "m={}", a, a ); }\n' >"$WORK/fmt_cpp/src/moved.cpp"
 fx_run fmt_cpp
 L="format-arity (c++)"
 ds_has  "$L" format-arity extra       gating
@@ -245,9 +306,13 @@ ds_has  "$L" format-arity positional  gating
 ds_has  "$L" format-arity dynwidthbad gating
 ds_has  "$L" format-arity printstream gating
 ds_has  "$L" format-arity fmtns       gating
+ds_has  "$L" format-arity localebad   gating
+ds_has  "$L" format-arity unrefpos    gating
+ds_has  "$L" format-arity swapped     gating
 ds_has  "$L" format-arity freshbad    gating-new
 ds_wasnow "$L" format-arity extra 0 1
 ds_wasnow "$L" format-arity concat 0 1
+ds_wasnow "$L" format-arity swapped 1 1
 ds_none "$L" escaped     "{{ and }} are escapes, not fields"
 ds_none "$L" spec        "a format spec is part of its field"
 ds_none "$L" posok       "{0} twice and {1} need two arguments"
@@ -265,7 +330,19 @@ ds_none "$L" printok     "std::println with matching arguments"
 ds_none "$L" raw         "emitRaw prints bytes, it does not format"
 ds_none "$L" legacy      "a mismatch the change did not introduce (untouched function)"
 ds_none "$L" freshok     "a new function with a matching call"
-gating_split "$L" 10
+ds_none "$L" packexp     "a pack expansion makes the argument count unknowable (skipped)"
+ds_none "$L" runtimefmt  "std::runtime_format / fmt::runtime wrap a non-literal format (skipped)"
+ds_none "$L" pairmacro   "an object-like macro argument may expand to a comma list (skipped)"
+ds_none "$L" pricat      "an adjacent-literal concat with a macro piece is not a whole literal (skipped)"
+ds_none "$L" unqualified "an unqualified in-repo format() is not the format family"
+ds_none "$L" ostreamprint "the std::print ostream overload is skipped, never guessed (stated floor)"
+ds_none "$L" formattonok "std::format_to_n puts the format at index 2: two fields, two arguments"
+ds_none "$L" posnested   "a positional nested width {0:>{1}} references both arguments"
+ds_none_p "$L" src/vamacro.h "a format inside a macro body (__VA_ARGS__) is skipped"
+ds_none "$L" moved        "a mismatch moved out of this file is not new"
+ds_none "$L" movedRenamed "a mismatch moved to a new file and renamed is not new (its call text was already in the baseline)"
+ds_none_p "$L" src/moved.cpp "the moved mismatch's new file carries no row"
+gating_split "$L" 13
 OFMT="$QD_OUT"
 fx_run fmt_cpp
 if [ "$QD_OK" = 1 ] && [ "$OFMT" = "$QD_OUT" ]; then ok "$L: delta byte-identical run-to-run"; else no "$L: non-deterministic delta"; fi
@@ -274,11 +351,78 @@ if command -v xmllint >/dev/null 2>&1; then
 else
     echo "  SKIP  $L: xml well-formedness (xmllint not installed)"
 fi
+#   The exit predicate's own ack token: --ack-only=gating selects whatever would exit 2, and a new-symbol
+#   format-arity row (freshbad) DOES exit 2, so the ack must take it too — the ack token and the XML gating=
+#   must read one predicate. On a fresh copy, so the later arms see the unacked fixture.
+L="format-arity ack gating"
+if printf '%s' "$OFMT" | tr '>' '\n' | grep '<r kind="defect-shape" ' | grep 'defect="format-arity"' | grep -q ' sym="freshbad"'; then
+    fx_copy fmt_cpp fmt_ackg
+    ( cd "$WORK/fmt_ackg" && "$BIN" . --quality-delta --no-cache --ack-only=gating --quality-ack="ack every gating row in this fixture" >/dev/null 2>&1 )
+    ARC=$?
+    if [ "$ARC" = 0 ]; then ok "$L: --ack-only=gating wrote its acks (exit 0)"; else no "$L: --ack-only=gating exited $ARC"; fi
+    fx_run fmt_ackg
+    if [ "$QD_OK" = 1 ]; then
+        left="$( ds_rows | grep -c 'defect="format-arity"' )"
+        if [ "$left" = 0 ]; then ok "$L: no format-arity row survives --ack-only=gating (freshbad included)"
+        else no "$L: $left format-arity rows survived --ack-only=gating: $( ds_rows | grep 'defect="format-arity"' | head -3 )"; fi
+        gating_split "$L" 0
+    fi
+else
+    no "$L: premise: the unacked fixture has no format-arity row on freshbad, so there is nothing for the ack to select"
+fi
+
+# ── 1c) FORMAT-ARITY across a CLEAN MERGE (ref-pair mode) — the train-25 incident ───────────────────────
+#   Each side adds the same field literal and one argument; git merges the two cleanly into 5 fields and 6
+#   arguments, which compiles. Each side alone matches. --quality-delta=BASE..HEAD takes the ref-pair snapshot
+#   path, which no other arm here exercises.
+fx_init merge
+mkdir -p "$WORK/merge/src"
+MERGE_BASE_SRC='#include <cstdio>
+namespace rw { template<class... A> void emitTo( std::FILE* stream, const char* f, A&&... a ); }
+void legend( int a, int b, int c, int d, int e, int f )
+{
+    rw::emitTo( stdout, "<l a=\"{}\" "
+                        "x=\"\" "
+                        "e=\"{}\" f=\"{}\" d=\"{}\"/>\n",
+                a,
+                e,
+                f,
+                d );
+}
+int drive() { return 0; }
+'
+printf '%s' "$MERGE_BASE_SRC" >"$WORK/merge/src/legend.cpp"
+fx_commit merge
+MB="$( cd "$WORK/merge" && git rev-parse HEAD )"
+( cd "$WORK/merge" && git checkout -q -b side_x \
+    && sed -i.bak -e 's|^                        "x=\\"\\" "$|&\
+                        "n=\\"{}\\" "|' -e 's|^                a,$|&\
+                b,|' src/legend.cpp && rm -f src/legend.cpp.bak && git commit -qam x \
+    && git checkout -q "$MB" && git checkout -q -b side_y \
+    && sed -i.bak -e 's|^                        "x=\\"\\" "$|&\
+                        "n=\\"{}\\" "|' -e 's|^                f,$|&\
+                c,|' src/legend.cpp && rm -f src/legend.cpp.bak && git commit -qam y \
+    && git checkout -q side_x && git merge -q --no-edit side_y >/dev/null 2>&1 ) \
+    || no "merge: building the two sides and their clean merge failed"
+MF="$( grep -c '{}' "$WORK/merge/src/legend.cpp" )"
+MA="$( grep -cE '^                [a-f],$|^                d \);$' "$WORK/merge/src/legend.cpp" )"
+if [ "$MF" = 3 ] && [ "$MA" = 6 ]; then ok "merge: the clean merge holds the duplicated literal once and both arguments (premise)"
+else no "merge: premise: expected 3 field lines and 6 argument lines after the merge, got $MF / $MA"; cat "$WORK/merge/src/legend.cpp"; fi
+L="format-arity (merge, ref-pair)"
+fx_run_ref merge "$MB..HEAD"
+ds_has "$L" format-arity legend gating
+gating_split "$L" 1
+fx_run_ref merge "$MB..side_x"
+ds_none "$L side x" legend "one side alone: five fields, five arguments"
+fx_run_ref merge "$MB..side_y"
+ds_none "$L side y" legend "the other side alone: five fields, five arguments"
 
 # ── 1b) FORMAT-ARITY, Python "literal".format(...) ──────────────────────────────────────────────────────
 #   Too few raises IndexError/KeyError at run time; too many is ignored silently. Named fields count against
 #   keyword arguments, auto/positional fields against positional ones; *args / **kwargs make the count
-#   unknowable (skipped). f-strings, %-formatting and a non-literal receiver are out of the shape.
+#   unknowable (skipped). f-strings, %-formatting and a non-literal receiver are out of the shape. An explicit
+#   keyword the format never names is ignored silently (a row); a raw r"" literal and an unparenthesised
+#   implicit concat ("a" "b".format) are one literal like any other.
 fx_init fmt_py
 printf 'VERSION = "1"\nBANNER = "v{}".format(VERSION)\n' >"$WORK/fmt_py/banner.py"
 cat >"$WORK/fmt_py/fmt.py" <<'EOF'
@@ -342,6 +486,26 @@ def percent(a):
 
 def triple(a, b):
     return """{} {}""".format(a, b)
+
+
+def kwunused(x, y):
+    return "{x}".format(x=x)
+
+
+def rawbad(a):
+    return r"{}".format(a)
+
+
+def concatbare(a, b):
+    return "a={} " "b={}".format(a, b)
+
+
+def nestedauto(s, w):
+    return "{}".format(s)
+
+
+def fmtmap(d):
+    return "{a}".format_map(d)
 
 
 def legacy(a):
@@ -413,6 +577,26 @@ def triple(a, b):
 {}""".format(a, b)
 
 
+def kwunused(x, y):
+    return "{x}".format(x=x, y=y)
+
+
+def rawbad(a):
+    return r"{} {}".format(a)
+
+
+def concatbare(a, b):
+    return "a={} " "b={}".format(a)
+
+
+def nestedauto(s, w):
+    return "{:>{}}".format(s, w)
+
+
+def fmtmap(d):
+    return "{a} {b}".format_map(d)
+
+
 def legacy(a):
     return "{} {}".format(a, a, a)
 
@@ -428,6 +612,9 @@ ds_has   "$L" format-arity namedmissing gating
 ds_has   "$L" format-arity concat       gating
 ds_has   "$L" format-arity freshbad     gating-new
 ds_has_p "$L" format-arity banner.py    gating
+ds_has   "$L" format-arity kwunused     gating
+ds_has   "$L" format-arity rawbad       gating
+ds_has   "$L" format-arity concatbare   gating
 ds_none  "$L" escaped    "{{ }} are escapes"
 ds_none  "$L" star       "*args makes the count unknowable"
 ds_none  "$L" kwstar     "**kwargs makes the names unknowable"
@@ -440,18 +627,24 @@ ds_none  "$L" nonliteral "a non-literal receiver is skipped, never guessed"
 ds_none  "$L" percent    "%-formatting is not this shape"
 ds_none  "$L" triple     "a triple-quoted literal with two fields and two arguments"
 ds_none  "$L" legacy     "a mismatch the change did not introduce"
-gating_split "$L" 6
+ds_none  "$L" nestedauto "an auto nested width {:>{}} consumes a positional argument"
+ds_none  "$L" fmtmap     ".format_map takes a mapping, not an argument list (skipped)"
+gating_split "$L" 9
 
 # ── 2) UTF8-CUT, C++ (report-only) ──────────────────────────────────────────────────────────────────────
 #   The corpus shapes: a cut (resize / substr(0,N) / erase(N)) plus an appended ellipsis on the SAME string
 #   with no UTF-8 back-off in the function, and an ellipsis appended once a byte-pushing loop reaches the
 #   cap (the cut lands mid-sequence and the ellipsis can fire with nothing dropped). Near-misses: a
 #   continuation-byte back-off (0xC0/0x80), a utf8-named helper, a cut with no ellipsis (a buffer, not text —
-#   a stated floor), an ellipsis on a different variable, an ellipsis that replaces the value, a u32string.
+#   a stated floor), an ellipsis on a different variable, an ellipsis that replaces the value, a u32string,
+#   a cut at a parsed delimiter (the cut length must be the bound of a size comparison on the same string, or
+#   a cap-named constant/parameter), and a loop that appends whole words. A back-off guard anywhere in the
+#   function exempts it: a precision choice, stated in the legend.
 fx_init utf8
 mkdir -p "$WORK/utf8/src"
 U8_HDR='#include <string>
 #include <string_view>
+#include <vector>
 
 constexpr std::size_t kCap = 80;
 std::string truncateUtf8WithEllipsis( std::string_view s, std::size_t cap );
@@ -474,7 +667,8 @@ std::string helper( const std::string& s ) { return s; }
 std::string noellipsis( std::string s, std::size_t n ) { return s; }
 std::string othervar( std::string buf, std::string label, std::size_t n ) { return buf + label; }
 std::string replaced( const std::string& s, std::size_t n ) { return s; }
-std::string loading( std::string out ) { return out; }
+std::string packname( const std::string& text, bool pack ) { return text; }
+std::string wordloop( const std::vector<std::string>& words ) { std::string out; return out; }
 std::u32string wide( std::u32string s, std::size_t n ) { return s; }
 std::string legacy( std::string s ) { if( s.size() > 40 ) { s.resize( 40 ); s += "..."; } return s; }
 int drive() { return 0; }
@@ -545,7 +739,29 @@ std::string othervar( std::string buf, std::string label, std::size_t n )
     return buf + label;
 }
 std::string replaced( const std::string& s, std::size_t n ) { return s.size() > n ? std::string( "..." ) : s; }
-std::string loading( std::string out ) { out += "loading..."; return out; }
+std::string packname( const std::string& text, bool pack )
+{
+    std::string n = text.substr( 0, text.find( '=' ) );
+    if( pack )
+    {
+        n += "...";
+    }
+    return n;
+}
+std::string wordloop( const std::vector<std::string>& words )
+{
+    std::string out;
+    for( const std::string& w : words )
+    {
+        out += w;
+        if( out.size() >= kCap )
+        {
+            out += "\xE2\x80\xA6";
+            break;
+        }
+    }
+    return out;
+}
 std::u32string wide( std::u32string s, std::size_t n )
 {
     if( s.size() > n )
@@ -573,7 +789,8 @@ ds_none "$L" helper     "a utf8 truncation helper does the cut"
 ds_none "$L" noellipsis "a cut with no ellipsis is not judged display text (stated floor)"
 ds_none "$L" othervar   "the ellipsis goes on a different string than the one cut"
 ds_none "$L" replaced   "the ellipsis replaces the value, nothing is cut"
-ds_none "$L" loading    "a literal that merely ends in ... with no cap"
+ds_none "$L" packname   "the cut is at a parsed ASCII delimiter, not a size cap, and ... is pack syntax (src/ingest_names.h cppTemplateParameterName)"
+ds_none "$L" wordloop   "whole strings are appended, so no byte sequence is split (the byte-push rule needs a single-char push)"
 ds_none "$L" wide       "a u32string holds code points, a cut cannot split one"
 ds_none "$L" legacy     "a cut the change did not introduce"
 gating_split "$L" 0
@@ -582,7 +799,9 @@ gating_split "$L" 0
 #   The corpus shape (a two-pass merge, sorted on (line, rule), uniqued keeping the first) plus its ranges and
 #   unsorted siblings. Near-misses: the sort orders on severity (worst first), the predicate compares severity,
 #   a type with no severity-like field, a field whose name only CONTAINS a severity word (indentLevel — a
-#   bounded token match), a predicate-less unique, a unique over ints.
+#   bounded token match), a predicate-less unique, a unique over ints, a heading level (bare level is not a
+#   severity token: severity-like = sev / severity / priority / prio), and a NAMED predicate (skipped).
+#   Stated floor: a sort that reads severity in the mild-first direction is not caught.
 fx_init dedup
 mkdir -p "$WORK/dedup/src"
 DD_HDR='#include <algorithm>
@@ -608,6 +827,12 @@ struct Node
     std::string rule;
     int indentLevel = 0;
 };
+struct Heading
+{
+    int line = 0;
+    int level = 0;
+};
+bool sameLineSev( const Finding& a, const Finding& b );
 '
 { printf '%s' "$DD_HDR"; cat <<'EOF'
 void mergeFirst( std::vector<Finding>& v ) { (void)v; }
@@ -619,6 +844,8 @@ void noSev( std::vector<Row>& v ) { (void)v; }
 void indent( std::vector<Node>& v ) { (void)v; }
 void defaultEq( std::vector<int>& v ) { (void)v; }
 void ints( std::vector<int>& v ) { (void)v; }
+void headings( std::vector<Heading>& v ) { (void)v; }
+void namedPred( std::vector<Finding>& v ) { (void)v; }
 void legacy( std::vector<Finding>& v )
 {
     v.erase( std::unique( v.begin(), v.end(), []( const Finding& a, const Finding& b ) { return a.line == b.line; } ), v.end() );
@@ -674,6 +901,15 @@ void ints( std::vector<int>& v )
 {
     v.erase( std::unique( v.begin(), v.end(), []( int a, int b ) { return a / 10 == b / 10; } ), v.end() );
 }
+void headings( std::vector<Heading>& v )
+{
+    v.erase( std::unique( v.begin(), v.end(), []( const Heading& a, const Heading& b ) { return a.line == b.line; } ), v.end() );
+}
+bool sameLineSev( const Finding& a, const Finding& b ) { return a.line == b.line && a.sev == b.sev; }
+void namedPred( std::vector<Finding>& v )
+{
+    v.erase( std::unique( v.begin(), v.end(), sameLineSev ), v.end() );
+}
 void legacy( std::vector<Finding>& v )
 {
     v.erase( std::unique( v.begin(), v.end(), []( const Finding& a, const Finding& b ) { return a.line == b.line; } ), v.end() );
@@ -697,6 +933,8 @@ ds_none "$L" noSev      "the element type has no severity-like field"
 ds_none "$L" indent     "indentLevel only contains a severity word (bounded token match)"
 ds_none "$L" defaultEq  "a predicate-less unique compares whole values"
 ds_none "$L" ints       "a unique over ints carries no severity"
+ds_none "$L" headings   "a heading/nesting level is not a severity (bare level, risk and grade are not severity tokens)"
+ds_none "$L" namedPred  "a named predicate function is skipped, never guessed"
 ds_none "$L" legacy     "a keep-first the change did not introduce"
 gating_split "$L" 0
 
@@ -706,10 +944,13 @@ gating_split "$L" 0
 #   appends the arm. Positives: an absence assertion read off an unchecked $( ) capture, off a direct pipe
 #   (with or without pipefail — under pipefail a crash makes the pipeline false, which takes the same PASS
 #   branch), the if/else spelling, backslash continuations, the !-negated pass spelling, other reporter
-#   names, inside a function, and a brand-new script. Near-misses: the capture's rc checked, `|| no` on the
-#   capture, a presence check, a positive assertion on the same output first, the match-is-pass polarity,
-#   a literal producer, a commented-out shape, a pre-existing vacuous line, a sound if, and the same shape in
-#   a script outside a test path.
+#   names, inside a function, and a brand-new script; under set -e a `local x="$( )"` capture (local masks the
+#   rc) and a direct pipe (left of &&, where errexit is suspended) stay positive. Near-misses: the capture's rc
+#   checked, `|| no` on the capture, a presence check, a positive assertion on the same output before OR after
+#   the absence, an enclosing if/case that requires content of the same capture, a plain capture under set -e
+#   (errexit aborts on its failure), the match-is-pass polarity, a literal producer, a commented-out shape, a
+#   pre-existing vacuous line, a sound if, a new function with a handled capture, and the same shape in a
+#   script outside a test path.
 fx_init vac
 mkdir -p "$WORK/vac/test" "$WORK/vac/scripts"
 VHDR="$( cat <<'EOF'
@@ -724,9 +965,18 @@ EOF
 )"
 VHDR="$VHDR
 "
-for f in t_var t_pipe t_pipefail t_if t_cont t_neg t_names t_fn n_rc n_orno n_presence n_positive n_polarity n_literal n_comment n_legacy n_ifok; do
+for f in t_var t_pipe t_pipefail t_if t_cont t_neg t_names t_fn t_setelocal t_setepipe n_rc n_orno n_presence n_positive n_polarity n_literal n_comment n_legacy n_ifok n_posafter n_nestif n_case n_sete n_seteuo; do
     printf '%s' "$VHDR" >"$WORK/vac/test/$f.sh"
 done
+for f in t_setepipe n_sete; do printf 'set -e\n' >>"$WORK/vac/test/$f.sh"; done
+printf 'set -euo pipefail\n' >>"$WORK/vac/test/n_seteuo.sh"
+cat >>"$WORK/vac/test/t_setelocal.sh" <<'EOF'
+set -e
+chk_local(){
+    ok "placeholder"
+}
+chk_local
+EOF
 printf '%s' "$VHDR" >"$WORK/vac/scripts/build.sh"
 cat >>"$WORK/vac/test/n_legacy.sh" <<'EOF'
 OLD="$( "$BIN" --old 2>/dev/null )"
@@ -838,11 +1088,62 @@ cat >>"$WORK/vac/scripts/build.sh" <<'EOF'
 OUT="$( "$BIN" --list 2>/dev/null )"
 printf '%s' "$OUT" | grep -q 'bad' && no "bad present" || ok "bad absent"
 EOF
+cat >>"$WORK/vac/test/t_fn.sh" <<'EOF'
+absent_checked(){
+    local out
+    out="$( "$BIN" --list 2>/dev/null )" || { no "the list run failed"; return; }
+    printf '%s' "$out" | grep -q "$1" && no "$1 present" || ok "$1 absent"
+}
+absent_checked xxx
+EOF
+{ printf '%s' "$VHDR"; cat <<'EOF'
+set -e
+chk_local(){
+    local x="$( "$BIN" --list 2>/dev/null )"
+    printf '%s' "$x" | grep -q 'bad' && no "bad present" || ok "bad absent"
+}
+chk_local
+EOF
+} >"$WORK/vac/test/t_setelocal.sh"
+cat >>"$WORK/vac/test/t_setepipe.sh" <<'EOF'
+"$BIN" --list 2>/dev/null | grep -q 'bad' && no "bad present" || ok "bad absent"
+EOF
+cat >>"$WORK/vac/test/n_posafter.sh" <<'EOF'
+OUT="$( "$BIN" --list 2>/dev/null )"
+printf '%s' "$OUT" | grep -q 'bad' && no "bad present" || ok "bad absent"
+printf '%s' "$OUT" | grep -q '<list ' && ok "the list root is there" || no "no list root"
+EOF
+cat >>"$WORK/vac/test/n_nestif.sh" <<'EOF'
+OUT="$( "$BIN" --list 2>/dev/null )"
+if printf '%s' "$OUT" | grep -q '<list '; then
+    if printf '%s' "$OUT" | grep -q 'bad'; then
+        no "bad present"
+    else
+        ok "bad absent"
+    fi
+else
+    no "no list root"
+fi
+EOF
+cat >>"$WORK/vac/test/n_case.sh" <<'EOF'
+OUT="$( "$BIN" --list 2>/dev/null )"
+case "$OUT" in
+    '<list '*) printf '%s' "$OUT" | grep -q 'bad' && no "bad present" || ok "bad absent" ;;
+    *) no "no list root" ;;
+esac
+EOF
+for f in n_sete n_seteuo; do
+    cat >>"$WORK/vac/test/$f.sh" <<'EOF'
+OUT="$( "$BIN" --list 2>/dev/null )"
+printf '%s' "$OUT" | grep -q 'bad' && no "bad present" || ok "bad absent"
+EOF
+done
 fx_run vac
 L="vacuous-assert (bash)"
-for f in t_var t_pipe t_pipefail t_if t_cont t_neg t_names; do
+for f in t_var t_pipe t_pipefail t_if t_cont t_neg t_names t_setepipe; do
     ds_has_p "$L" vacuous-assert "test/$f.sh" minor
 done
+ds_has   "$L" vacuous-assert chk_local minor
 ds_has   "$L" vacuous-assert absent_unchecked new-symbol
 ds_has_p "$L" vacuous-assert test/t_new.sh new-symbol
 ds_none  "$L" absent "the capture's failure is handled (|| { no; return; }) — and the function is untouched"
@@ -856,54 +1157,132 @@ ds_none_p "$L" test/n_comment.sh  "a commented-out shape is not code"
 ds_none_p "$L" test/n_legacy.sh   "a vacuous line the change did not introduce"
 ds_none_p "$L" test/n_ifok.sh     "the if checks the rc in its condition"
 ds_none_p "$L" scripts/build.sh   "not a test-script path: the kind is scoped to gate scripts"
+ds_none  "$L" absent_checked      "a NEW function whose capture failure is handled (|| { no; return; })"
+ds_none_p "$L" test/n_posafter.sh "a positive assertion on the same capture AFTER the absence fails on a crash"
+ds_none_p "$L" test/n_nestif.sh   "the absence is nested in an if that requires content of the same capture"
+ds_none_p "$L" test/n_case.sh     "the absence is nested in a case arm that requires content of the same capture"
+ds_none_p "$L" test/n_sete.sh     "set -e: a failed plain capture aborts the script"
+ds_none_p "$L" test/n_seteuo.sh   "set -euo pipefail: a failed plain capture aborts the script"
 gating_split "$L" 0
 
-# ── 5) SURFACES: legend, JSON twin, MCP, and the ack identity of a facet ─────────────────────────────────
+# ── 5) SURFACES: legend, help, MCP, skill and docs; JSON twin; MCP; the ack identity of a facet ───────────
+#   D2: format-arity is the one exception to "new-symbol rows never gate", and every surface that states the
+#   rule states the exception in ONE fixed phrase (PHRASE below), so no surface still reads unqualified.
 L="surfaces"
+PHRASE='new-symbol rows never gate, except defect-shape format-arity'
+phrase_ok(){  # LABEL TEXT — the text states the exception, and every "new-symbol rows never gate" in it carries it
+    local all qual
+    all="$( printf '%s' "$2" | grep -o 'new-symbol rows never gate' | wc -l | tr -d ' ' )"
+    qual="$( printf '%s' "$2" | grep -o "$PHRASE" | wc -l | tr -d ' ' )"
+    if [ "$qual" -ge 1 ] && [ "$all" = "$qual" ]; then ok "$1: states '$PHRASE' ($qual), no unqualified 'new-symbol rows never gate'"
+    else no "$1: '$PHRASE' x$qual, 'new-symbol rows never gate' x$all — the exception is missing or a sentence still reads unqualified"; fi
+}
 LEG="$( cd "$WORK/fmt_cpp" && "$BIN" . --quality-delta --no-cache --legend=full 2>/dev/null )"
 if printf '%s' "$LEG" | grep -q '<quality-delta '; then
     miss=""
-    for w in defect-shape format-arity utf8-cut dedup-first vacuous-assert; do
+    for w in defect-shape format-arity utf8-cut dedup-first vacuous-assert 'defect='; do
         printf '%s' "$LEG" | grep -q -- "$w" || miss="$miss $w"
     done
-    if [ -z "$miss" ]; then ok "$L: the full legend names defect-shape and its four facets"; else no "$L: the full legend does not name:$miss"; fi
+    if [ -z "$miss" ]; then ok "$L: the full legend names defect-shape, its four facets and the defect= facet attribute"; else no "$L: the full legend does not name:$miss"; fi
     if printf '%s' "$LEG" | grep -q 'ELEVEN KINDS'; then no "$L: the legend still says ELEVEN KINDS (stale count)"; else ok "$L: the legend's kind count is not the stale ELEVEN"; fi
+    phrase_ok "$L full legend" "$LEG"
+    EX="$( printf '%s' "$LEG" | grep -o 'EXIT 2 fires only on[^.]*' )"
+    if [ -n "$EX" ] && ! printf '%s\n' "$EX" | grep -vq 'format-arity'; then ok "$L: every 'EXIT 2 fires only on' sentence names the format-arity exception"
+    else no "$L: an 'EXIT 2 fires only on' sentence omits format-arity (or none found): ${EX:-<none>}"; fi
+    if printf '%s' "$LEG" | grep -q 'report-only by facet, not by size'; then ok "$L: the legend says the report-only facets are sev=minor by facet, not by size (D3)"
+    else no "$L: the legend does not say 'report-only by facet, not by size' — sev=minor is otherwise defined as a small numeric delta"; fi
+    if printf '%s' "$LEG" | grep -q 'f-strings are not checked'; then ok "$L: the legend names the Python formats it does not check"
+    else no "$L: the legend does not say '%-formatting and f-strings are not checked' (no row is not a verdict on them)"; fi
 else
     no "$L: the --legend=full delta run produced no <quality-delta root"
 fi
+CLEG="$( cd "$WORK/fmt_cpp" && "$BIN" . --quality-delta --no-cache --legend=compact 2>/dev/null )"
+if printf '%s' "$CLEG" | grep -q '<quality-delta '; then
+    phrase_ok "$L compact legend" "$CLEG"
+    if printf '%s' "$CLEG" | grep -q -e 'NEW code; never gate' -e 'NEW code, never gating'; then no "$L: the compact legend still says new-symbol rows never gate, unqualified"
+    else ok "$L: the compact legend has no unqualified new-symbol never-gate entry"; fi
+else
+    no "$L: the --legend=compact delta run produced no <quality-delta root"
+fi
+HELP="$( "$BIN" --help 2>&1 )"; HRC=$?
+if [ "$HRC" = 0 ] && printf '%s' "$HELP" | grep -q -- '--quality-delta'; then
+    if printf '%s' "$HELP" | grep -q 'across 11 kinds'; then no "$L: --help still says 'across 11 kinds'"; else ok "$L: --help no longer says 'across 11 kinds'"; fi
+    if printf '%s' "$HELP" | grep -q 'defect-shape'; then ok "$L: --help names defect-shape"; else no "$L: --help does not name defect-shape"; fi
+    phrase_ok "$L --help" "$HELP"
+else
+    no "$L: --help failed (rc=$HRC) or does not list --quality-delta"
+fi
 if command -v python3 >/dev/null 2>&1; then
-    JS="$( cd "$WORK/fmt_cpp" && "$BIN" . --quality-delta --no-cache --json 2>/dev/null )"
-    JV="$( printf '%s' "$JS" | python3 -c '
+    TL="$( printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+        | "$BIN" --mcp 2>/dev/null | tail -1 )"
+    QDD="$( printf '%s' "$TL" | python3 -c '
 import json, sys
-try: d = json.load(sys.stdin)
+try: r = json.load(sys.stdin)
 except Exception as e: print("BROKEN %s" % e); raise SystemExit
-rows = [r for r in d.get("r", []) if r.get("kind") == "defect-shape" and r.get("defect") == "format-arity"]
-print("ROWS %d" % len(rows))' )"
-    case "$JV" in ROWS\ *) n="${JV#ROWS }"; [ "$n" -ge 10 ] && ok "$L: --json carries the $n format-arity rows (kind + defect keys)" \
-                                                      || no "$L: --json carries $n format-arity rows, want >= 10" ;;
-                  *) no "$L: --json probe: $JV" ;; esac
+d = [t.get("description", "") for t in r.get("result", {}).get("tools", []) if t.get("name") == "quality_delta"]
+print(d[0] if d else "MISSING")' )"
+    case "$QDD" in
+        BROKEN*|MISSING) no "$L: MCP tools/list has no quality_delta description: $QDD" ;;
+        *)  if printf '%s' "$QDD" | grep -q '11 measured failure modes'; then no "$L: the MCP quality_delta description still says '11 measured failure modes'"
+            else ok "$L: the MCP quality_delta description has no stale kind count"; fi
+            if printf '%s' "$QDD" | grep -q 'defect-shape'; then ok "$L: the MCP quality_delta description names defect-shape"; else no "$L: the MCP quality_delta description does not name defect-shape"; fi
+            phrase_ok "$L MCP description" "$QDD" ;;
+    esac
+else
+    echo "  SKIP  $L: MCP tools/list description (python3 not installed)"
+fi
+SKILL="$ROOT/skills/ripwire-quality-bar/SKILL.md"
+for doc in "$SKILL" "$ROOT/docs/COMMANDS.md" "$ROOT/README.md"; do
+    rel="${doc#"$ROOT"/}"
+    if [ ! -f "$doc" ]; then no "$L: $rel is missing"; continue; fi
+    if grep -qiE '(^|[^0-9])11 kinds|eleven kinds|eleven quality kinds|ELEVEN KINDS' "$doc"; then no "$L: $rel still says 11/eleven kinds: $( grep -niE '(^|[^0-9])11 kinds|eleven kinds|eleven quality kinds' "$doc" | head -2 )"
+    else ok "$L: $rel has no stale 11/eleven-kinds count"; fi
+    phrase_ok "$L $rel" "$( cat "$doc" )"
+done
+if [ -f "$SKILL" ]; then
+    FM="$( awk 'NR==1 && /^---$/ {f=1; next} f && /^---$/ {exit} f' "$SKILL" )"
+    if printf '%s' "$FM" | tr '\n' ' ' | tr -s ' ' | grep -q "$PHRASE"; then ok "$L: the quality-bar skill's trigger text states the format-arity exception"
+    else no "$L: the quality-bar skill's trigger text (frontmatter description) does not state '$PHRASE'"; fi
+fi
+if command -v python3 >/dev/null 2>&1; then
+    #   D2 at every exit-predicate site: the new-symbol freshbad row carries "gating": true, and the top-level
+    #   "gating" equals the rows that carry it (the same predicate as the XML gating= and the exit code).
+    JPROBE='
+import json, sys
+try:
+    raw = sys.stdin.read()
+    d = json.loads(raw)
+    if "result" in d: d = json.loads(d["result"]["content"][0]["text"])
+except Exception as e: print("BROKEN %s" % e); raise SystemExit
+rs = d.get("r", [])
+rows = [r for r in rs if r.get("kind") == "defect-shape" and r.get("defect") == "format-arity"]
+fresh = [r for r in rows if r.get("sym") == "freshbad"]
+ng = sum(1 for r in rs if r.get("gating") is True)
+print("ROWS %d FRESH %d FRESHGATE %d TOP %s NG %d" % (len(rows), len(fresh), sum(1 for r in fresh if r.get("gating") is True), d.get("gating"), ng))'
+    JS="$( cd "$WORK/fmt_cpp" && "$BIN" . --quality-delta --no-cache --json 2>/dev/null )"
     MC="$( printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
         '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"quality_delta","arguments":{"path":"'"$WORK/fmt_cpp"'"}}}' \
         | "$BIN" --mcp 2>/dev/null | tail -1 )"
-    MV="$( printf '%s' "$MC" | python3 -c '
-import json, sys
-try:
-    r = json.load(sys.stdin)
-    t = r["result"]["content"][0]["text"]
-    d = json.loads(t)
-except Exception as e: print("BROKEN %s" % e); raise SystemExit
-rows = [x for x in d.get("r", []) if x.get("kind") == "defect-shape" and x.get("defect") == "format-arity"]
-print("ROWS %d" % len(rows))' )"
-    case "$MV" in ROWS\ *) n="${MV#ROWS }"; [ "$n" -ge 10 ] && ok "$L: MCP quality_delta carries the $n format-arity rows" \
-                                                      || no "$L: MCP quality_delta carries $n format-arity rows, want >= 10" ;;
-                  *) no "$L: MCP quality_delta probe: $MV" ;; esac
+    for surf in json mcp; do
+        if [ "$surf" = json ]; then V="$( printf '%s' "$JS" | python3 -c "$JPROBE" )"; else V="$( printf '%s' "$MC" | python3 -c "$JPROBE" )"; fi
+        set -- $V
+        if [ "${1:-}" != ROWS ]; then no "$L $surf: probe: $V"; continue; fi
+        n="$2"; fr="$4"; frg="$6"; top="$8"; ng="${10}"
+        case "$n$fr$frg$ng" in *[!0-9]*) no "$L $surf: probe printed non-numbers: $V"; continue ;; esac
+        if [ "$n" -ge 13 ]; then ok "$L $surf: carries the $n format-arity rows (kind + defect keys)"; else no "$L $surf: carries $n format-arity rows, want >= 13"; fi
+        if [ "$fr" = 1 ] && [ "$frg" = 1 ]; then ok "$L $surf: the new-symbol freshbad format-arity row carries \"gating\": true"
+        else no "$L $surf: freshbad rows=$fr gating=$frg (want 1 and 1)"; fi
+        if [ "$top" = "$ng" ]; then ok "$L $surf: top-level \"gating\" ($top) equals the rows that carry \"gating\": true"
+        else no "$L $surf: top-level \"gating\" is $top but $ng rows carry \"gating\": true"; fi
+    done
 else
     echo "  SKIP  $L: --json and MCP row checks (python3 not installed)"
 fi
 
 #   Ack identity (checklist 16): one symbol with BOTH a format-arity and a utf8-cut row. Acking only the
 #   format-arity facet must leave the utf8-cut row on the same symbol standing — a facet is part of the
-#   finding's identity, not a label on one shared per-symbol key.
+#   finding's identity, not a label on one shared per-symbol key. --ack-only=defect-shape (the kind) takes
+#   both facets; each on a fresh copy.
 fx_init both
 mkdir -p "$WORK/both/src"
 cat >"$WORK/both/src/b.cpp" <<'EOF'
@@ -930,15 +1309,26 @@ EOF
 fx_run both
 ds_has "$L ack" format-arity label gating
 ds_has "$L ack" utf8-cut     label minor
+fx_copy both both_kind
 ( cd "$WORK/both" && "$BIN" . --quality-delta --no-cache --ack-only=format-arity --quality-ack="deliberate in this fixture" >/dev/null 2>&1 )
 ARC=$?
 if [ "$ARC" = 0 ]; then ok "$L ack: --ack-only=format-arity selects the facet (exit 0)"; else no "$L ack: --ack-only=format-arity exited $ARC"; fi
 fx_run both
 if [ "$QD_OK" = 1 ]; then
     if [ -z "$( ds_row format-arity label )" ]; then ok "$L ack: the acked format-arity row is suppressed"; else no "$L ack: the format-arity row survived its ack: $( ds_row format-arity label )"; fi
+    if [ -z "$( ds_rows | grep 'gating=' )" ]; then ok "$L ack: no defect-shape row carries gating= after the ack"; else no "$L ack: a defect-shape row still gates: $( ds_rows | grep 'gating=' | head -2 )"; fi
 fi
 ds_has "$L ack" utf8-cut label minor
-if [ "$QD_RC" = 0 ]; then ok "$L ack: with format-arity acked the run exits 0"; else no "$L ack: should exit 0 after the ack (got $QD_RC)"; fi
+gating_split "$L ack" 0
+( cd "$WORK/both_kind" && "$BIN" . --quality-delta --no-cache --ack-only=defect-shape --quality-ack="deliberate in this fixture" >/dev/null 2>&1 )
+ARC=$?
+if [ "$ARC" = 0 ]; then ok "$L ack kind: --ack-only=defect-shape selects the kind (exit 0)"; else no "$L ack kind: --ack-only=defect-shape exited $ARC"; fi
+fx_run both_kind
+if [ "$QD_OK" = 1 ]; then
+    left="$( ds_rows | wc -l | tr -d ' ' )"
+    if [ "$left" = 0 ]; then ok "$L ack kind: both facets are suppressed by the kind token"; else no "$L ack kind: $left defect-shape rows survived --ack-only=defect-shape: $( ds_rows | head -2 )"; fi
+fi
+gating_split "$L ack kind" 0
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail
