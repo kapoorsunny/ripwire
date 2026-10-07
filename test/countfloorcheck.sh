@@ -21,6 +21,8 @@
 #      and the clue LEADS to the uses (the grep names the file that declares a `struct cell`).
 #   B  (negative) a static C function nobody calls: a provably complete zero stays callers="0" risk="none-found",
 #      dead_code_candidate="1", no floor marker, no next=.
+#   R  (negatives) recursion: a self-call is bound to the definition itself (C static fn, Python self.m() and module fn,
+#      mutual recursion); (near miss) a recursive TS method with an outside same-named call bound nowhere still floors.
 #   C  CALLSITE-LINE: --safe-delete=width_of rows carry sites_l= (the call lines) beside p= (the definition line):
 #      a caller with three calls on three lines lists all three; one call split over two lines lists its line.
 #   D  (near-miss) a single-definition symbol called once still prints its call site (sites_l= present, one line).
@@ -182,6 +184,35 @@ R_B="$( root_tag "$( run c --safe-delete=helper_dead )" safe-delete )"
 [ "$( attr "$R_B" callers )" = 0 ] && [ "$( attr "$R_B" risk )" = none-found ] && [ "$( attr "$R_B" dead_code_candidate )" = 1 ] \
     && ok "(B) callers=\"0\" risk=\"none-found\" dead_code_candidate=\"1\" (unchanged)" || no "(B) the complete zero changed: $R_B"
 case "$R_B" in *callers_floor=*|*uses_floor=*|*' next='*) no "(B) a provably complete zero carries a floor marker: $R_B" ;; *) ok "(B) no floor marker, no next= on a complete zero" ;; esac
+
+# ── R: recursion — a self-call bound to the definition itself is not evidence of a miss ─────────────────
+# graph.h drops self-loops (CallDisposition::Self), so a recursive call commits no edge: the unbound scan must still
+# count it as bound (it bound to this very definition). Negatives: a static recursive C function with no other caller,
+# a Python method recursing through self.m() and a recursive module function, mutual recursion (both edges bound).
+# Near miss: a recursive TS method that ALSO has a same-named call bound nowhere still floors.
+echo "=== R: a recursive function's own call keeps a plain count; an unbound outside call still floors ==="
+mkdir -p "$W/crec" "$W/pyrec" "$W/tsrec"
+printf 'static int fact(int n) { return n ? n * fact(n - 1) : 1; }\nstatic int pong(int n);\nstatic int ping(int n) { return n ? pong(n - 1) : 0; }\nstatic int pong(int n) { return n ? ping(n - 1) : 1; }\nint entry(void) { return ping(3); }\n' > "$W/crec/r.c"
+printf 'class Walker:\n    def walk(self, n):\n        return self.walk(n - 1) if n else 0\n\ndef walk_tree(n):\n    return walk_tree(n - 1) if n else 0\n' > "$W/pyrec/w.py"
+printf 'export class Tree { walkDown(n: number): number { return n ? this.walkDown(n - 1) : 0 } }\nexport function outside() { return walkDown(3) }\n' > "$W/tsrec/t.ts"
+R_R1="$( root_tag "$( run crec --safe-delete=fact )" safe-delete )"
+[ "$( attr "$R_R1" callers )" = 0 ] && [ "$( attr "$R_R1" dead_code_candidate )" = 1 ] || no "(R) premise: fact: $R_R1"
+case "$R_R1" in *callers_floor=*|*' next='*) no "(R) a static recursive C function with no caller is floored: $R_R1" ;; *) ok "(R) --safe-delete=fact (self-call only): no callers_floor, no next=" ;; esac
+ROW_R1="$( enc_row "$( run crec --grep='n - 1) : 1' )" fact )"
+[ -n "$ROW_R1" ] || no "(R) premise: no <enc> row for fact"
+case "$ROW_R1" in *callers_floor=*) no "(R) grep <enc> fact (self-call only) is floored: $ROW_R1" ;; *) ok "(R) grep <enc n=\"fact\"> stays a plain zero" ;; esac
+OUT_R2="$( run pyrec --grep='if n else 0' )"
+ROW_R2="$( enc_row "$OUT_R2" 'Walker::walk' )"; ROW_R3="$( enc_row "$OUT_R2" walk_tree )"
+[ -n "$ROW_R2" ] && [ -n "$ROW_R3" ] || no "(R) premise: Python rows: [$ROW_R2] [$ROW_R3]"
+case "$ROW_R2" in *callers_floor=*) no "(R) Python self.walk() recursion is floored: $ROW_R2" ;; *) ok "(R) Python method recursing via self.walk(): no callers_floor" ;; esac
+case "$ROW_R3" in *callers_floor=*) no "(R) Python recursive module function is floored: $ROW_R3" ;; *) ok "(R) Python recursive module function walk_tree: no callers_floor" ;; esac
+R_R3="$( root_tag "$( run pyrec --safe-delete=walk_tree )" safe-delete )"
+case "$R_R3" in *callers_floor=*|*' next='*) no "(R) --safe-delete=walk_tree is floored: $R_R3" ;; *) ok "(R) --safe-delete=walk_tree: no callers_floor, no next=" ;; esac
+OUT_RM="$( run crec --grep='n ? p' )"; ROW_PING="$( enc_row "$OUT_RM" pong )"; ROW_PONG="$( enc_row "$OUT_RM" ping )"
+[ "$( attr "$ROW_PING" callers )" = 1 ] && [ "$( attr "$ROW_PONG" callers )" = 2 ] || no "(R) premise: mutual recursion counts: [$ROW_PING] [$ROW_PONG]"
+case "$ROW_PING$ROW_PONG" in *callers_floor=*) no "(R) bound mutual recursion is floored: $ROW_PING $ROW_PONG" ;; *) ok "(R) mutual recursion ping<->pong (both bound): no callers_floor" ;; esac
+ROW_R4="$( enc_row "$( run tsrec --grep='this.walkDown' )" walkDown )"
+if [ "$( attr "$ROW_R4" callers_floor )" = 1 ]; then ok "(R) near miss: recursive walkDown with an outside call bound nowhere still floors"; else no "(R) near miss lost its floor: $ROW_R4"; fi
 
 # ── C/D: the call-site line ──────────────────────────────────────────────────────────────────────────────
 echo "=== C/D: --safe-delete caller rows carry the CALL lines beside the definition line ==="
