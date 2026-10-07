@@ -38,6 +38,16 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   (above train 25's 143/144; the ref record gains the receiver chain memberPath/memberCtor and the receiver-evidence
 #   binding kinds), kCacheVersion 28 -> 29; quality.h's mirrors move with them. kQSnapCacheScheme stays 17: a snapshot's meaning is unchanged, and the
 #   edges it reads are re-derived under the new kParserVer. The train renumbers and re-derives.
+# 2026-10-04, train 26a (PR #373, Ruby method lookup, merged onto main 255dc199): RE-DERIVED ONCE on the merged tree with
+#   UPDATE_GOLDEN=1 (hash 9fe75d7e33…283213). The only watched text that moved is the kParserVer declaration: 143 -> 148,
+#   above the branch's 145 and the 145–147 other branch builds have used (148's full-use file tag is 149); quality.h's
+#   kIngestParserVerMirror moves with it. kCacheVersion stays main's 28 (the branch side said 27). kQSnapCacheScheme
+#   stays 17: what a Snapshot means is unchanged — with kParserVer set back to 143, the merged tree hashes to main's pin
+#   32240f4552…2dafcc. The two feat/ruby-method-lookup entries below are the branch's own history.
+# 2026-10-04, train 25 review fixes: RE-DERIVED with UPDATE_GOLDEN=1 (hash 32240f4552…2dafcc). kParserVer 141 -> 143 (two
+#   extraction changes: a declaration named like the JS global object is a JsShadow binding; value-reference slot text
+#   is cut on a UTF-8 boundary and JS string keys are capped) with quality.h's mirror; 143 because 141's full-use file
+#   tag was 142. kQSnapCacheScheme stays 17: what a Snapshot means is unchanged, and every key carries the parser mirror.
 # 2026-10-04, train 25, extractor fix: RE-DERIVED with UPDATE_GOLDEN=1 (hash d1a2878ce0…44e6c8). No source or scheme
 #   change: extract_fn now reads a candidate's whole signature before deciding it is a prototype, so computeSnapshot's
 #   two-line forward declaration is skipped and its REAL definition is hashed for the first time since the import
@@ -49,6 +59,14 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   the merged tree with UPDATE_GOLDEN=1 (hash 723c71a3de…36d288). kParserVer 140 -> 141: above FE-A's 134/135 and
 #   refval-edges' 140 (both extraction changes) and train 24's 133; kCacheVersion 28 (FE-A's ref-record change, the max);
 #   kQSnapCacheScheme 17 (refval-edges' dead-kind change, the max); quality.h's mirrors move with them.
+# 2026-10-04, feat/ruby-method-lookup (PR #373 review: include and extend sides): RE-PINNED with UPDATE_GOLDEN=1 (hash
+#   2aaf4390cb…4f692eeb). kParserVer 142 -> 145: a Ruby extraction change (RubyClassMixin bindings, the includer mark), above
+#   main's 143 and 144; kCacheVersion stays 27, kQSnapCacheScheme stays 16; quality.h's kIngestParserVerMirror moves with
+#   it. The train may renumber.
+# 2026-10-04, feat/ruby-method-lookup rebased onto main 2720d1c5: RE-DERIVED ONCE with UPDATE_GOLDEN=1 (hash
+#   494bccc1ca…be6c147e). kParserVer 133 -> 142: the branch's eight Ruby extraction steps carried 130–137, and 142 is
+#   above those, main's 133 and train 25's 141; kCacheVersion stays 27, kQSnapCacheScheme stays 16; quality.h's
+#   kIngestParserVerMirror moves with it. The train may renumber.
 # 2026-10-02, train 24 (recall, answer-honesty, #368, contrib-checklist, hygiene-orphans, readme-terminality merged):
 #   RE-DERIVED ONCE on the merged tree with UPDATE_GOLDEN=1 (hash a7f2ec25d4…9388db). kParserVer 132 -> 133: above the two
 #   merged lanes' extraction changes (130 body-less C/C++ type specifier span; 131 TS/TSX await/unary type-argument
