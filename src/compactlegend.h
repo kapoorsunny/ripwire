@@ -337,9 +337,9 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "to",                "vr to= def=: the function used as a value and its definition; sites=N binding sites one to=/through= pair joins", false, "vr" },
     { "through",           "through=: the written callee this function may call it through", false, "vr" },
     { "to_value_refs",     "to_value_refs=N: to= is used as a value N times (matched by name); a run through such a slot is not a proven call and no hop here" },
-    { "value-ref-excluded", "value-ref-excluded=N: internal functions kept off because another function's table, field or argument holds them (matched by name, not a proven call); a floor" },
+    { "value-ref-excluded", "value-ref-excluded=N: internal functions kept off because a table, field or argument in another function or at file scope holds them (matched by name, not a proven call); a floor" },
     // The value walk's depth cut (ingest_valuerefs.h kVrMaxDepth, graphlegend.h kValueRefsDepthLegend): absent when none.
-    { "value_refs_depth_capped", "value_refs_depth_capped=N: N files nest past the value walk's 512-level cap; a value use below it is unseen, so value_refs= and every reading on it are floors" },
+    { "value_refs_depth_capped", "value_refs_depth_capped=N: N files of this language family (every family on the dead-code list) nest past the value walk's 512-level cap; a value use below it is unseen, so value_refs= and every reading on it are floors" },
     { "value_refs_depth_at", "value_refs_depth_at=: the first such cut, file:line; read the code there" },
     { "role",              "u role=value: the function is used as a VALUE there (stored or passed), matched by name; not a proven call", false, "u", MapHeaderRead::No, "value" },
     // #220 part 1: the FILE graph's gauge (graphlegend.h importsUnresolvedAttrXml), absent at zero, on the --deps/--arch/

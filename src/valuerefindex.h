@@ -772,8 +772,9 @@ struct VrViaRows
 // --callees side: the functions `fns` store/pass as values (through= absent unless the same function also calls
 // through that very slot), and the functions they may call through a parameter or a container (through= the written
 // callee; one row per (to, through), bind= its first site, sites= the number of distinct binding sites).
-// Rows are per BINDING SITE, never per call through it: two calls `tbl.k(); tbl.k();` through one slot are one row, and
-// `TABLE.k()` called twice through a slot one site fills is sites=1, not 2.
+// Rows are per BINDING SITE and WRITTEN callee, never per call through it: two calls `tbl.k(); tbl.k();` through one slot
+// are one row, and `TABLE.k()` called twice through a slot one site fills is sites=1, not 2. FLOOR: one slot called under two
+// spellings (`tbl.k()` and `tbl["k"]()`) is two written callees, so two rows.
 inline ValueRefRows valueRefCalleeRows( const IngestResult& ing, const ValueRefIndex& idx, std::span<const NodeId> fns )
 {
     ValueRefRows out;
@@ -861,15 +862,22 @@ private:
     std::vector<std::uint64_t> m_sites;
 };
 
-// --path / path_between: with NO directed call path (`unreachable`), how often `dstDefs` are used as values; 0 when a
-// path exists, so the attribute is absent and the answer byte-identical.
-inline std::size_t toValueRefsCount( const IngestResult& ing, bool unreachable, std::span<const NodeId> dstDefs, const ValueRefIndex* cached = nullptr )
+// --path / path_between: with NO directed call path (`unreachable`), how often `dstDefs` are used as values (0 when a
+// path exists, so the attribute is absent and the answer byte-identical) and the depth cut over their language families
+// (ValueRefRows::depthCut: a count read off a cut file is a floor, and the answer says so, as --callers' does).
+struct ToValueRefs
+{
+    std::size_t              count = 0;
+    ValueRefIndex::DepthCuts depthCut;
+};
+inline ToValueRefs toValueRefs( const IngestResult& ing, bool unreachable, std::span<const NodeId> dstDefs, const ValueRefIndex* cached = nullptr )
 {
     if( !unreachable )
     {
-        return 0;
+        return {};
     }
-    return cached != nullptr ? valueRefCallerRows( ing, *cached, dstDefs ).rows.size() : valueRefCallerRows( ing, ValueRefIndex( ing ), dstDefs ).rows.size();
+    const ValueRefRows rows = cached != nullptr ? valueRefCallerRows( ing, *cached, dstDefs ) : valueRefCallerRows( ing, ValueRefIndex( ing ), dstDefs );
+    return { rows.rows.size(), rows.depthCut };
 }
 
 }   // namespace rw

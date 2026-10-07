@@ -95,15 +95,18 @@ call-shaped references, so on such a function `--callers`, `--callees`, `--impac
   argument or a CommonJS `module.exports` table holds.
 - **Depth.** The capture does not descend past 512 levels of nesting (a 300-link C `else if` chain reaches it). That
   cut is disclosed, never silent: every answer that reads value references for the cut file's language — the
-  callers/callees roots, `--impact`, `--safe-delete`, `--dead-code`, `--json` and the MCP twins — carries
-  `value_refs_depth_capped=N` (files cut) and `value_refs_depth_at=FILE:LINE` (the first cut), so a missing row or a
-  listed dead function there reads as a floor.
+  callers/callees roots, `--impact`, `--safe-delete`, `--dead-code`, `--uses`, `--path` (beside `to_value_refs=`),
+  `--json` and the MCP twins — carries `value_refs_depth_capped=N` (files cut) and `value_refs_depth_at=FILE:LINE`
+  (the first cut), so a missing row, a `count=` or a listed dead function there reads as a floor. The one exception,
+  named: `--quality-delta`'s dead-code kind and the `--quality` overview's `value-ref-excluded=` read the rows and do
+  not yet carry it. An answer over a tree with no cut is byte-identical.
 - **Second review.** A parameter of a prototype, a function-pointer typedef or parameter, a C++ member declaration, a
   Go func type or interface method, or a TS function type, `declare function` or interface signature no longer hides a
   same-named function in the enclosing scope (`signal( SIGINT, handler )` beside `typedef void (*fn_t)( int handler )`
   was no row). A function that only stores ITSELF (`timer_set( tick )` inside tick) is no longer kept off `--dead-code`
-  or `dead_code_candidate`, as a recursive self-call is no caller. `--callees` rows are per binding site: two calls
-  through one slot are one row, and `sites=` counts binding sites, not calls. A C `[expr]` designator, a numeric key
+  or `dead_code_candidate`, as a recursive self-call is no caller. `--callees` rows are per binding site and written
+  callee: two calls `tbl.k(); tbl.k();` through one slot are one row, and `sites=` counts binding sites, not calls. A
+  known floor: one slot called under two spellings (`tbl.k()` and `tbl["k"]()`) is two written callees, so two rows. A C `[expr]` designator, a numeric key
   and an identifier key are capped like every other written slot.
 - **Cost.** A cold default map costs +3.6% CPU on this tree, +6.3% on django and +5.2% on webpack (median of 5,
   `sim/refval_cpu.sh`).
@@ -111,7 +114,7 @@ call-shaped references, so on such a function `--callers`, `--callees`, `--impac
 - **Manifest.** The `tools/list` manifest grows 46,591 → 46,732 B: the two find descriptions name `valueRefs` as
   not a proven call.
 
-Gate: `test/recallshapecheck.sh`. It has 177 arms across C, C++, JS, JSX, TS, TSX, Python and Go:
+Gate: `test/recallshapecheck.sh`. It has 201 CLI arms (plus the parity checks) across C, C++, JS, JSX, TS, TSX, Python and Go:
 - positives;
 - near-miss negatives for every guard, each proven able to fail by a mutation (`sim/refval_mutate.sh`);
 - named floors;
@@ -535,7 +538,7 @@ value-reference fixes take 145, above 143's full-use tag 144), `kCacheVersion` 2
 (the `--quality-delta` error-masking and placeholder changes, then the dead kind agreeing with `--dead-code` on functions
 held as values, then on a function that only stores itself). Every ingest cache written by an earlier build is refused
 and re-indexed once, and every cached quality snapshot is recomputed. The session legend dictionary is
-`dictv=beedfcd755c9457f entries=786`.
+`dictv=cc0b20902eeb3e68 entries=786`.
 
 ### Fixed — a call the language resolves outside the tree no longer binds to a same-named in-repo definition
 

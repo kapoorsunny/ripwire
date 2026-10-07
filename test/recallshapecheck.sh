@@ -1627,7 +1627,7 @@ vri_arm "RV5 MCP session: the server exited 0 with no sanitizer report (meaningf
 #    reads value references for the cut file's language family — absent below the cap, absent for another family.
 # RK: every written key slot is capped and newline-free (a C `[expr]` designator, a numeric key, an identifier key).
 echo "-- re-review fixes"
-mkdir -p "$FX/proto" "$FX/protogo" "$FX/protots" "$FX/self" "$FX/dup" "$FX/deep" "$FX/deepneg" "$FX/keys"
+mkdir -p "$FX/proto" "$FX/protogo" "$FX/protots" "$FX/self" "$FX/dup" "$FX/deep" "$FX/deep2" "$FX/deepneg" "$FX/keys"
 printf 'void handler(int sig) { (void)sig; }\n' >"$FX/proto/a.c"
 cat >"$FX/proto/b.c" <<'EOF'
 #include <signal.h>
@@ -1682,7 +1682,7 @@ static void tock(void) { timer_set(tock); }
 void boot(void) { timer_set(tock); }          /* @S_BOOT */
 EOF
 arm "RS1 dead-code: tick, stored only by itself, is listed; value-ref-excluded= counts tock alone" \
-    self --dead-code attr:count=1 nd:1 'd:n=tick' 'nod:n=tock' attr:value-ref-excluded=1 "legend:another function's"
+    self --dead-code attr:count=1 nd:1 'd:n=tick' 'nod:n=tock' attr:value-ref-excluded=1 'legend:in another function or at file scope'
 arm "RS2 safe-delete tick: a dead-code candidate again — its self-row is still served and still a use site" \
     self --safe-delete=tick attr:dead_code_candidate=1 attr:value_refs=1 attr:uses=1 'vr:bind=@S_TICK;in_id=tick'
 arm "RS3 safe-delete tock (near miss): another function stores it — not a candidate" \
@@ -1724,6 +1724,14 @@ for i in range( 1, 300 ):
 s += "    else return reg(handler);\n}\n"
 open( os.path.join( fx, "deep", "elif.c" ), "w" ).write( s )        # a 300-link else-if chain nests past the 512-level cap
 open( os.path.join( fx, "deep", "side.py" ), "w" ).write( "def py_fn():\n    return 1\n\nPT = [py_fn]\n" )
+# deep2: the same chain, plus a SHALLOW store of the same function — the shape --callers' next=--uses sends a reader to:
+# the shallow use is a row, the one below the cap is not, and a count that reads as complete is the false answer.
+d2 = ( "static void handler( int s ) { (void)s; }\nvoid reg( void (*)( int ) );\n"
+       "static void table_user( void ) { reg( handler ); }   /* @DZ_SHALLOW */\nvoid run( int x )\n{\n    if( x == 0 ) { }\n" )
+for i in range( 1, 300 ):
+    d2 += "    else if( x == %d ) { }\n" % i
+d2 += "    else { reg( handler ); }\n}\n"
+open( os.path.join( fx, "deep2", "elif.c" ), "w" ).write( d2 )
 open( os.path.join( fx, "deepneg", "near.c" ), "w" ).write(
     "static int handler(int x) { return x; }\nint reg(int (*f)(int));\nint install(void) { return reg("
     + "(" * 200 + "handler" + ")" * 200 + "); }\n" )                   # deep, but under the cap
@@ -1782,6 +1790,51 @@ fi
 ( cd "$FX/deep" && "$BIN" . --callers=handler --no-cache --legend=full >"$TMP/full.deep.xml" 2>/dev/null )
 run_check "RZ9 callers legend (full) defines value_refs_depth_capped= and value_refs_depth_at=" "$FX/deep" "$TMP/full.deep.xml" \
     'attr:value_refs_depth_capped=1' 'legend:value_refs_depth_capped=' 'legend:value_refs_depth_at='
+
+# RZ10..RZ17: the readers a --callers answer's next= sends the reader to. --uses and --path read the same value references,
+# so a count beside a cut file is a floor on them too (a shallow use is a row; the one below the cap is not).
+arm "RZ10 uses handler: count=1 (the shallow store) and the root says the use below the cap is unseen" \
+    deep2 --uses=handler attr:count=1 nu:1 'u:role=value;p=@DZ_SHALLOW' attr:value_refs_depth_capped=1 'attr:value_refs_depth_at!=' 'legend:value_refs_depth_capped=' 'legend:value_refs_depth_at='
+arm "RZ11 path run,handler: no directed call path, to_value_refs=1 (the shallow store) and the root says it is a floor" \
+    deep2 --path=run,handler attr:reachable=0 attr:to_value_refs=1 attr:value_refs_depth_capped=1 'attr:value_refs_depth_at!=' 'legend:value_refs_depth_capped='
+arm "RZ11b callers handler: the disclosure --uses and --path repeat (one cut, read by every reader)" \
+    deep2 --callers=handler attr:value_refs=1 attr:value_refs_depth_capped=1 'attr:value_refs_depth_at!='
+cli deep2 --uses=handler "$TMP/cli.deep2.uses.xml"
+cli deep2 --path=run,handler "$TMP/cli.deep2.path.xml"
+mcp_call uses '{"path":"'"$FX/deep2"'","symbol":"handler","legend":"compact"}' >"$TMP/mcp.deep2.uses.xml"
+mcp_call path_between '{"path":"'"$FX/deep2"'","from":"run","to":"handler","legend":"compact"}' >"$TMP/mcp.deep2.path.xml"
+run_check "RZ12 MCP uses: count=1 and the depth disclosure, root and legend, as the CLI" "$FX/deep2" "$TMP/mcp.deep2.uses.xml" \
+    attr:count=1 'u:role=value;p=@DZ_SHALLOW' attr:value_refs_depth_capped=1 'attr:value_refs_depth_at!=' 'legend:value_refs_depth_capped=' 'legend:value_refs_depth_at='
+run_check "RZ13 MCP path_between: to_value_refs=1 and the depth disclosure, root and legend, as the CLI" "$FX/deep2" "$TMP/mcp.deep2.path.xml" \
+    attr:reachable=0 attr:to_value_refs=1 attr:value_refs_depth_capped=1 'attr:value_refs_depth_at!=' 'legend:value_refs_depth_capped='
+res="$( python3 - "$TMP/cli.deep2.uses.xml" "$TMP/mcp.deep2.uses.xml" "$TMP/cli.deep2.path.xml" "$TMP/mcp.deep2.path.xml" <<'EOF'
+import re, sys
+def disc( f ):
+    x = open( f, encoding="utf-8" ).read()
+    root = re.search( r"<(uses|path)\b[^>]*>", x ).group( 0 )
+    return re.findall( r'value_refs_depth_(?:capped|at)="[^"]*"', root )
+for cli, mcp in ( ( sys.argv[1], sys.argv[2] ), ( sys.argv[3], sys.argv[4] ) ):
+    a, b = disc( cli ), disc( mcp )
+    if len( a ) != 2 or a != b:
+        print( "FAIL %s carries %r, %s carries %r" % ( cli.rsplit( "/", 1 )[-1], a, mcp.rsplit( "/", 1 )[-1], b ) ); raise SystemExit
+print( "OK" )
+EOF
+)"
+verdict "RZ14 the CLI and the MCP twin carry byte-equal value_refs_depth_capped= / _at= on --uses and --path" "$res"
+arm "RZ15 uses handler (near miss): 200 levels is under the cap — the row, no disclosure" \
+    deepneg --uses=handler attr:count=1 'u:role=value' noattr:value_refs_depth_capped noattr:value_refs_depth_at 'nolegend:value_refs_depth_capped='
+arm "RZ15b path install,handler (near miss): under the cap — to_value_refs=1 and no disclosure" \
+    deepneg --path=install,handler attr:reachable=0 attr:to_value_refs=1 noattr:value_refs_depth_capped noattr:value_refs_depth_at 'nolegend:value_refs_depth_capped='
+arm "RZ15c uses py_fn (near miss): a Python function beside the cut C file — another family, no disclosure" \
+    deep --uses=py_fn 'u:role=value' noattr:value_refs_depth_capped noattr:value_refs_depth_at 'nolegend:value_refs_depth_capped='
+mcp_call uses '{"path":"'"$FX/deepneg"'","symbol":"handler","legend":"compact"}' >"$TMP/mcp.deepneg.uses.xml"
+mcp_call path_between '{"path":"'"$FX/deepneg"'","from":"install","to":"handler","legend":"compact"}' >"$TMP/mcp.deepneg.path.xml"
+run_check "RZ16 MCP uses (near miss): under the cap — the row, no disclosure" "$FX/deepneg" "$TMP/mcp.deepneg.uses.xml" \
+    attr:count=1 'u:role=value' noattr:value_refs_depth_capped noattr:value_refs_depth_at 'nolegend:value_refs_depth_capped='
+run_check "RZ16b MCP path_between (near miss): under the cap — to_value_refs=1 and no disclosure" "$FX/deepneg" "$TMP/mcp.deepneg.path.xml" \
+    attr:to_value_refs=1 noattr:value_refs_depth_capped noattr:value_refs_depth_at 'nolegend:value_refs_depth_capped='
+arm "RZ17 path run,reg where a directed path EXISTS (near miss): no value-reference read, so no disclosure" \
+    deep2 --path=run,reg attr:reachable=1 noattr:to_value_refs noattr:value_refs_depth_capped 'nolegend:value_refs_depth_capped='
 
 python3 - "$FX" >"$TMP/keys.expect" <<'EOF'
 import os, sys

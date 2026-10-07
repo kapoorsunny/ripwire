@@ -381,7 +381,9 @@ A row is a clue to follow, not a proven call; `--dead-code` and `--safe-delete` 
 a reason a function is not dead (one made by another function or at file scope: a function that only
 stores itself stays dead, as a recursive self-call is no caller). The capture stops at 512 levels of
 nesting; a file it cut carries one depth-cut record, and every answer that reads value references for
-that file's language says so (`value_refs_depth_capped=`, `value_refs_depth_at=`).
+that file's language says so (`value_refs_depth_capped=`, `value_refs_depth_at=`): the callers/callees roots,
+`--impact`, `--safe-delete`, `--dead-code`, `--uses`, `--path`, the JSON form and the MCP twins. The one exception is
+`--quality-delta`'s dead-code kind and the `--quality` overview's `value-ref-excluded=`, which do not yet say so.
 
 ### graph — the CSR
 

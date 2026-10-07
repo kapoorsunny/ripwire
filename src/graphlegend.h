@@ -626,7 +626,7 @@ inline constexpr const char* kUsesValueRoleLegend =
 // The value walk's depth cut (ingest_valuerefs.h kVrMaxDepth, valuerefs.h valueRefsDepthAttrXml): rides EVERY answer
 // that carries value_refs_depth_capped=, whether value_refs= is there or not — a zero beside it is the floor it names.
 inline constexpr const char* kValueRefsDepthLegend =
-    "value_refs_depth_capped=N (absent when 0): N indexed files of this language nest deeper than the value-reference walk's 512-level cap (a long else-if chain, a deep expression), and a function used as a value below that depth is not seen: value_refs= (absent or not) is a floor there, and a reading built on it (dead_code_candidate=, risk=none-found, the dead-code list) may miss a table that holds the function. value_refs_depth_at= is the first cut, file:line: read the code there for value uses. ";
+    "value_refs_depth_capped=N (absent when 0): N indexed files of this language family (every family on the dead-code list) nest deeper than the value-reference walk's 512-level cap (a long else-if chain, a deep expression), and a function used as a value below that depth is not seen: value_refs= (absent or not) is a floor there, and a reading built on it (dead_code_candidate=, risk=none-found, the dead-code list) may miss a table that holds the function. value_refs_depth_at= is the first cut, file:line: read the code there for value uses. ";
 inline const char* valueRefsDepthLegend( bool on ) noexcept { return on ? kValueRefsDepthLegend : ""; }
 inline const char* usesValueRoleLegend( bool on ) noexcept { return on ? kUsesValueRoleLegend : ""; }
 inline const char* valueRefsLegend( bool on, bool callersSide ) noexcept
