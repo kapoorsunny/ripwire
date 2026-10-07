@@ -94,6 +94,8 @@ is_asan(){ LC_ALL=C grep -q -a '__asan_init' "$1" 2>/dev/null; }
 # the sanitizer binary: RIPWIRE_ASAN_BIN, else the binary under test when it is one (RIPWIRE_BIN=asan/ripwire), else asan/ripwire
 if [ -n "${RIPWIRE_ASAN_BIN:-}" ]; then
     ASAN_BIN="$RIPWIRE_ASAN_BIN"; [ "${ASAN_BIN#/}" = "$ASAN_BIN" ] && ASAN_BIN="$ROOT/$ASAN_BIN"
+    # an override that names nothing is a typo, not the expected "this checkout has no asan/ build": exit 2, never SKIP
+    [ -x "$ASAN_BIN" ] || { echo "RIPWIRE_ASAN_BIN is set to '$RIPWIRE_ASAN_BIN' but no executable is there"; exit 2; }
 elif is_asan "$BIN"; then
     ASAN_BIN="$BIN"
 else
