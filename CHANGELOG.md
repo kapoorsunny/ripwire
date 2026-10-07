@@ -15,10 +15,10 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
-### Changed — leaner answers: `--whereis` lists definitions, three lossless row spellings, the MCP legend once per session
+### Changed — leaner answers: `--whereis` lists definitions, two lossless row spellings, the MCP legend once per session
 
 Measured on 90 rung-0 answers of a comparison table (eight repos, three in-sample and five held out), base vs this
-build: 631,732 → 603,482 B for the lossless changes alone (−4.5%), 559,209 B with the `--whereis` default (−11.5%).
+build: 631,732 → 611,785 B for the lossless changes alone (−3.2%), 567,512 B with the `--whereis` default (−10.2%).
 Every gold item the base answers supplied is still supplied (502 of 502), and decoding the lossless spellings gives
 the base answer back element for element on all 90.
 
@@ -30,9 +30,8 @@ the base answer back element for element on all 90.
   window the listed rows; `hits=` counts every row; `complete=` reads the listing.
 - **Lossless:** a `--whereis` row on HEAD's commit omits `tip=`/`date=` (they read `at=` and the new root
   `head_date=`); a `--for` lens row omits `cx=`/`ccx=`/`in=` when 0 (the legend says an absent one is 0; the rows
-  kept by the byte budget are unchanged); a map row whose callees are all bare carries them as `calls="a,b,c"`
-  (any per-edge attribute keeps the `<c>` rows). Median per class: how-it-works −0.24 KB, orient-for −0.26 KB,
-  orient-map −0.96 KB, where-defined −1.95 KB.
+  kept by the byte budget are unchanged). Median per class: how-it-works −0.24 KB, orient-for −0.26 KB,
+  where-defined −1.95 KB; map answers are unchanged.
 - **MCP: the legend session opens on the first answer.** A stdio session no longer waits for a read of
   `ripwire://legend-dict`: its first answer carries its legend inline, later answers take the `legend="ref"`
   posture (rows first, each definition sent once per session, the core carried by the first ref answer).
