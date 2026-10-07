@@ -904,9 +904,10 @@ inline constexpr SafeDeleteRiskReading kSafeDeleteRiskReadings[] = {
 };
 inline const char* safeDeleteRiskSentence( std::string_view risk ) noexcept
 {
-    const auto it = std::ranges::find( kSafeDeleteRiskReadings, risk, &SafeDeleteRiskReading::risk );
-    ASSUME( it != std::end( kSafeDeleteRiskReadings ), "safeDeleteRiskSentence: runSafeDelete assigns only the four values listed" );
-    return it != std::end( kSafeDeleteRiskReadings ) ? it->sentence : "";
+    const auto it  = std::ranges::find( kSafeDeleteRiskReadings, risk, &SafeDeleteRiskReading::risk );
+    const auto end = std::end( kSafeDeleteRiskReadings );   // outside the promise: a self-check names values, it calls nothing
+    ASSUME( it != end, "safeDeleteRiskSentence: runSafeDelete assigns only the four values listed" );
+    return it != end ? it->sentence : "";
 }
 
 inline void emitSafeDeleteLegend( std::size_t defCount, std::size_t unprovenDefs, std::size_t ambiguousCallers, std::string_view risk,
