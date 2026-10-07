@@ -880,7 +880,7 @@ for tb in 500 750; do
         p4floor_bad=$(( p4floor_bad + 1 )); no "(P4 floor twin) --token-budget=$tb: compact est_tokens=${pc:-?} over the budget AND over the full answer's ${pf:-?}"
     fi
 done
-[ "$p4floor_bad" -eq 0 ] && ok "(P4 floor twin) at 500 both dialects ship <sigs> next= at the rank 1..4 floor with over_ceiling=\"1\", the floor clause and an honest est_tokens; at 750 the paid next= fits with no label; compact never further over than full"
+[ "$p4floor_bad" -eq 0 ] && ok "(P4 floor twin) at 500 both dialects ship <sigs> next= at the rank 1..4 floor with over_ceiling=\"1\", the floor clause and an honest est_tokens, the 750 run's paid next= fits with no label, compact never further over than full"
 
 # (P5) the BUDGET LEDGER survives compaction (orchestrator rule, METHODOLOGY §9.3/§9.4: never cut silently). --pack-task's
 # full legend ends with "budget=N bytes (T-token target, ceiling C) | ranking: … | bodies: … | callers: … | notes: … | tests:
