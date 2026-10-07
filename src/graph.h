@@ -7,7 +7,7 @@
 #include "elixir_resolve.h"      // lexical module/name/arity resolution; reuses cached Binding records
 #include "filter.h"              // isTestPath — for the Q2 tested= post-pass
 #include "pageview.h"            // LB-H: kImportReachRowCap — the import tier's display cap lives with the rest of the truncation vocabulary
-#include "nextverb.h"            // cut-fix E: nextFlag / nextAttrXml / kNextAttrMaxBytes — the import tier's importers_next=
+#include "nextverb.h"            // cut-fix E: nextFlag / nextAttrXml — the import tier's importers_next=
 #include "graphlegend.h"         // M15: graphGaugeAttrXml/Json + kGraphCountFloorAttrXml/Json — graphCountFloorAttrXml( g ) below
 #include "lintrules.h"           // §P9.4: langOfPath / dependencyCapable — the file-language classification
                                  // restrictDependencyHealth() needs (owns the extension table, kept in sync
@@ -7904,8 +7904,11 @@ struct ImportTier
 // cut-fix E: `sym` is the answer's own selector. A cut tier was a DEAD-END cut (docs/research/answer-completeness.md
 // §1.3): counted, but naming no call that serves the rest, although one exists — the tier is sized by limit, so
 // `--impact=SYM --limit=<importers>` lists all of it. That call rides as importers_next= (the root's next= is taken
-// by --safe-delete), only on a cut, and not when the invocation would pass kNextAttrMaxBytes (a hint that pastes
-// wrong is worse than none — forpage.h's rule). Both surfaces spell the CLI flag, as their root next= already does.
+// by --safe-delete), only on a cut, and IN FULL whatever its length (knob-honesty-068): it used to be dropped past
+// kNextAttrMaxBytes, so a long selector's cut tier lost its only continuation with no marker — the silent drop the
+// 2026-09-25 ruling (nextverb.h: next= is never truncated or dropped for length) removed from every other producer.
+// The invocation is never truncated, so it never pastes wrong. Both surfaces spell the CLI flag, as their root next=
+// already does. Gate: impactimportcheck.sh #9d (a 130 B call).
 inline void sizeImportTier( ImportTier& t, int pageLimit, std::string_view sym = {} )
 {
     t.shown  = std::min( t.files.size(), std::size_t( rw::effectiveRowCap( pageLimit, rw::kImportReachRowCap ) ) );
@@ -7913,11 +7916,7 @@ inline void sizeImportTier( ImportTier& t, int pageLimit, std::string_view sym =
     t.next.clear();
     if( t.capped && !sym.empty() )
     {
-        std::string inv = rw::nextFlag( "--impact=", sym ) + " --limit=" + std::to_string( t.files.size() );
-        if( inv.size() <= rw::kNextAttrMaxBytes )
-        {
-            t.next = std::move( inv );
-        }
+        t.next = rw::nextFlag( "--impact=", sym ) + " --limit=" + std::to_string( t.files.size() );
     }
     // Emitted UNCONDITIONALLY, zero included: an absent importers= reads as "this build cannot measure it",
     // and a shown_ without its capped= is the missing-attribute ambiguity pageview.h rule 3 forbids.

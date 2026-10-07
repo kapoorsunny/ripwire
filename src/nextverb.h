@@ -6,7 +6,7 @@
 // --test-gate/--safe-delete/--situ handed the agent nothing, so "contract-change → find the sites → open the
 // file" was three calls with the middle one guessed. The owner's frame for this lane: an answer should TERMINATE
 // the search in one compact shot — so every root in P3's enumeration carries exactly one next= holding a
-// pasteable invocation of ≤ kNextAttrMaxBytes: --edit-check contract-change → --uses=SYM; --impact →
+// pasteable invocation, typically ≤ kNextAttrMaxBytes and never dropped past it: --edit-check contract-change → --uses=SYM; --impact →
 // --safe-delete=SYM; a gating --quality-delta row → --expand=FILE:NAME; --test-gate → its first run= command;
 // --situ → --test-gate; --from-trace/--run-trace → --slice=@FILE:LINE (the innermost in-corpus frame);
 // --callers → --uses=SELECTOR (bare NAME for a narrowed selector with declined calls; otherwise the spelling is mirrored);
@@ -24,6 +24,12 @@
 namespace rw
 {
 
+// NOT A RUNTIME CEILING (knob-honesty-068). No producer drops or truncates a next= for its length: nextAttrXml has no
+// length branch (138b383c, 2026-09-25 ruling: a dropped next= leaves a cut with no way back, and an untruncated one never
+// pastes wrong), and the last pre-filter — graph.h's importers_next= — went with this lane. What remains is the TYPICAL
+// size the short-fixture gates hold their own next= to (nextverbcheck.sh, forsectioncollapsecheck.sh (5a)): a compactness
+// target for the common case, never a reason to omit a continuation. A producer that wants a shorter next= must spell
+// a shorter equivalent call, not drop it.
 inline constexpr std::size_t kNextAttrMaxBytes = 120;
 
 // the ONE definition every legend that meets next= splices (legendcoveragecheck: an attribute is defined where
