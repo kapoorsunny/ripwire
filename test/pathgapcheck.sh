@@ -264,7 +264,7 @@ fi
 cleanArm "(N5) a value the search also calls" "$TMP/valin" "handleRequest,other"
 
 echo "(M) MCP path_between carries the same clause"
-python3 - "$BIN" "$TMP" <<'PY' && ok "(M) path_between: same searched/gaps/gap_syms/rows/next as the CLI on P1-P3, plain hint on N1" || no "(M) MCP path_between disagrees with the CLI (above)"
+python3 - "$BIN" "$TMP" <<'PY'
 import json, re, subprocess, sys
 binp, tmp = sys.argv[1], sys.argv[2]
 cases = [ ( "decl", "Machine_run", "Process_update", True ), ( "val", "listen", "respond", True ),
@@ -304,6 +304,12 @@ for i, ( d, a, b, gap ) in enumerate( cases ):
         print( "  %s: MCP lost the plain no-path hint" % d ); bad = 1
 sys.exit( bad )
 PY
+mrc=$?
+if [ "$mrc" -eq 0 ]; then
+    ok "(M) path_between: same searched/gaps/gap_syms/rows/next as the CLI on P1-P3, plain hint on N1"
+else
+    no "(M) MCP path_between disagrees with the CLI or the helper crashed (rc=$mrc, details above)"
+fi
 
 if [ "$fail" -eq 0 ]; then echo "ALL PASS"; else echo "FAIL"; fi
 exit "$fail"
