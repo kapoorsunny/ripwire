@@ -2935,6 +2935,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // tokens: 995 vs 816). So the compact charge is capped at the FULL dialect's charge for the same header, computed by the
         // same rule: rows(default) ⊇ rows(full) by construction, and a default that pays more header than full never gets more
         // room for rows than full had.
+        std::size_t compactLedgerGapBytes = 0;   // knob-honesty-068: how much MORE sig room this compact header was given than full's
         if( compactLegendOn )
         {
             ForLensHeaderParts fullParts = headerParts;
@@ -2944,7 +2945,8 @@ std::optional<int> runForLens( const MainDispatch& d )
                                               + confidenceEarlyAttrsBytes + confidenceEarlyNoteBytes + forAtAttrStr.size()
                                               + rw::kForFileTailLegend.size() + idRouteParts.bytes();
             const std::size_t fullCharged     = fullExempt > fullHeaderBytes ? fullHeaderBytes : fullHeaderBytes - fullExempt;
-            chargedHeaderBytes = std::min( chargedHeaderBytes, fullCharged );
+            chargedHeaderBytes    = std::min( chargedHeaderBytes, fullCharged );
+            compactLedgerGapBytes = fullCharged - chargedHeaderBytes;   // >= 0 by the min above
         }
         const std::size_t fixedBytes = chargedHeaderBytes + legoStr.size() + composeStr.size() + routeStr.size() + 6;   // + "</ctx>"
         // the auto bundle's SECTION SPLIT — the sig side's claim is capped so an explicit ceiling wider
@@ -3008,9 +3010,16 @@ std::optional<int> runForLens( const MainDispatch& d )
         // two regimes are argued): CHARGED exactly when an explicit ceiling's sig side is the whole ceiling (nothing
         // downstream can pay, and the ceiling is hard); exempt at the default and when the sig side is frozen at the
         // default's share (forSigSideCeiling), so those ranked sets — and forbudgetmonotoncheck's identity — are untouched.
+        // THE COMPACT DIALECT PAYS FROM FULL'S ROOM WHEN IT CHARGES ONE: its sig ledger charges less header than it emits and
+        // leans on the header rungs to land inside the ceiling; a continuation's bytes are not a clause those rungs can shed,
+        // so a charged one also reserves the room the compact charge was given beyond full's (compactLedgerGapBytes). Only a
+        // block the ladder already trims pays it (the plan reserves only when it fires): a capped compact answer then serves
+        // the rows the full one does — rows(default) ⊇ rows(full) still holds, as equality — and lands no further over its
+        // ceiling than full (compactlegendcheck P4). An uncapped answer is untouched.
         const bool                    forSigsNextCharged = cfg.tokenBudget > 0 && sigSideCeiling == bundleBudget;
         const std::string             forRankFlags       = forRankShapingFlags( cfg );
-        const rw::SigsCutContinuation forSigsNext{ cfg.forTask, cfg.packTopN, forRankFlags, fixedBytes, forSigsNextCharged, /*json=*/false };
+        const rw::SigsCutContinuation forSigsNext{ cfg.forTask, cfg.packTopN, forRankFlags, fixedBytes, forSigsNextCharged, /*json=*/false,
+                                                   /*pasteHandle=*/true, /*ledgerGapBytes=*/forSigsNextCharged ? compactLedgerGapBytes : 0u };
         bool        forSigsCapped      = false;   // did the H1 ladder trim <sigs>? — decides the budget_bytes= legend clause below
         rw::SigsCutReport forSigsCut;             // cut-fix lane A: the <sigs> tag's shown/total/docs_dropped — its clauses below
         sigsPreRendered = preRender( [ & ]( std::FILE* sm )

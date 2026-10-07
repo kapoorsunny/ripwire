@@ -4480,6 +4480,8 @@ struct SigsCutReport
     std::size_t lastShownRank    = 0;  // the 1-based candidate rank of the last row printed (rows are a rank PREFIX: the ladder
                                        //   drops tail-first) — the resume index; next_offset= when rows were dropped
     bool        hasContinuation  = false;   // the caller asked for the continuation (next=/next_budget_tokens=/next_offset=)
+    bool        terseContinuation = false;  // a CHARGED pasteable one under a hard ceiling: next= alone (no next_offset=, no
+                                            //   clause — the bundle's own next= reading defines it); see SigsCutContinuation
 };
 
 // ── THE <sigs> CUT'S CONTINUATION (knob-honesty-068; PROCESS rule 5: every cut disclosed AND recoverable via next=) ──────────
@@ -4500,10 +4502,13 @@ struct SigsCutReport
 //     leftover, the tail funded last); est_tokens measures it.
 //   • CHARGED (an explicit ceiling whose sig side is ALL of it: a --token-budget at or under the default sig share, any
 //     explicit one beside --signatures-only, MCP budget_tokens, --json --token-budget): nothing downstream can pay there, and
-//     an explicit --token-budget is a HARD ceiling (est_tokens <= budget, fornotesbudgetcheck), so the attribute AND its
-//     legend clause are reserved inside the block like shown=/total=. Cost, measured (knob-honesty-068 report): at the wrap
-//     recipe's --token-budget=2000 one row on 11 of 20 queries — a row the next= itself serves. Exempting it there instead
-//     kept every row and pushed est_tokens over the stated ceiling (disclosed by over_ceiling=, but past a hard ceiling).
+//     an explicit --token-budget is a HARD ceiling (est_tokens <= budget, fornotesbudgetcheck), so the attribute is reserved
+//     inside the block like shown=/total=, and it rides TERSE there: next= alone — no next_offset=, no bracket clause; the
+//     bundle's own next= reading defines it ("the follow-up to paste"). Measured why (knob-honesty-068 report): with the
+//     clauses, the compact dialect — whose sig ledger leans on the header rungs — landed past the ceiling where the full
+//     one fitted (compactlegendcheck P4), and the rungs cannot shed a clause that is the cut's only disclosure. The e=
+//     ruling's shape: under a tight ceiling the extras go, the one thing that must stay (here the call) stays and is paid
+//     for. MCP keeps its clause (next_budget_tokens= has no other reading).
 // THE RESUME INDEX, next_offset= (present when rows were DROPPED, not only shrunk): the candidate index the cut starts at —
 // the last printed row's 1-based rank in the (score desc, id asc) candidate order, so a pseudo-symbol slot that prints no
 // row cannot skew it the way a printed-row count would. The root's at= stamps the index it was cut from; a continuation
@@ -4525,6 +4530,8 @@ struct SigsCutContinuation
     bool             json       = false; // the --json dialect: the re-run is --json too
     bool             pasteHandle = true; // false on MCP: no pasteable CLI argv (the CLI ranks its own list) — the machine form,
                                          //   next_budget_tokens=, is what a re-call of the same tool needs
+    std::size_t      ledgerGapBytes = 0; // a CHARGED one also reserves this: the sig room the caller's dialect was given beyond what
+                                         //   its header honestly costs (the --for compact dialect, verbs_for.h compactLedgerGapBytes)
 };
 
 inline std::size_t sigsCutNextTokens( std::size_t blockBytes, std::size_t fixedBytes ) noexcept
@@ -4630,7 +4637,8 @@ inline void sigsCutAttachContinuation( SigsCutReport& cut, const SigsCutContinua
     {
         return;
     }
-    cut.hasContinuation = true;
+    cut.hasContinuation   = true;
+    cut.terseContinuation = req->charged && req->pasteHandle;
     if( req->pasteHandle )
     {
         cut.next = invocation;
@@ -4642,7 +4650,7 @@ inline void sigsCutAttachContinuation( SigsCutReport& cut, const SigsCutContinua
 }
 inline bool sigsCutHasNextOffset( const SigsCutReport& cut ) noexcept
 {
-    return cut.hasContinuation && cut.isCapped && cut.shown < cut.total && cut.lastShownRank > 0;
+    return cut.hasContinuation && !cut.terseContinuation && cut.isCapped && cut.shown < cut.total && cut.lastShownRank > 0;
 }
 // the legend clauses a cut report owes, in a fixed order: shrunk-not-dropped, the continuation's (knob-honesty-068), docs_dropped
 inline std::string sigsCutReportLegend( const SigsCutReport& cut )
@@ -4652,7 +4660,7 @@ inline std::string sigsCutReportLegend( const SigsCutReport& cut )
     {
         notes += kForSigsShrunkNote;
     }
-    if( cut.isCapped && !cut.next.empty() )
+    if( cut.isCapped && !cut.next.empty() && !cut.terseContinuation )
     {
         notes += kForSigsNextNote;
     }
@@ -4680,8 +4688,8 @@ inline std::string sigsCutLegendNotes( bool isCapped, std::size_t shown, std::si
     cut.docsDropped = docsDropped;
     return sigsCutReportLegend( cut );
 }
-// The bytes a CHARGED continuation adds, an upper bound fixed before the plan: the attribute(s) at their widest digits, and
-// every clause they may bring. `dialectAttrBytes` is the dialect's own spelling of the value-bearing attribute(s).
+// The bytes a CHARGED continuation adds, an upper bound fixed before the plan: the pasteable form is terse (the call alone);
+// the MCP machine form keeps its attribute, the resume index at its widest digits, and the clauses that define them.
 inline std::size_t sigsCutContinuationReserve( const SigsCutContinuation* req, std::size_t valueAttrBytes, std::size_t offsetAttrBytes,
                                                bool withClauses )
 {
@@ -4689,9 +4697,12 @@ inline std::size_t sigsCutContinuationReserve( const SigsCutContinuation* req, s
     {
         return 0;
     }
-    const std::size_t clauses = withClauses ? ( req->pasteHandle ? kForSigsNextNote.size() : kForSigsNextBudgetNote.size() ) + kForSigsNextOffsetNote.size()
-                                            : 0u;
-    return valueAttrBytes + offsetAttrBytes + clauses;
+    if( req->pasteHandle )
+    {
+        return valueAttrBytes + req->ledgerGapBytes;   // terse: next= alone (sigsCutAttachContinuation)
+    }
+    const std::size_t clauses = withClauses ? kForSigsNextBudgetNote.size() + kForSigsNextOffsetNote.size() : 0u;
+    return valueAttrBytes + offsetAttrBytes + clauses + req->ledgerGapBytes;
 }
 
 // The <sigs> open tag: `<sigs>` untrimmed; ` shown= total= capped="1"` when rows were cut or shrunk; ` docs_dropped=`

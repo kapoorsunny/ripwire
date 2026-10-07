@@ -418,7 +418,7 @@ esac
 # next= was the r=1 row's (a body, or the widening page). Fixture: 40 matching C functions with long docs and long
 # parameter lists, so the DEFAULT ceiling drops rows. The tag must carry next= (+ its legend clause), pasting it must
 # serve all total= rows uncut in the same rank order, the shown rows must be its prefix. Under a tight explicit (hard)
-# ceiling it is CHARGED: still there, and est_tokens stays within budget_tokens. At an explicit ceiling wide enough that
+# ceiling it is CHARGED and TERSE: next= alone, and est_tokens stays within budget_tokens. At an explicit ceiling wide enough that
 # the sig side is frozen at the default's it is EXEMPT: the <sigs> block is byte-identical to the default's. JSON + MCP.
 # Negatives: an uncapped tag (arm 8's fixture) carries none; --no-route is echoed. RED on 255dc199 (no next= on <sigs>).
 mkdir -p "$TMP/fxcut"
@@ -487,9 +487,9 @@ python3 -c 'import json,sys; a=json.loads(sys.argv[1])["names"]; b=json.loads(sy
 # tight explicit ceiling: CHARGED — still named, and est_tokens stays within the hard ceiling the root names
 C3="$( cd "$TMP" && "$BIN" fxcut --for="gadget assembler" --token-budget=1500 --no-cache 2>/dev/null | cut_arm )"
 NX3="$( cfield "$C3" next )"
-{ [ "$( cfield "$C3" capped )" = true ] && [ -n "$NX3" ] && [ "$( cfield "$C3" over )" = false ] \
-  && [ "$( cfield "$C3" est_tokens )" -le "$( cfield "$C3" budget_tokens )" ]; } \
-    && ok "(9) --token-budget=1500: next= present and charged (est_tokens $( cfield "$C3" est_tokens ) <= budget_tokens 1500)" \
+{ [ "$( cfield "$C3" capped )" = true ] && [ -n "$NX3" ] && [ "$( cfield "$C3" over )" = false ] && [ "$( cfield "$C3" next_offset )" = null ] \
+  && [ "$( cfield "$C3" clause )" = false ] && [ "$( cfield "$C3" est_tokens )" -le "$( cfield "$C3" budget_tokens )" ]; } \
+    && ok "(9) --token-budget=1500: charged and terse — next= alone (no next_offset=, no clause), est_tokens $( cfield "$C3" est_tokens ) <= budget_tokens 1500" \
     || no "(9) --token-budget=1500: $C3"
 # wide explicit ceiling (sig side frozen at the default's): EXEMPT — the block, next= included, is the default's byte for byte
 sigsblk(){ python3 -c 'import re,sys; m=re.search(r"<sigs[^>]*>.*?</sigs>",sys.stdin.read(),re.S); print(m.group(0) if m else "")'; }
