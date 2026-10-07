@@ -96,6 +96,7 @@ struct SarifRunProperties
     std::size_t totalCount      = 0;
     std::string select;   // the raw --lint-select= argument, "" when the flag was absent
     std::string ignore;   // the raw --lint-ignore= argument, "" when the flag was absent
+    std::string findingsNext;   // XML twin: findings_next= — the call that counts the floored rules' rest; "" when nothing floored
 };
 
 // One result — the SAME shape as main.cpp's file-scope LintOut, plus the enclosing-symbol name
@@ -231,6 +232,13 @@ inline void writeSarifResult( std::FILE* out, const SarifFinding& f, std::string
 inline void writeSarifRunProperties( std::FILE* out, const SarifRunProperties& props )
 {
     rw::emitTo( out, "\"properties\":{{\"findingsCapped\":{}", props.anyRuleCapped ? "true" : "false" );
+    // knob-honesty-068: a floored run names the call that counts the rest (findings_next= on the XML root), so a CI
+    // consumer reading findingsCapped=true is handed the next step, not a dead end. Absent when nothing floored.
+    if( !props.findingsNext.empty() )
+    {
+        std::fputs( ",\"findingsNext\":", out );
+        jsonQuoted( out, props.findingsNext );
+    }
     if( props.selectionActive )
     {
         std::fputs( ",\"selected\":", out );
