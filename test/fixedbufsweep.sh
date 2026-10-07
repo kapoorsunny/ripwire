@@ -261,7 +261,11 @@ NUMERIC_ONLY = {
     ( "src/serialize.h", "callsHdr" ): 2,
     ( "src/serialize.h", "cb" ): 1,
     ( "src/serialize.h", "changedAttr" ): 1,
+    ( "src/serialize.h", "eAttr" ): 1,  # lane/for-spine-span-068 (2026-10-04): writeSigHeadWithEnd's ' e="{}"' — 5 B literal + one
+                                        #   std::uint32_t (10 digits) = 15 B against 23 usable + NUL. A count, no %s, nothing escaped.
     ( "src/serialize.h", "eb" ): 1,
+    ( "src/serialize.h", "eKey" ): 1,   # lane/for-spine-span-068: spliceJsonEndLine's JSON twin ',"e":{}' — 5 B + 10 digits = 15 B
+                                        #   against 23 usable + NUL. A count, no %s, nothing escaped.
     ( "src/serialize.h", "estAttr" ): 1,
     ( "src/serialize.h", "gb" ): 1,
     ( "src/serialize.h", "gfb" ): 1,
@@ -274,10 +278,12 @@ NUMERIC_ONLY = {
                                       #   "{}" of one std::uint32_t, ten digits worst case against 15 usable + NUL, no %s and
                                       #   nothing escaped, so it does not join the string-interpolating population
     ( "src/serialize.h", "lineAttr" ): 1,
-    ( "src/serialize.h", "nb" ): 3,   # row 6 (2026-09-12): appendCalleeNameRow's `"\" l=\"{}\"/>"` buffer went with the merge.
+    ( "src/serialize.h", "nb" ): 4,   # row 6 (2026-09-12): appendCalleeNameRow's `"\" l=\"{}\"/>"` buffer went with the merge.
                                       #   cut-fix lane A (2026-09-23): +2, sigsOpenTag's nb[96] — ' shown="{}" total="{}" capped="1"'
                                       #   (31 B literal + two size_t at 20 digits = 71 B worst case, against 95 usable + NUL) and
                                       #   ' docs_dropped="{}"' (16 B + 20 digits = 36 B). Counts only, no %s, nothing escaped.
+                                      #   lane/for-spine-span-068 (2026-10-04): +1, the same nb[96]'s ' docs_after_code="{}"'
+                                      #   (19 B + 20 digits = 39 B). A count, no %s, nothing escaped.
     ( "src/serialize.h", "precAttr" ): 1,
     ( "src/serialize.h", "rankAttr" ): 1,
     ( "src/serialize.h", "rc" ): 1,
@@ -594,7 +600,7 @@ if not bad:
 #            238 -> 239 calls/sites, 104 -> 105 rows). noteCacheReject's new `char detail[192]` names both version
 #            numbers on a refused cache blob; one formatTo of a literal and two std::uint32_t, rowed 'not-markup'
 #            (a stderr notice). Re-derived on the train 20 merged tree; no other train lane moves the population.
-EXPECTED = { "mentions": 351, "calls": 241, "sites": 241, "rows": 105, "widthforms": 0 }
+EXPECTED = { "mentions": 354, "calls": 244, "sites": 244, "rows": 107, "widthforms": 0 }
 #            2026-09-30 (#325 ruby_bases_unscoped=): +2 calls/+2 mentions/+2 sites, rows unchanged — graphGaugeAttrXml/Json (graphlegend.h) each format the absent-at-zero Ruby gauge into the SAME local buf[160]: one size_t, no string argument (21 + 20 digits worst case).
 #            2026-09-04 (capture-audit L6, H9): +1 call/+1 mention, sites/rows UNCHANGED — re-read, not
 #            re-counted. packConnect gained ONE snprintf into a new `char connectCeiling[32]` for the

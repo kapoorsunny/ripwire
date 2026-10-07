@@ -129,7 +129,8 @@ done
 # inert arm in a gate written for a ranking change is the failure mode this suite has been bitten by
 # twice. The first row is also the one that survives every budget: it is what the defect actually
 # costs on a corpus where 85 declarations push the definition off the end.
-first="$( tr '>' '\n' <"$TMP/lens" | sed -n 's/.*<d l="\([0-9]*\)" n="Widget" sc="\([^"]*\)" p="\([^"]*\)".*/\3::\2::Widget:\1/p' | sed 's#defoverdeclfix/##' | head -1 )"
+# A --for row may carry e="N" (the definition's end line) right after l= (lane/for-spine-span-068): optional here.
+first="$( tr '>' '\n' <"$TMP/lens" | sed -E -n 's/.*<d l="([0-9]*)"( e="[0-9]+")? n="Widget" sc="([^"]*)" p="([^"]*)".*/\4::\3::Widget:\1/p' | sed 's#defoverdeclfix/##' | head -1 )"
 [ "$first" = "z_widget.hpp::Widget::Widget:10" ] \
     && ok "the FIRST ranked row is the definition (z_widget.hpp:10) — the row that survives any budget" \
     || no "the first ranked row is $first, not the definition z_widget.hpp::Widget::Widget:10"
