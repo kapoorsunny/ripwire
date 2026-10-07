@@ -35,7 +35,10 @@ ln -sf "$BIN" "$BINDIR/ripwire"
 export PATH="$BINDIR:$PATH"
 export RIPWIRE_HOME="$TMP/home"; mkdir -p "$RIPWIRE_HOME"
 export TMPDIR="$TMP/tmp"; mkdir -p "$TMPDIR"
-unset RIPWIRE_METER_ARM RIPWIRE_METER RIPWIRE_ROUTE_METER
+unset RIPWIRE_METER RIPWIRE_ROUTE_METER
+# The unconfigured default arm is `auto` (issue #381), so the corpus pass below pins `treatment` to score the
+# classifier on every row; the default itself is asserted separately in the "default arm" section.
+export RIPWIRE_METER_ARM=treatment
 LOG="$RIPWIRE_HOME/routing.jsonl"
 
 run_hook()
@@ -146,11 +149,48 @@ tail -n1 "$LOG" | jq -e '.status == "abstain" and .reason == "cap"' >/dev/null 2
 : >"$LOG"
 export RIPWIRE_METER_ARM=control
 COUT="$( run_hook Bash "$( jq -cn '{command:"grep -rn controlPattern src/"}' )" "control-session-1" )"
-unset RIPWIRE_METER_ARM
+export RIPWIRE_METER_ARM=treatment
 if [ -z "$COUT" ]; then ok "control arm: injects nothing"; else no "control arm: injected anyway -- $COUT"; fi
 tail -n1 "$LOG" | jq -e '.status == "recommend" and .arm == "control" and .recommended == "--grep"' >/dev/null 2>&1 \
     && ok "control arm: still logs the recommend decision (status/arm/recommended all correct)" \
     || no "control arm: logged row wrong -- $( tail -n1 "$LOG" )"
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# Default arm (issue #381): no RIPWIRE_METER_ARM and no meter.conf resolves to `auto`, the meter's own
+# session-hash split. It used to be `treatment` for every session, so the registered treatment-minus-
+# control difference could never be computed. RED on a hook whose default is treatment. An explicit
+# `arm=treatment` in meter.conf is still honoured.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+DEFBAD=""; DEFCTL=0; DEFTRT=0; DEFCTLSID=""
+for sid in d1 d2 d3 d4 d5 d6 d7 d8; do
+    h="$( printf '%s' "$sid" | cksum | cut -d' ' -f1 )"
+    if [ "$(( h % 100 ))" -lt 50 ]; then want=control; DEFCTL=$(( DEFCTL + 1 )); [ -n "$DEFCTLSID" ] || DEFCTLSID="$sid"; else want=treatment; DEFTRT=$(( DEFTRT + 1 )); fi
+    : >"$LOG"
+    ( unset RIPWIRE_METER_ARM; run_hook Bash "$( jq -cn --arg c "grep -rn defaultArm$sid src/" '{command:$c}' )" "$sid" >/dev/null )
+    got="$( tail -n1 "$LOG" | jq -r '.arm // "<missing>"' 2>/dev/null )"
+    [ "$got" = "$want" ] || DEFBAD="$DEFBAD [$sid -> $got, auto says $want]"
+done
+[ -z "$DEFBAD" ] && [ "$DEFCTL" -gt 0 ] && [ "$DEFTRT" -gt 0 ] \
+    && ok "default arm: unconfigured toolroute follows the auto split (both arms populated: $DEFCTL control / $DEFTRT treatment of 8)" \
+    || no "default arm: unconfigured toolroute did not follow the auto split:$DEFBAD (control=$DEFCTL treatment=$DEFTRT)"
+: >"$LOG"; printf 'arm=treatment\n' >"$RIPWIRE_HOME/meter.conf"
+( unset RIPWIRE_METER_ARM; run_hook Bash "$( jq -cn '{command:"grep -rn confTreat src/"}' )" "$DEFCTLSID" >/dev/null )
+[ -n "$DEFCTLSID" ] && [ "$( tail -n1 "$LOG" | jq -r '.arm // "<missing>"' 2>/dev/null )" = "treatment" ] \
+    && ok "default arm: an explicit meter.conf arm=treatment is honoured over the auto default" \
+    || no "default arm: meter.conf arm=treatment gave $( tail -n1 "$LOG" | cut -c1-160 ) for control-side session [$DEFCTLSID]"
+rm -f "$RIPWIRE_HOME/meter.conf"
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# This hook's notification guard matches markers INSIDE a tool input; it deliberately does NOT carry the
+# prompt hooks' `<channel`/`<agent-message` wrapper prefixes (issue #381): a tool call is the agent's own
+# action, never a harness-delivered event, and `<channel>` is ordinary RSS/XML text that a grep pattern
+# legitimately names. A grep for it must still route.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+: >"$LOG"
+CHOUT="$( run_hook Grep "$( jq -cn '{pattern:"<channel>",path:"src"}' )" "chan-tool-1" )"
+tail -n1 "$LOG" | jq -e '.status == "recommend"' >/dev/null 2>&1 && [ -n "$CHOUT" ] \
+    && ok "a Grep whose pattern names <channel> still routes (the guard is for prompt wrappers, not tool inputs)" \
+    || no "a Grep for <channel> was suppressed: out=[$CHOUT] row=$( tail -n1 "$LOG" | cut -c1-160 )"
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 # Malformed / degenerate input: exit 0, empty (or valid-JSON) stdout, never a crash.

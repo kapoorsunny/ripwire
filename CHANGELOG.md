@@ -15,6 +15,19 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Changed — router and meter default to a random control arm; channel events and agent hand-backs are not prompts
+
+With no `~/.ripwire/meter.conf` and no `RIPWIRE_METER_ARM`, the Claude Code prompt router, the tool-call router and
+the meter used to put every session on `treatment`, so the registered treatment-versus-control comparison had no control
+group on a default install (issue #381). The unconfigured default is now `arm=auto`, the stable per-session split
+the meter already had; `arm=treatment` and `arm=control` are still honoured. The Claude Code and Codex prompt-router hooks
+and the `--help-task` classifier now treat a prompt that starts with `<channel` (an MCP channel event) or
+`<agent-message` (a sub-agent hand-back), followed by a space or `>`, as a harness event, like `<task-notification>` and
+`<system-reminder>`: no classification, a `skip-system` log row. `<channelz>`, `<agent-messages>` and a prompt that merely
+mentions a wrapper mid-sentence still route. `bench/routing_ab_report.py` prints per-arm counts, says `NO CONTROL ARM`
+when an arm has no prompts, and prints the registration's readout date, flagged once it has passed. Gates:
+`routehookcheck`, `codexpromptroutecheck`, `taskroutecheck`, `toolcallroutecheck`, `hookcheck`, `routingreportcheck`.
+
 
 ### Added — MCP `grep` rows carry the matched text and a `fetch_body` handle (CLI parity)
 

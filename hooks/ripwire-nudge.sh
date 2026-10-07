@@ -94,9 +94,12 @@ set -u
 # with no marker file and no shared state to go stale, including across the internal SessionStart
 # resets a long session can produce (see the post_nudge/post_sweep reset behavior above). It is reached
 # only when the arm config names the new literal `auto` (RIPWIRE_METER_ARM=auto, or `arm=auto` in
-# meter.conf) — UNSET still means treatment, exactly as before this fix, so a machine nobody has
-# touched keeps behaving exactly as it always has; going live with a real A/B population is a
-# deployment-time config write (`arm=auto`), not a change to what the script defaults to.
+# meter.conf). THAT WAS THE DEFAULT-OFF DESIGN, AND IT IS SUPERSEDED (issue #381, 2026-10-07): UNSET now
+# means `auto`. Field data from one machine that never wrote meter.conf showed the prompt router logging
+# 18968 treatment prompts and 0 control, so the registered treatment-minus-control difference could not be
+# computed. An explicit `arm=treatment` / RIPWIRE_METER_ARM=treatment is the opt-out, and any other value
+# still reads as treatment. The same default applies in hooks/ripwire-claude-route.sh and
+# hooks/ripwire-claude-toolroute.sh (their resolve_arm), so the three instruments still agree per session.
 #
 # THIS FIX DOES NOT CHANGE TREATMENT SEMANTICS. A session that lands on the treatment arm behaves
 # bit-for-bit as before: same nudges, same dedup, same sweep. What changes is only that a control arm
@@ -435,14 +438,12 @@ meter_init()
     #
     # The literal `control`/`treatment` still force an arm (an operator override, or a test harness
     # pinning one side) — that contract, and its "any unrecognized value reads as treatment" safety
-    # net, is UNCHANGED, on purpose: this file's own default stays `treatment` so a machine that never
-    # touches meter.conf keeps behaving exactly as it always has. What is NEW is a third literal value,
-    # `auto`, which activates the session-id hash split in `meter_auto_arm` — this is the fix's actual
-    # deliverable, but it is opt-in at the CONFIG layer (deployment writes `arm=auto` to
-    # ~/.ripwire/meter.conf) rather than a change to what an unconfigured hook does. That split keeps
-    # "does this commit change treatment semantics" answerable with "no" — nothing about this hook's
-    # behavior moves unless something now names `auto` where nothing was named before.
-    case "${RIPWIRE_METER_ARM:-$_conf_arm}" in
+    # net, is UNCHANGED, on purpose. The third literal value, `auto`, activates the session-id hash
+    # split in `meter_auto_arm`. Until issue #381 it was opt-in at the CONFIG layer and an unconfigured
+    # hook resolved `treatment`; an unconfigured hook (no env, no `arm=` line) now resolves `auto`, so
+    # a machine nobody has touched gets a real control arm. The opt-out is an explicit `arm=treatment`.
+    # UNSET (no env, no `arm=` in meter.conf) is `auto` as of issue #381 — see the note above.
+    case "${RIPWIRE_METER_ARM:-${_conf_arm:-auto}}" in
         control)    meter_arm="control" ;;
         auto)       meter_arm="$( meter_auto_arm "$session" )" ;;
         *)          meter_arm="treatment" ;;

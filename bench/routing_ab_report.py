@@ -36,8 +36,9 @@
 # and NO VERDICT below 40 recommended prompts per arm — that floor is enforced unconditionally below;
 # there is no flag that overrides it, and none should be added.
 #
-# WHAT THIS NEVER OPENS. Exactly the two paths named by --routing and --meter — nothing else on disk,
-# ever. routing.jsonl carries no prompt text by construction (a cksum and a byte length only), and this
+# WHAT THIS NEVER OPENS. Exactly the two paths named by --routing and --meter, plus the one registration
+# file docs/EVALS.md (--evals) read for the registered readout date and nothing else — no other path on
+# disk, ever. routing.jsonl carries no prompt text by construction (a cksum and a byte length only), and this
 # script never reads a field that could hold any (`detail`, transcripts, repo content); every number
 # printed below is a count, a rate, or a file path the caller supplied.
 #
@@ -65,7 +66,9 @@
 # Exit 0 on a normal readout OR a refusal (refusing below the floor is a correct answer, not a
 # failure); non-zero only when an input file's content cannot be read as this instrument's data at all.
 import argparse
+import datetime
 import os
+import re
 import subprocess
 import sys
 import json
@@ -74,6 +77,63 @@ MIN_RECOMMENDED_PER_ARM = 40   # docs/EVALS.md §4 — pre-registered before the
 KEEP_PP = 10.0                 # KEEP >= +10pp; REWORD is (0, +10)pp; REMOVE <= 0pp
 ARMS = ("treatment", "control")
 AGENT = "claude"                # routing.jsonl is shared with the Codex router; see header
+
+
+def default_evals():
+    """docs/EVALS.md next to this script (bench/ and docs/ are siblings in the checkout)."""
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "docs", "EVALS.md")
+
+
+# The prompt-router registration (docs/EVALS.md, "Claude Code prompt router — PRE-REGISTERED 2026-09-02")
+# carries its readout date as bold lines `**Readout date:** YYYY-MM-DD` and, once, `**Readout date, extended
+# once:** YYYY-MM-DD`. Both are read from that section only.
+REGISTRATION_HEADING = "### Claude Code prompt router — PRE-REGISTERED"
+READOUT_RE = re.compile(r"^\*\*Readout date:\*\*\s*(\d{4}-\d{2}-\d{2})", re.M)
+READOUT_EXT_RE = re.compile(r"^\*\*Readout date, extended once:\*\*\s*(\d{4}-\d{2}-\d{2})", re.M)
+
+
+def read_readout_dates(path):
+    """(readout, extended, problem). Dates are `datetime.date` or None; `problem` is a one-line reason
+    when the readout date could not be read (file missing, section missing, no date line) so the report
+    says "unknown" and why instead of staying silent."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+    except OSError:
+        return None, None, "registration file not readable: %s" % os.path.normpath(path)
+    start = text.find(REGISTRATION_HEADING)
+    if start < 0:
+        return None, None, "no prompt-router registration section in %s" % os.path.normpath(path)
+    nxt = text.find("\n### ", start + 1)
+    section = text[start:nxt if nxt > 0 else len(text)]
+    m, e = READOUT_RE.search(section), READOUT_EXT_RE.search(section)
+    try:
+        readout = datetime.date.fromisoformat(m.group(1)) if m else None
+        extended = datetime.date.fromisoformat(e.group(1)) if e else None
+    except ValueError:
+        return None, None, "readout date in the registration is not a valid calendar date"
+    if readout is None:
+        return None, None, "the registration section carries no `**Readout date:**` line"
+    return readout, extended, None
+
+
+def readout_lines(readout, extended, problem, today):
+    """The report's readout-date lines: the registered date, how far it is from `today`, and a loud flag
+    once it has passed (a passed date is exactly when an unread, underpowered window needs a decision)."""
+    if problem:
+        return ["readout date: UNKNOWN -- %s" % problem]
+    lines = []
+    for label, d in (("prompt-router registered readout date", readout), ("prompt-router extended readout date (one-time)", extended)):
+        if d is None:
+            continue
+        delta = (today - d).days
+        if delta > 0:
+            lines.append("%s: %s -- PASSED %d day(s) ago (as of %s)" % (label, d.isoformat(), delta, today.isoformat()))
+        elif delta == 0:
+            lines.append("%s: %s -- TODAY" % (label, d.isoformat()))
+        else:
+            lines.append("%s: %s -- in %d day(s) (as of %s)" % (label, d.isoformat(), -delta, today.isoformat()))
+    return lines
 
 
 def default_home():
@@ -262,6 +322,17 @@ def report_one_router(router, routing_rows, meter_rows):
         print("%-10s %8d %12d %10d %8s %9d"
               % (arm, st["prompts"], st["recommended"], st["adopted"], rate_s, st["sessions"]))
 
+    # Per-arm counts on one line, and a LOUD flag for an empty arm: a window with no control prompts
+    # (the shipped default put every session on treatment until issue #381) cannot yield the registered
+    # treatment-minus-control difference no matter how long it runs.
+    print("arm counts: treatment=%d control=%d prompts"
+          % (arm_stats["treatment"]["prompts"], arm_stats["control"]["prompts"]))
+    for arm, other in (("control", "treatment"), ("treatment", "control")):
+        if arm_stats[arm]["prompts"] == 0:
+            print("!!! NO %s ARM -- %s has 0 prompts in this window (the other arm has %d); "
+                  "the registered treatment-minus-control difference CANNOT be computed from it !!!"
+                  % (arm.upper(), arm, arm_stats[other]["prompts"]))
+
     covered, total = join_coverage(prompts, meter_rows)
     if total:
         print("join coverage: %d/%d routing row(s) (%.1f%%) have a session with >=1 meter row"
@@ -294,6 +365,12 @@ def main():
                      help="path to substitution.jsonl (default: $RIPWIRE_HOME or ~/.ripwire, substitution.jsonl)")
     ap.add_argument("--since", default=None, help="only rows with at >= this ISO8601 timestamp")
     ap.add_argument("--until", default=None, help="only rows with at < this ISO8601 timestamp")
+    ap.add_argument("--evals", default=default_evals(),
+                     help="path to docs/EVALS.md, read only for the prompt-router registration's readout "
+                          "date (default: the docs/EVALS.md next to this script)")
+    ap.add_argument("--today", default=None,
+                     help="YYYY-MM-DD to compare the readout date against (default: the current UTC date; "
+                          "a fixed value makes the report reproducible)")
     ap.add_argument("--router", default=None,
                      help="report only this router (e.g. prompt, toolcall) instead of every router "
                           "present in the log")
@@ -311,6 +388,12 @@ def main():
               % args.meter, file=sys.stderr)
         return 1
 
+    try:
+        today = datetime.date.fromisoformat(args.today) if args.today else datetime.datetime.now(datetime.timezone.utc).date()
+    except ValueError:
+        print("routing_ab_report: --today must be YYYY-MM-DD, got %r" % args.today, file=sys.stderr)
+        return 2
+
     routing_rows = filter_window(routing_rows, args.since, args.until)
 
     print("routing_ab_report -- routing=%s meter=%s" % (args.routing, args.meter))
@@ -319,6 +402,10 @@ def main():
              len(meter_rows), meter_bad, "found" if meter_existed else "not found"))
     if args.since or args.until:
         print("window: [%s, %s)" % (args.since or "-inf", args.until or "+inf"))
+    # The registered readout date belongs to the PROMPT router's registration; the toolcall router has
+    # its own registration and is not dated here.
+    for line in readout_lines(*read_readout_dates(args.evals), today):
+        print(line)
 
     if args.router:
         routers = [args.router]

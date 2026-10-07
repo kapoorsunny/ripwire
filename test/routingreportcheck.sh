@@ -322,6 +322,57 @@ echo "$OUT8T" | grep -q '=== router=toolcall ===' && ok "--router=toolcall: show
 echo "$OUT8T" | grep -q '=== router=prompt ===' && no "--router=toolcall: leaked the prompt section too" \
     || ok "--router=toolcall: does not print the prompt section"
 
+# ── C/D: per-arm counts, a loud NO CONTROL ARM, and the registered readout date (issue #381) ──────────
+# A treatment-only log is what an unconfigured install used to produce. The report must say so in so many
+# words, however many treatment prompts there are, and must NOT say it when both arms have prompts.
+DC="$TMP/dc"; mkdir -p "$DC"
+python3 - "$DC" <<'PYEOF'
+import json, sys
+rows = [{"v": 2, "at": "2026-10-01T10:00:00Z", "agent": "claude", "event": "UserPromptSubmit", "status": "recommend",
+         "intent": "x", "recommended": "--for", "arm": "treatment", "session_hash": str(1000 + i),
+         "prompt_hash": str(2000 + i), "prompt_bytes": 10} for i in range(5)]
+open(sys.argv[1] + "/routing.jsonl", "w").write("\n".join(json.dumps(r) for r in rows) + "\n")
+open(sys.argv[1] + "/substitution.jsonl", "w").write("")
+PYEOF
+OUTC="$( run "$DC" )"
+echo "$OUTC" | grep -q 'NO CONTROL ARM' && ok "C1: a treatment-only log prints NO CONTROL ARM" \
+    || no "C1: treatment-only log did not say NO CONTROL ARM -- $OUTC"
+echo "$OUTC" | grep -q 'arm counts: treatment=5 control=0' && ok "C2: per-arm counts are printed (treatment=5 control=0)" \
+    || no "C2: per-arm count line missing or wrong -- $( echo "$OUTC" | grep 'arm counts' )"
+echo "$OUTC" | grep -q 'NO TREATMENT ARM' && no "C3: a log WITH treatment prompts claimed NO TREATMENT ARM" \
+    || ok "C3: no false NO TREATMENT ARM when treatment has prompts"
+echo "$OUT1" | grep -q 'NO CONTROL ARM' && no "C4: a log with both arms populated still printed NO CONTROL ARM" \
+    || ok "C4: both arms populated -> no NO CONTROL ARM line"
+echo "$OUT1" | grep -q 'arm counts: treatment=43 control=40' && ok "C5: per-arm counts on the both-arms fixture (43 treatment incl. 3 edge-case prompts / 40 control)" \
+    || no "C5: per-arm count line wrong on the 43/40 fixture -- $( echo "$OUT1" | grep 'arm counts' )"
+
+# The readout date is read from the registration file. Synthetic registrations pin each state; the last
+# arm reads the REAL docs/EVALS.md so the registration cannot lose its date without this gate noticing.
+EV="$TMP/evals.md"
+printf '## x\n\n### Claude Code prompt router — PRE-REGISTERED 2026-09-02 (test)\n\nbody\n\n**Readout date:** 2026-09-30\n**Readout date, extended once:** 2026-10-14\n\n### Next section\n\n**Readout date:** 2020-01-01\n' >"$EV"
+ro(){ python3 "$SCRIPT" --routing "$DC/routing.jsonl" --meter "$DC/substitution.jsonl" --evals "$EV" --today "$1" 2>&1; }
+ro 2026-10-07 | grep -q 'registered readout date: 2026-09-30 -- PASSED 7 day' && ok "D1: a passed readout date is printed and flagged PASSED" \
+    || no "D1: passed date not flagged -- $( ro 2026-10-07 | grep -i readout )"
+ro 2026-10-07 | grep -q 'extended readout date (one-time): 2026-10-14 -- in 7 day' && ok "D2: the extension date, not yet passed, is printed without the flag" \
+    || no "D2: extension date line wrong -- $( ro 2026-10-07 | grep -i extended )"
+ro 2026-09-20 | grep -q 'PASSED' && no "D3: nothing has passed on 2026-09-20 but the report said PASSED" \
+    || ok "D3: before both dates nothing is flagged PASSED"
+ro 2026-09-30 | grep -q 'registered readout date: 2026-09-30 -- TODAY' && ok "D4: on the day itself the line says TODAY" \
+    || no "D4: same-day line wrong -- $( ro 2026-09-30 | grep -i readout )"
+ro 2026-10-20 | grep -q 'extended readout date (one-time): 2026-10-14 -- PASSED 6 day' && ok "D5: the extension flags PASSED too, once it passes" \
+    || no "D5: passed extension not flagged -- $( ro 2026-10-20 | grep -i extended )"
+ro 2026-10-07 | grep -q '2020-01-01' && no "D6: a readout date from a LATER section leaked into the report" \
+    || ok "D6: only the prompt-router section's date is read"
+printf '## nothing here\n' >"$EV"
+ro 2026-10-07 | grep -q 'readout date: UNKNOWN' && ok "D7: a registration without a date prints UNKNOWN instead of staying silent" \
+    || no "D7: missing date not reported -- $( ro 2026-10-07 | grep -i readout )"
+python3 "$SCRIPT" --routing "$DC/routing.jsonl" --meter "$DC/substitution.jsonl" --evals "$TMP/no-such-evals.md" --today 2026-10-07 2>&1 \
+    | grep -q 'readout date: UNKNOWN.*not readable' && ok "D8: an unreadable registration file prints UNKNOWN" \
+    || no "D8: unreadable registration file not reported"
+python3 "$SCRIPT" --routing "$DC/routing.jsonl" --meter "$DC/substitution.jsonl" --today 2026-10-07 2>&1 \
+    | grep -Eq 'registered readout date: 20[0-9]{2}-[0-9]{2}-[0-9]{2} -- ' && ok "D9: the shipped docs/EVALS.md carries a parseable readout date" \
+    || no "D9: docs/EVALS.md's prompt-router registration has no parseable readout date"
+
 echo ""
 if [ "$fail" = 0 ]; then
     echo "ALL PASS"

@@ -623,7 +623,7 @@ LASTROW="$( meterrows "$DEFAULT_LOG" )"
 # ── M19-M20: the arm is on every row, and the PreToolUse path is now ARM-INDEPENDENT ───────────────
 # §RETIRED (2026-09-02): with both tiers silent in both arms, the PreToolUse path can no longer differ
 # by arm — so these arms assert exactly that, plus the two things that did NOT change: the arm is still
-# resolved, still recorded on the row, and still defaults to treatment. The one behaviour the arm does
+# resolved, still recorded on the row, and now defaults to the auto split (issue #381). The one behaviour the arm does
 # separate is the SessionStart primer, gated by A3/A4.
 # OR-chain pattern (P4.2, 2026-08-29): a literal `grep -rn needle .` would demote category to "" before
 # the arm is consulted, and these arms would pass for the wrong reason (nudge=none).
@@ -635,10 +635,31 @@ OUTM19="$( run_meter "$L19" "$( bashjson meter19 "grep -rn 'needle|other' ." )" 
     || no "M19 meter: arm=[$( meterrowget "$L19" 1 arm )] nudged=[$( meterrowget "$L19" 1 nudged )] nudge=[$( meterrowget "$L19" 1 nudge )] out=[$OUTM19]"
 TM20="$TMP/tm20"; mkdir -p "$TM20"; L20="$TMP/m20.jsonl"
 OUTM20="$( run_meter "$L20" "$( bashjson meter20 "grep -rn 'needle|other' ." )" "$TM20" )"
-[ "$( meterrowget "$L20" 1 arm )" = "treatment" ] && [ -z "$OUTM20" ] \
+# Issue #381: with no env override and no meter.conf the arm is now the `auto` split (it used to be
+# `treatment` for every session, so no control arm could ever exist). Expected side computed here the way
+# the meter hashes a session id.
+M20H="$( printf '%s' meter20 | cksum | cut -d' ' -f1 )"
+if [ "$(( M20H % 100 ))" -lt 50 ]; then M20WANT=control; else M20WANT=treatment; fi
+[ "$( meterrowget "$L20" 1 arm )" = "$M20WANT" ] && [ -z "$OUTM20" ] \
     && [ "$( meterrowget "$L20" 1 nudge )" = "retired" ] \
-    && ok "M20 meter: DEFAULT arm is treatment, and treatment's PreToolUse path is silent too" \
-    || no "M20 meter: default arm=[$( meterrowget "$L20" 1 arm )] nudge=[$( meterrowget "$L20" 1 nudge )] out=[${OUTM20:+set}]"
+    && ok "M20 meter: DEFAULT arm is the auto split ($M20WANT for this session), and the PreToolUse path is silent" \
+    || no "M20 meter: default arm=[$( meterrowget "$L20" 1 arm )] want=[$M20WANT] nudge=[$( meterrowget "$L20" 1 nudge )] out=[${OUTM20:+set}]"
+# Twin for the old default: an EXPLICIT treatment is still honoured, on a session the auto split would
+# have put in control (so the arm cannot pass by coincidence).
+M20CSID=""
+for _m in meter20c1 meter20c2 meter20c3 meter20c4 meter20c5 meter20c6; do
+    _mh="$( printf '%s' "$_m" | cksum | cut -d' ' -f1 )"; [ "$(( _mh % 100 ))" -lt 50 ] && { M20CSID="$_m"; break; }
+done
+TM20C="$TMP/tm20c"; mkdir -p "$TM20C"; L20C="$TMP/m20c.jsonl"
+run_meter "$L20C" "$( bashjson "$M20CSID" "grep -rn 'needle|other' ." )" "$TM20C" RIPWIRE_METER_ARM=treatment >/dev/null 2>&1
+[ -n "$M20CSID" ] && [ "$( meterrowget "$L20C" 1 arm )" = "treatment" ] \
+    && ok "M20c meter: an explicit RIPWIRE_METER_ARM=treatment is honoured over the auto default" \
+    || no "M20c meter: explicit treatment gave arm=[$( meterrowget "$L20C" 1 arm )] for control-side session [$M20CSID]"
+TM20D="$TMP/tm20d"; mkdir -p "$TM20D"; L20D="$TMP/m20d.jsonl"
+run_meter "$L20D" "$( bashjson "$M20CSID" "grep -rn 'needle|other' ." )" "$TM20D" >/dev/null 2>&1
+[ -n "$M20CSID" ] && [ "$( meterrowget "$L20D" 1 arm )" = "control" ] \
+    && ok "M20d meter: the same control-side session with no override lands in control (the default really is auto)" \
+    || no "M20d meter: unconfigured control-side session [$M20CSID] got arm=[$( meterrowget "$L20D" 1 arm )]"
 [ "$OUTM19" = "$OUTM20" ] \
     && ok "M20b meter: control and treatment produce BYTE-IDENTICAL PreToolUse output (both empty)" \
     || no "M20b meter: the arms still differ on the PreToolUse path: control=[$OUTM19] treatment=[$OUTM20]"

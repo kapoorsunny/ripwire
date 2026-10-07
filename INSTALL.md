@@ -185,6 +185,12 @@ rm -rf "$h/substitution.jsonl" "$h/routing.jsonl" "$h/routing-pending" "$h/meter
 rmdir "$h" 2>/dev/null || true
 ```
 
+`meter.conf` is optional and the installer never writes it. With no `meter.conf` (and no `RIPWIRE_METER_ARM`
+in the environment) the hooks assign each session to the `treatment` or `control` arm of the router and
+meter A/B at random, from a hash of the session id, so the A/B always has a control group. Control sessions
+get the same logging and no injected advice. To force every session onto one side, write `arm=treatment` or
+`arm=control` into `$h/meter.conf` (or set `RIPWIRE_METER_ARM`); `arm=auto` spells out the default.
+
 **4. The MCP server** (only if you added it).
 
 - Claude Code: `claude mcp remove ripwire`.
