@@ -29,7 +29,8 @@ in a Java class with an outside base drawn to an unrelated class's `flush`.
   import alias of the class); a constructed receiver (`new Foo().m()`); a class-name receiver; a chain of fields
   whose classes are stated (`this.bucket = new Schemas()`, Python `self.x = Foo()`, Go struct and embedded fields);
   Python `feed = parser.feed`. A JS/TS call on the class object reaches its `static` members only, and a call on an
-  instance never one. Ruby keeps only the language-neutral proof below (its own method lookup is separate work).
+  instance never one. A Ruby call's candidates that Ruby's own method lookup proves (the entries below) are its
+  answer, never `via="name"`.
 - **A call nothing proves is NAME-ONLY.** Its candidates the language's own lookup proves are its answer (an
   implicit receiver's class and bases, a free function in scope, the module a receiver alias names). With none
   proven, every same-file and same-directory candidate is listed — a lone global one too, because one candidate is
@@ -44,7 +45,7 @@ in a Java class with an outside base drawn to an unrelated class's `flush`.
 - Cost, measured over 210 calls on eight public repositories (`--no-cache`): +8.55% bytes in total; 32% of the
   `<s>`/`<c>`/`<e>` rows carry `via="name"`, most of them the map's `<c>` rows (C trees: no change). The gate is
   `test/receiverevidencecheck.sh` (every surface, CLI/MCP parity, census conservation, and near misses
-  for every evidence rule). Ingest records the receiver chain (`kParserVer` 146, `kCacheVersion` 29), so a cache
+  for every evidence rule). Ingest records the receiver chain (`kParserVer` 150, `kCacheVersion` 29), so a cache
   written by an earlier build is re-parsed.
 
 ### Changed — a Ruby call to self, or on an instance the code builds, answers from its own side: an instance never reaches `def self.m`
