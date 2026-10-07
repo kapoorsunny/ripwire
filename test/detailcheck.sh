@@ -41,7 +41,7 @@ bodies(){ grep -o '<b t=' "$1" | wc -l | tr -d ' '; }
 # default bundle carries it, so the shape without it no longer matched and arm #2 read "0 sigs blocks".
 # knob-honesty-068: a capped tag also carries its continuation, next="…" (the call that serves it uncut) — the block is the
 # same <sigs> block, so the shape admits the attribute; the count it asserts is unchanged.
-sigblocks(){ grep -oE '<sigs( shown="[0-9]+" total="[0-9]+" capped="1")?( docs_dropped="[0-9]+")?( next="[^"]*")?>' "$1" | wc -l | tr -d ' '; }
+sigblocks(){ grep -oE '<sigs( shown="[0-9]+" total="[0-9]+" capped="1")?( docs_dropped="[0-9]+")?( next_offset="[0-9]+")?( next="[^"]*")?( next_budget_tokens="[0-9]+")?>' "$1" | wc -l | tr -d ' '; }
 
 # ── #1: --detail=0 == no --detail (byte-identical, golden-neutral) ──────────────────────────────────────
 "$BIN" src --for="$TASK" --no-cache >"$TMP/plain" 2>/dev/null
