@@ -1482,9 +1482,11 @@ OUTA3="$( printf '%s' '{"session_id":"armss","cwd":"'"$REPO"'","source":"startup
     || no "A3b arm: control session-start row = [$( meterrowget "$LA3" 1 class )/$( meterrowget "$LA3" 1 arm )]"
 
 # A4: the positive control for A3. Suppressing the primer everywhere would pass A3 for the wrong reason.
+# The arm is pinned to treatment explicitly: the unconfigured default is the auto split (issue #381), under
+# which this session id could land in control; the default itself is asserted by M20/M20d.
 TA4="$TMP/ta4"; mkdir -p "$TA4"; LA4="$TMP/a4.jsonl"
 OUTA4="$( printf '%s' '{"session_id":"armsst","cwd":"'"$REPO"'","source":"startup"}' \
-    | env HOME="$METERHOME" RIPWIRE_METER_LOG="$LA4" RIPWIRE_METER_FIXTURE=1 \
+    | env HOME="$METERHOME" RIPWIRE_METER_LOG="$LA4" RIPWIRE_METER_FIXTURE=1 RIPWIRE_METER_ARM=treatment \
         PATH="$WRAP_PATH" TMPDIR="$TA4" bash "$HOOK" --session-start )"
 [ -n "$OUTA4" ] && printf '%s' "$OUTA4" | is_valid_json \
     && ok "A4 arm: the treatment arm still gets the SessionStart primer (A3's positive control)" \
