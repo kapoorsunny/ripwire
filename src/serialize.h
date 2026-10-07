@@ -4535,8 +4535,6 @@ struct SigsCutContinuation
     bool             json       = false; // the --json dialect: the re-run is --json too
     bool             pasteHandle = true; // false on MCP: the client re-calls the tool, so no CLI argv — the machine form,
                                          //   next_budget_tokens=, is the argument a re-call of the same tool needs
-    std::size_t      ledgerGapBytes = 0; // a CHARGED one also reserves this: the sig room the caller's dialect was given beyond what
-                                         //   its header honestly costs (the --for compact dialect, verbs_for.h compactLedgerGapBytes)
 };
 
 inline std::size_t sigsCutNextTokens( std::size_t blockBytes, std::size_t fixedBytes ) noexcept
@@ -4704,10 +4702,10 @@ inline std::size_t sigsCutContinuationReserve( const SigsCutContinuation* req, s
     }
     if( req->pasteHandle )
     {
-        return valueAttrBytes + req->ledgerGapBytes;   // terse: next= alone (sigsCutAttachContinuation)
+        return valueAttrBytes;   // terse: next= alone (sigsCutAttachContinuation)
     }
     const std::size_t clauses = withClauses ? kForSigsNextBudgetNote.size() + kForSigsNextOffsetNote.size() : 0u;
-    return valueAttrBytes + offsetAttrBytes + clauses + req->ledgerGapBytes;
+    return valueAttrBytes + offsetAttrBytes + clauses;
 }
 
 // The <sigs> open tag: `<sigs>` untrimmed; ` shown= total= capped="1"` when rows were cut or shrunk; ` docs_dropped=`
@@ -5121,13 +5119,20 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                                                            : sizeof( " next_budget_tokens=\"\"" ) - 1 + sigsDecimalDigits( cutNextTokens ),
             sizeof( " next_offset=\"\"" ) - 1 + sigsDecimalDigits( std::numeric_limits<std::uint32_t>::max() ), /*withClauses=*/true );
         const SigsTrimPlan plan = planSigsTrim( entries, totalRows, gateCut, total, payloadBudgetBytes,
-                                                sizeof( " shown=\"\" total=\"\" capped=\"1\"" ) - 1 + cutNextCost, sizeof( " docs_dropped=\"\"" ) - 1 );
+                                                sizeof( " shown=\"\" total=\"\" capped=\"1\"" ) - 1, sizeof( " docs_dropped=\"\"" ) - 1 );
         if( plan.ladderFires )
         {
             // one ladder ACTION on one entry, tail-first; every action re-checks the budget so the ladder
             // stops at the first fitting state. Pure function of (global rank, the kFor* constants) — the
             // ladder itself is trimSigLadder() above, shared verbatim with the JSON sibling (§A4a).
             trimSigLadder( entries, sigFiles, total, plan.effectiveBudget, entryCost );
+        }
+        // knob-honesty-068: a CHARGED continuation is paid FROM THE ROWS, byte for byte: the same ladder runs on past the cut
+        // until the block has given up its bytes, so block + continuation never exceeds the block the cut alone left — in
+        // either dialect, whatever the plan's slack (reserving it in the plan let that slack absorb it and the bundle grow).
+        if( plan.capped && cutNextCost > 0 )
+        {
+            trimSigLadder( entries, sigFiles, total, total > cutNextCost ? total - cutNextCost : 0u, entryCost );
         }
 
         // A2: the exact count, computed AFTER the ladder has made its final drop decisions (droppedPositiveCount
@@ -9548,10 +9553,14 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
                                                                   sizeof( ",\"sigs_next_offset\":" ) - 1 + sigsDecimalDigits( std::numeric_limits<std::uint32_t>::max() ),
                                                                   /*withClauses=*/false );
     const SigsTrimPlan plan = planSigsTrim( entries, totalRows, gateCut, total, payloadBudgetBytes,
-                                            sizeof( ",\"sigs_shown\":,\"sigs_total\":" ) - 1 + cutNextCost, sizeof( ",\"docs_dropped\":" ) - 1 );
+                                            sizeof( ",\"sigs_shown\":,\"sigs_total\":" ) - 1, sizeof( ",\"docs_dropped\":" ) - 1 );
     if( plan.ladderFires )
     {
         trimSigLadder( entries, sigFiles, total, plan.effectiveBudget, jsonSigEntryCost );
+    }
+    if( plan.capped && cutNextCost > 0 )   // knob-honesty-068: a charged continuation is paid from the rows (the XML twin's rule)
+    {
+        trimSigLadder( entries, sigFiles, total, total > cutNextCost ? total - cutNextCost : 0u, jsonSigEntryCost );
     }
     if( outCapped )
     {
