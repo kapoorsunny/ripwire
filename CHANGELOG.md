@@ -16,6 +16,31 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 ## [Unreleased]
 
 
+### Fixed — every disclosed cut names the call that recovers it: `--for`'s `<sigs>`, `--lint`'s per-rule floor, `--impact`'s import tier
+
+Three cuts were disclosed and still dead ends — counted, with no pasteable call that serves the rest:
+
+- **`--for` (and the MCP `for` twin, and `--for --json`).** A `<sigs shown= total= capped="1">` block cut by the payload
+  ceiling or an explicit `--token-budget` now carries `next=` — the same ranked lens re-run with the signatures given the
+  whole ceiling, sized from the untrimmed block so nothing is cut (`--for=TASK --signatures-only [ranking flags]
+  [--pack-top-n=N] --token-budget=T`) — and, when rows were dropped, `next_offset=`: the candidate index the cut starts at
+  (the last printed row's rank, so a slot that prints no row cannot skew it). `--json` carries `"sigs_next"` and
+  `"sigs_next_offset"`. The MCP twin carries no CLI argv (its ranking pipeline is its own): `next_budget_tokens=T` names
+  the `budget_tokens` a re-call needs, beside the same `next_offset=`. Present-only legend clauses define each. At the
+  default ceiling, and at any explicit ceiling wide enough that the signature side is frozen at the default's, it is exempt
+  from the signature trim — the rows shown are the ones they were. Under a tighter explicit ceiling (a hard one) it is
+  charged like `shown=`/`total=`, so `est_tokens` stays within the budget; measured at `--token-budget=2000`, that costs one
+  row on 11 of 20 queries — a row the `next=` itself serves. No budget, ceiling or token conversion changed.
+- **`--lint` / `--lint-rules` and `--sarif`.** A rule that spends its per-rule match budget (`count_capped="1"`) now makes
+  the root carry `findings_next=` (SARIF: `runs[0].properties.findingsNext`): only the floored rules, under a 10x budget,
+  through the new `--lint-max-per-rule=N` (the default stays 5000). A re-run still floored names its own.
+- **`--impact`.** A cut import tier dropped `importers_next=` when `--impact=SYM --limit=N` passed 120 bytes, so a long
+  selector lost its only continuation with no marker. It is now always emitted in full, like every other `next=`.
+
+Also: the `ripwire-handoff` skill passed `--top-k=20` to `--for`, which does not read it; it now spells
+`--signatures-only`. Gates: `forrankordercheck` (9), `lintbudgetcheck` (5), `impactimportcheck` (#9d).
+
+
 ### Added — MCP `grep` rows carry the matched text and a `fetch_body` handle (CLI parity)
 
 The MCP `grep` hit row was `{file, line, in}`: no matched text, so an agent re-read every file it had just searched, and
