@@ -1287,6 +1287,11 @@ struct ForLensRootFinish
     std::size_t      tokenBudget          = 0;
     int              maxTokens            = 0;
     bool             bodyCeiling          = false;
+    // knob-honesty-068 (orchestrator ruling 2026-10-07): a charged <sigs> continuation rode unpaid from the rank 1..4 floor
+    // (SigsCutReport::continuationUnpaidBytes) AND the document lands past its ceiling — byte allowance or budget_tokens.
+    // Decided by the caller on the finished document (a value, never a search of the text); labels it over_ceiling="1"
+    // with kForSigsFloorOverCeilingNote, which is true where kOverCeilingLegend's est_tokens reading may not be.
+    bool             sigsFloorOver        = false;
 };
 
 // PR #215 review: the finished header AND the number it prints, handed back together. finishForLensHeader
@@ -1370,9 +1375,13 @@ inline ForLensPricedHeader finishForLensHeaderPriced( std::string header, const 
     // clause unconditionally would charge every budgeted bundle for an attribute it does not carry. Monotone —
     // adding bytes only RAISES est_tokens — so one extra stage is exact and the flag never oscillates. The
     // definition rides the legend of the document that carries the attribute.
-    if( forLensOverCeiling( f.lastRungFired, f.tokenBudget, f.maxTokens, f.bodyCeiling, priced.first ) )
+    const bool namedCeilingOver = forLensOverCeiling( f.lastRungFired, f.tokenBudget, f.maxTokens, f.bodyCeiling, priced.first );
+    if( namedCeilingOver || f.sigsFloorOver )
     {
-        spliceBefore( header, " -->", /*fromEnd=*/true, f.overCeilingLegend );
+        // each clause rides only where its reading is true: the est_tokens/last-rung one when that predicate holds, the
+        // <sigs> floor one when the unpaid recovery handle is what crossed (knob-honesty-068) — both when both hold
+        spliceBefore( header, " -->", /*fromEnd=*/true, namedCeilingOver ? f.overCeilingLegend : std::string_view() );
+        spliceBefore( header, " -->", /*fromEnd=*/true, f.sigsFloorOver ? rw::kForSigsFloorOverCeilingNote : std::string_view() );
         overAttr = " over_ceiling=\"1\"";
         priced   = priceFixpoint( header.size() + f.nonHeaderMarkupBytes, overAttr.size() );
     }
@@ -2936,6 +2945,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // tokens: 995 vs 816). So the compact charge is capped at the FULL dialect's charge for the same header, computed by the
         // same rule: rows(default) ⊇ rows(full) by construction, and a default that pays more header than full never gets more
         // room for rows than full had.
+        std::size_t compactLedgerGapBytes = 0;   // knob-honesty-068: how much MORE sig room this compact header was given than full's
         if( compactLegendOn )
         {
             ForLensHeaderParts fullParts = headerParts;
@@ -2945,7 +2955,8 @@ std::optional<int> runForLens( const MainDispatch& d )
                                               + confidenceEarlyAttrsBytes + confidenceEarlyNoteBytes + forAtAttrStr.size()
                                               + rw::kForFileTailLegend.size() + idRouteParts.bytes();
             const std::size_t fullCharged     = fullExempt > fullHeaderBytes ? fullHeaderBytes : fullHeaderBytes - fullExempt;
-            chargedHeaderBytes = std::min( chargedHeaderBytes, fullCharged );
+            chargedHeaderBytes    = std::min( chargedHeaderBytes, fullCharged );
+            compactLedgerGapBytes = fullCharged - chargedHeaderBytes;   // >= 0 by the min above
         }
         const std::size_t fixedBytes = chargedHeaderBytes + legoStr.size() + composeStr.size() + routeStr.size() + 6;   // + "</ctx>"
         // the auto bundle's SECTION SPLIT — the sig side's claim is capped so an explicit ceiling wider
@@ -3009,11 +3020,17 @@ std::optional<int> runForLens( const MainDispatch& d )
         // two regimes are argued): CHARGED exactly when an explicit ceiling's sig side is the whole ceiling (nothing
         // downstream can pay, and the ceiling is hard); exempt at the default and when the sig side is frozen at the
         // default's share (forSigSideCeiling), so those ranked sets — and forbudgetmonotoncheck's identity — are untouched.
-        // A charged one is paid from the rows byte for byte (serialize.h packSignatures), so a capped bundle never grows
-        // past the bytes the cut alone left it — in the compact dialect too, whose sig ledger leans on the header rungs.
+        // A charged one is paid from the rows byte for byte (serialize.h paySigsContinuationFromRows), so a capped bundle never
+        // grows past the bytes the cut alone left it. THE COMPACT DIALECT ALSO PAYS FROM FULL'S ROOM: its sig ledger charges
+        // less header than it emits and leans on the header rungs to land inside the ceiling, so a charged one also reserves
+        // the room the compact charge was given beyond full's (compactLedgerGapBytes) — in the plan, so only a block the ladder
+        // already trims pays it: a capped compact answer serves the rows the full one does and lands no further over its
+        // ceiling (compactlegendcheck P4). An uncapped answer is untouched. AT THE FLOOR (rank 1..4, nothing left to shed) the
+        // handle still ships and an overshoot is labelled (rootFinish.sigsFloorOver below; orchestrator ruling 2026-10-07).
         const bool                    forSigsNextCharged = cfg.tokenBudget > 0 && sigSideCeiling == bundleBudget;
         const std::string             forRankFlags       = forRankShapingFlags( cfg );
-        const rw::SigsCutContinuation forSigsNext{ cfg.forTask, cfg.packTopN, forRankFlags, fixedBytes, forSigsNextCharged, /*json=*/false };
+        const rw::SigsCutContinuation forSigsNext{ cfg.forTask, cfg.packTopN, forRankFlags, fixedBytes, forSigsNextCharged, /*json=*/false,
+                                                   /*pasteHandle=*/true, /*ledgerGapBytes=*/forSigsNextCharged ? compactLedgerGapBytes : 0u };
         bool        forSigsCapped      = false;   // did the H1 ladder trim <sigs>? — decides the budget_bytes= legend clause below
         rw::SigsCutReport forSigsCut;             // cut-fix lane A: the <sigs> tag's shown/total/docs_dropped — its clauses below
         forSigsCut.continuationRequest = &forSigsNext;   // knob-honesty-068: IN — the capped block's continuation
@@ -3497,6 +3514,17 @@ std::optional<int> runForLens( const MainDispatch& d )
                                                                        /*hasRouteAttr=*/!routeNoteRaw.empty(), kNotes );
             headerStr                = std::move( chosen.header );
             rootFinish.lastRungFired = ( chosen.rung == rw::CeilingRung::OverCeiling );
+            // knob-honesty-068 (orchestrator ruling 2026-10-07): the recovery handle ALWAYS ships. When the <sigs> floor could
+            // not pay for its next= and the document it rides in lands past its ceiling — the byte allowance, or the token
+            // budget the root names — the root says so: over_ceiling="1" + kForSigsFloorOverCeilingNote. Read off the
+            // FINISHED document (the header this ladder chose + every byte stdout receives); the label only adds bytes,
+            // so a document over before it is over after it.
+            if( forSigsCut.continuationUnpaidBytes > 0 )
+            {
+                const ForLensPricedHeader asChosen = finishForLensHeaderPriced( headerStr, rootFinish );
+                rootFinish.sigsFloorOver = asChosen.header.size() + emittedNonHeaderBytes > ladderCeiling
+                                        || asChosen.estTokens > cfg.tokenBudget;
+            }
         }
         headerStr = finishForLensHeader( std::move( headerStr ), rootFinish );
 
