@@ -57,6 +57,13 @@
 #   (M)  the MCP `for` twin: the same e= on the C rows, none on the extent_suspect rows, and a legend clause for e=.
 #   (L)  legend: --legend=full defines e= and says what it does NOT mean (absent = unknown, not 0; l= is the name's
 #        line, not the definition's first line).
+#   (N)  the experimental RIPWIRE_FOR_ENDLINES switch (serialize.h forEndLinesMode; default auto = arm (B)'s rule):
+#        always — e= on the --token-budget=1200 rows, XML and JSON, and on the MCP `for` rows under budget_tokens=1200,
+#        with the SAME <d> row set (n p l r) as auto there (e= never costs a row); est_tokens vs the budget is REPORTED
+#        (may exceed it — that is why auto is the default), not gated. never — no e= and no e= clause at the default
+#        ceiling (XML, JSON, MCP), same row set as auto. auto — byte-identical to unset (default and 1200). An unknown
+#        value ("sometimes", "Always", "") — byte-identical to unset (so e= stays at the default: never read as never)
+#        plus one stderr line naming the switch. Near miss: always does not put e= on --pack-signatures rows.
 #   (K)  the predicates can fail: a row with e= < l=, a row with e= on an md row, a missing e= on a code row, and a
 #        name-only hop row are each caught; a document with no --for root is never a pass. Every run must exit 0.
 #
@@ -449,6 +456,105 @@ if bad:
 print( "  PASS  L: e= defined with its NOT-meaning" )
 PY
     [ $? -eq 0 ] || fail=1
+fi
+
+echo "(N) RIPWIRE_FOR_ENDLINES=always|auto|never (experimental; unset = auto)"
+NQ="--for=How is a per-request context created?"
+# runenv VALUE OUT ARGS… — VALUE "-" leaves the switch unset
+runenv(){ local v="$1" f="$2"; shift 2
+    if [ "$v" = "-" ]; then ( cd "$CORPUS/ts" && env -u RIPWIRE_FOR_ENDLINES "$BIN" . --no-cache "$@" >"$f" 2>"$f.err" )
+    else ( cd "$CORPUS/ts" && RIPWIRE_FOR_ENDLINES="$v" "$BIN" . --no-cache "$@" >"$f" 2>"$f.err" ); fi
+    printf '%s' "$?" >"$f.rc"; }
+# rowset FILE — the <d> rows (XML) or "sigs" entries (JSON) as "n p l r" lines, e= ignored; "NOROWS" when none
+cat >"$TMP/rowset.py" <<'PY'
+import json, re, sys
+exec( open( sys.argv[ 1 ] ).read() )
+text = load( sys.argv[ 2 ] )
+if text.lstrip().startswith( "{" ):
+    rows = [ ( r.get( "n" ), r.get( "p" ), str( r.get( "l" ) ), str( r.get( "r" ) ) ) for r in json.loads( text ).get( "sigs", [] ) ]
+    est = json.loads( text ).get( "est_tokens" )
+else:
+    rows = [ ( a.get( "n" ), a.get( "p" ), a.get( "l" ), a.get( "r" ) ) for _, a in drows( text ) ]
+    m = re.search( r'<ctx [^>]*\best_tokens="([0-9]+)"', text ); est = m.group( 1 ) if m else None
+print( "EST %s" % est )
+print( "\n".join( " ".join( map( str, r ) ) for r in rows ) if rows else "NOROWS" )
+PY
+rowset(){ python3 "$TMP/rowset.py" "$TMP/rows.py" "$1" | sed 1d; }
+estof(){ python3 "$TMP/rowset.py" "$TMP/rows.py" "$1" | sed -n '1s/^EST //p'; }
+has_e(){ grep -Eq ' e="[0-9]+"|"e":[0-9]+' "$1"; }
+has_e_clause(){ grep -Eq 'e= on a d row|d e= its last line' "$1"; }
+for spec in "xml|" "json|--json"; do
+    tag="${spec%%|*}"; extra="${spec#*|}"
+    set -- "$NQ" --token-budget=1200; [ -n "$extra" ] && set -- "$@" "$extra"
+    NA="$TMP/n.always.$tag"; NU="$TMP/n.unset1200.$tag"; NX="$TMP/n.auto1200.$tag"
+    runenv always "$NA" "$@"; runenv - "$NU" "$@"; runenv auto "$NX" "$@"
+    if ran_ok "$NA" "N/always/$tag" && ran_ok "$NU" "N/unset1200/$tag" && ran_ok "$NX" "N/auto1200/$tag"; then
+        if [ "$( rowset "$NU" )" = NOROWS ]; then no "N/always/$tag: the 1200-token answer has no rows (premise)"
+        elif ! has_e "$NA"; then no "N/always/$tag: RIPWIRE_FOR_ENDLINES=always carries no e= under --token-budget=1200"
+        elif has_e "$NU"; then no "N/always/$tag: premise — the unset 1200-token answer already carries e= (arm B's rule moved)"
+        elif [ "$( rowset "$NA" )" != "$( rowset "$NU" )" ]; then no "N/always/$tag: forcing e= changed the shown row set (e= cost or moved a row)"
+        else ok "N/always/$tag: e= present under --token-budget=1200, same $( rowset "$NU" | wc -l | tr -d ' ' ) rows as auto (est_tokens $( estof "$NU" ) -> $( estof "$NA" ) vs budget 1200, reported not gated)"; fi
+        if cmp -s "$NX" "$NU"; then ok "N/auto/$tag: RIPWIRE_FOR_ENDLINES=auto is byte-identical to unset at --token-budget=1200"
+        else no "N/auto/$tag: auto differs from unset at --token-budget=1200"; fi
+    fi
+    set -- "$NQ"; [ -n "$extra" ] && set -- "$@" "$extra"
+    NN="$TMP/n.never.$tag"; ND="$TMP/n.unset.$tag"; NXD="$TMP/n.auto.$tag"
+    runenv never "$NN" "$@"; runenv - "$ND" "$@"; runenv auto "$NXD" "$@"
+    if ran_ok "$NN" "N/never/$tag" && ran_ok "$ND" "N/unset/$tag" && ran_ok "$NXD" "N/auto/$tag"; then
+        if ! has_e "$ND"; then no "N/never/$tag: premise — the unset default answer carries no e="
+        elif has_e "$NN" || has_e_clause "$NN"; then no "N/never/$tag: RIPWIRE_FOR_ENDLINES=never still carries e= or its clause at the default ceiling"
+        elif [ "$( rowset "$NN" )" != "$( rowset "$ND" )" ]; then no "N/never/$tag: dropping e= changed the shown row set"
+        else ok "N/never/$tag: no e= and no e= clause at the default ceiling, same rows as auto"; fi
+        if cmp -s "$NXD" "$ND"; then ok "N/auto/$tag: RIPWIRE_FOR_ENDLINES=auto is byte-identical to unset at the default"
+        else no "N/auto/$tag: auto differs from unset at the default"; fi
+        [ -s "$ND.err" ] && no "N/unset/$tag: the unset run wrote to stderr: $( head -c 200 "$ND.err" )"
+    fi
+done
+nu=0
+for bad in sometimes Always ""; do
+    NB="$TMP/n.unknown.$nu"; nu=$(( nu + 1 ))
+    runenv "$bad" "$NB" "$NQ"
+    if ran_ok "$NB" "N/unknown '$bad'"; then
+        if ! cmp -s "$NB" "$TMP/n.unset.xml"; then no "N/unknown '$bad': stdout differs from unset (an unknown value must fall back to auto)"
+        elif ! has_e "$NB"; then no "N/unknown '$bad': no e= at the default (read as never)"
+        elif [ "$( grep -c 'RIPWIRE_FOR_ENDLINES' "$NB.err" )" != 1 ]; then no "N/unknown '$bad': expected exactly one stderr line naming RIPWIRE_FOR_ENDLINES, got: $( head -c 300 "$NB.err" )"
+        else ok "N/unknown '$bad': falls back to auto (stdout == unset, e= kept) and says so once on stderr"; fi
+    fi
+done
+for v in always never; do
+    NM="$TMP/n.mcp.$v.json"; mkdir -p "$TMP/mcphome"
+    if [ "$v" = always ]; then bargs=',"budget_tokens":1200'; else bargs=''; fi
+    printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+                   '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"for","arguments":{"path":"'"$CORPUS/ts"'","task":"How is a per-request context created?"'"$bargs"'}}}' \
+      | ( cd "$CORPUS/ts" && TMPDIR="$TMP/mcphome" RIPWIRE_FOR_ENDLINES="$v" "$BIN" --mcp >"$NM" 2>/dev/null ); printf '%s' "$?" >"$NM.rc"
+    if ran_ok "$NM" "N/mcp/$v"; then
+        python3 - "$TMP/rows.py" "$NM" "$v" <<'PY'
+import json, re, sys
+exec( open( sys.argv[ 1 ] ).read() )
+v = sys.argv[ 3 ]
+lines = [ l for l in open( sys.argv[ 2 ], encoding="utf-8", errors="replace" ) if l.strip() ]
+try:
+    text = json.loads( lines[ -1 ] )[ "result" ][ "content" ][ 0 ][ "text" ]
+except Exception as err:
+    print( "  FAIL  N/mcp/%s: no readable MCP for answer (%s)" % ( v, err ) ); sys.exit( 1 )
+rows = drows( text )
+withE = [ a for _, a in rows if "e" in a ]
+if not rows:
+    print( "  FAIL  N/mcp/%s: no <d> rows (premise)" % v ); sys.exit( 1 )
+if v == "always" and not withE:
+    print( "  FAIL  N/mcp/always: budget_tokens=1200 rows carry no e=" ); sys.exit( 1 )
+if v == "never" and ( withE or "e= on a d row" in text or "d e= its last line" in text ):
+    print( "  FAIL  N/mcp/never: e= or an e= legend clause at the default ceiling" ); sys.exit( 1 )
+print( "  PASS  N/mcp/%s: MCP for %s (%d of %d rows with e=)" % ( v, "carries e= under budget_tokens=1200" if v == "always" else "carries no e= and no clause", len( withE ), len( rows ) ) )
+PY
+        [ $? -eq 0 ] || fail=1
+    fi
+done
+NP="$TMP/n.packsig.xml"; ( cd "$CORPUS/c" && RIPWIRE_FOR_ENDLINES=always "$BIN" . --no-cache --pack-signatures >"$NP" 2>"$NP.err" ); printf '%s' "$?" >"$NP.rc"
+if ran_ok "$NP" "N/near-miss"; then
+    if ! grep -q '<d ' "$NP"; then no "N/near-miss: --pack-signatures produced no <d> rows (premise)"
+    elif has_e "$NP"; then no "N/near-miss: RIPWIRE_FOR_ENDLINES=always put e= on --pack-signatures rows (the switch is --for only)"
+    else ok "N/near-miss: RIPWIRE_FOR_ENDLINES=always leaves --pack-signatures rows without e="; fi
 fi
 
 echo "(K) the predicates can fail"

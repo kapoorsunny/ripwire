@@ -27,7 +27,11 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
   signature-row byte budget, so the default ceiling admits the same rows it admitted before; it costs about 8 bytes
   per row. An answer whose explicit ceiling is TIGHTER than the default signature budget (`--token-budget` below it, a
   body ceiling, MCP `budget_tokens` likewise) carries no `e=`: its est_tokens promise and its rows stay exactly what they
-  were. A ceiling at or above the default serves the default's `<sigs>`, `e=` included.
+  were. A ceiling at or above the default serves the default's `<sigs>`, `e=` included. For measurement only, the
+  experimental environment switch `RIPWIRE_FOR_ENDLINES=always|auto|never` moves that one decision (CLI `--for` in both
+  dialects and MCP `for`): `auto`, the default, is the rule above; `always` adds `e=` under every ceiling with the same
+  rows, so est_tokens may then exceed a tight budget; `never` drops it everywhere. Any other value falls back to `auto`
+  and says so on stderr. It is not a flag and may be removed once measured.
   `--pack-signatures`, `--pack-task`, `--from-trace` and the map keep their bytes.
 - **Code above docs.** On a question that does not ask about docs, the code rows of the SHOWN signature set now come
   first and its markdown rows after them. It is a reorder of the same rows: the score order and the byte budget still

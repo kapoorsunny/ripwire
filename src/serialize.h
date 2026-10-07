@@ -4285,7 +4285,7 @@ inline constexpr std::string_view kForEndLineLegend =
 // The " e=\"N\"" run, spliced into a rendered <d …> head right after its l= value (the head always opens `<d l="N"`,
 // sigRowHead). Kept OUT of the head the budget ledger measures, so the ranked set a row budget admits is the one it
 // admitted before e= existed (owner ruling: exempt from the signature-row budget; its bytes are reported,
-// explain-or-fail, never traded for a row). Only at the default ceiling (forLensRules).
+// explain-or-fail, never traded for a row). Only where endLinesFitCeiling says e= rides (forLensRules).
 inline void writeSigHeadWithEnd( XmlWriter& w, std::string_view head, std::uint32_t endLine )
 {
     if( endLine == 0 )
@@ -4334,9 +4334,84 @@ inline constexpr SigLensRules forLensRules( bool docsAfterCode, bool endLines ) 
 // est_tokens <= the budget: exempt, e= broke that promise; charged, it cost rows (the compact dialect's header leaves no
 // slack — compactlegendcheck (P4)). There the answer carries no e= at all — no row and no legend clause — and is the
 // answer it was before e= existed: a row is worth more than the end line of the rows around it.
-inline constexpr bool endLinesFitCeiling( std::size_t budgetTokens, bool bodyCeiling ) noexcept
+//
+// RIPWIRE_FOR_ENDLINES — an EXPERIMENTAL measurement switch, not a feature (owner, 2026-10-07: answer fully first, then
+// measure with adjustable knobs). It moves only this one decision, so CLI --for (XML and JSON) and MCP `for` follow it alike:
+//   unset or "auto" — the rule above (the default; byte-identical to the switch not existing);
+//   "always"        — e= under EVERY ceiling, a tighter explicit one and a body ceiling included. The shown row set does
+//                     not change (e= is never charged to rows), so est_tokens <= the budget may NOT hold there — the very
+//                     reason auto is the default; the round-2 knob arm reports it rather than hiding it;
+//   "never"         — no e= anywhere, the default regime included.
+// Any other value (case, spaces and the empty string included) is a recoverable config problem: it falls back to auto and
+// says so once per process on stderr (siblift.h's shape) — never read as never. No flag and no legend change: the legend
+// clause follows the rows. Gate: test/forsigspancheck.sh (N).
+enum class ForEndLinesMode : std::uint8_t
 {
+    Auto,
+    Always,
+    Never,
+};
+struct ForEndLinesSetting
+{
+    ForEndLinesMode mode    = ForEndLinesMode::Auto;
+    bool            unknown = false;   // set to a value that is none of auto|always|never — mode is then Auto
+};
+inline constexpr ForEndLinesSetting forEndLinesSettingParse( const char* env ) noexcept
+{
+    if( env == nullptr )
+    {
+        return {};
+    }
+    const std::string_view v( env );
+    if( v == "auto" )
+    {
+        return {};
+    }
+    if( v == "always" )
+    {
+        return { ForEndLinesMode::Always, false };
+    }
+    if( v == "never" )
+    {
+        return { ForEndLinesMode::Never, false };
+    }
+    return { ForEndLinesMode::Auto, true };
+}
+static_assert( forEndLinesSettingParse( nullptr ).mode == ForEndLinesMode::Auto && !forEndLinesSettingParse( nullptr ).unknown );
+static_assert( forEndLinesSettingParse( "never" ).mode == ForEndLinesMode::Never );
+static_assert( forEndLinesSettingParse( "Never" ).mode == ForEndLinesMode::Auto && forEndLinesSettingParse( "Never" ).unknown );
+static_assert( forEndLinesSettingParse( "" ).unknown );
+// Read once per process: the environment does not change under a run, and an MCP server asks per call.
+inline ForEndLinesMode forEndLinesMode()
+{
+    static const ForEndLinesMode mode = []
+    {
+        const ForEndLinesSetting s = forEndLinesSettingParse( std::getenv( "RIPWIRE_FOR_ENDLINES" ) );
+        if( s.unknown )
+        {
+            // the value itself is not echoed: environment bytes are not ours to print unescaped
+            rw::emitTo( stderr, "ripwire: RIPWIRE_FOR_ENDLINES is set to a value other than always|auto|never — --for e= follows the default rule (auto)\n" );
+        }
+        ENSURES( !s.unknown || s.mode == ForEndLinesMode::Auto, "an unknown RIPWIRE_FOR_ENDLINES value falls back to auto, never to never" );
+        return s.mode;
+    }();
+    return mode;
+}
+inline constexpr bool endLinesFitCeilingFor( ForEndLinesMode mode, std::size_t budgetTokens, bool bodyCeiling ) noexcept
+{
+    switch( mode )
+    {
+    case ForEndLinesMode::Always: return true;
+    case ForEndLinesMode::Never:  return false;
+    case ForEndLinesMode::Auto:   break;
+    }
     return !bodyCeiling && ( budgetTokens == 0 || budgetBytesForTokens( budgetTokens ) >= kForPayloadBudgetBytes );
+}
+static_assert( endLinesFitCeilingFor( ForEndLinesMode::Auto, 0, false ) && !endLinesFitCeilingFor( ForEndLinesMode::Auto, 0, true ) );
+static_assert( endLinesFitCeilingFor( ForEndLinesMode::Always, 1, true ) && !endLinesFitCeilingFor( ForEndLinesMode::Never, 0, false ) );
+inline bool endLinesFitCeiling( std::size_t budgetTokens, bool bodyCeiling )
+{
+    return endLinesFitCeilingFor( forEndLinesMode(), budgetTokens, bodyCeiling );
 }
 
 // ── CODE ABOVE DOCS, AS A REORDER OF THE SHOWN SET (filter.h CODE ABOVE DOCS; gate test/forsigspancheck.sh (R)) ─────────
