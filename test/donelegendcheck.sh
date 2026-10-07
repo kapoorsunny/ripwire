@@ -175,8 +175,46 @@ printf '%s' "$DIRT" >> "$FX/src/base.cpp"
 # 213 there, so the ceiling moves by less than the growth (45 B of headroom left) — a ratchet, not an allowance.
 run_budget qd_dirty       3900  8574  "$FX"  --quality-delta
 run_budget qd_dirty_scope 5200 10512  "$FX"  --quality-delta "--scope=src/*"
-run_budget sd_uses        3800  4112  "$FX"  --safe-delete=classifyWidth
+# sd_uses 3800 -> 4100 (2026-10-07, lane count-floor-068, CALLSITE-LINE): every safe-delete <c> row now carries
+# sites_l=, the caller's call-site LINES beside p= (the caller's definition line) — graded answers that named every
+# caller were scored wrong for printing only definition lines — and the law this gate pins (no emitted name is
+# undefined) puts its one defining sentence in the full legend exactly when a row carries it (verbs_navigate.h,
+# flags.hasSitesL). Measured on this fixture: 3662 -> 4086 B (+424, the sentence alone); sd_none (no caller row, no
+# sites_l=) does not move (3659). The pin is the next multiple of 100 over the measured total. The OLD ceiling is
+# not dropped: the twin arm below holds everything EXCEPT that sentence at 3800, so the rest of the essay cannot
+# re-inflate under the new headroom.
+run_budget sd_uses        4100  4112  "$FX"  --safe-delete=classifyWidth
 run_budget sd_none        3800  4112  "$FX"  --safe-delete=tangle
+# twin of the pre-2026-10-07 sd_uses ceiling: the sd_uses legend with the sites_l= sentence cut out still fits 3800 B.
+# The cut is only taken when the row really carries sites_l= AND the sentence is found once, start to end;
+# any other premise FAILs (a cut that silently removes nothing, or removes the wrong text, would prove nothing).
+sdRest="$( python3 - "$WORK/sd_uses.xml" <<'PY'
+import re, sys
+doc  = open( sys.argv[1], 'rb' ).read().decode( 'utf-8', 'replace' )
+m    = re.match( r'\A(?:\s*<!--.*?-->)+', doc, re.S )
+leg  = m.group( 0 ) if m else ''
+body = doc[ len( leg ): ]
+if not leg or 'sites_l="' not in body:
+    print( 'NOPREMISE row-without-sites_l' ); sys.exit( 0 )
+a, z = 'sites_l= on a c row', 'Two calls on one line are one site. '
+i = leg.find( a ); j = leg.find( z, i + 1 ) if i >= 0 else -1
+if i < 0 or j < 0 or leg.count( a ) != 1:
+    print( 'NOPREMISE sentence-not-found-once' ); sys.exit( 0 )
+rest = leg[ :i ] + leg[ j + len( z ): ]
+print( len( rest.encode() ), len( leg.encode() ) - len( rest.encode() ) )
+PY
+)"
+case "$sdRest" in
+    NOPREMISE*) no "(a) sd_uses twin (old 3800 ceiling minus the sites_l= sentence) cannot measure: ${sdRest#NOPREMISE }" ;;
+    *)  read -r restB cutB <<EOF
+$sdRest
+EOF
+        if [ -n "${restB:-}" ] && [ "$restB" -eq "$restB" ] 2>/dev/null && [ "$restB" -le 3800 ]; then
+            ok "(a) sd_uses twin: legend minus the sites_l= sentence ($cutB B) is $restB B <= 3800 B (the pre-CALLSITE-LINE ceiling)"
+        else
+            no "(a) sd_uses twin: legend minus the sites_l= sentence ($cutB B) is ${restB:-?} B > 3800 B — the rest of the essay re-inflated"
+        fi ;;
+esac
 # tg_empty 1200 -> 1400 (2026-09-04, capture-audit wave-1 close, lane L4 M15): the zero-row root now carries
 # graph_ambiguous=/graph_unresolved= (the resolver gauge every graph-floored root spells, floormarkcheck arm 11),
 # and two emitted attributes must be DEFINED in this document (arm (d) below) — the shortest honest sentence is
@@ -243,6 +281,9 @@ present sd_uses 'untested-radius: callers or uses exist'
 absent  sd_uses 'none-found: zero callers AND zero uses'
 present sd_none 'none-found: zero callers AND zero uses'
 absent  sd_none 'untested-radius: callers or uses exist'
+# sites_l= (CALLSITE-LINE, 2026-10-07) is defined exactly where a caller row carries it: sd_uses has one caller row, sd_none none.
+present sd_uses 'sites_l= on a c row'
+absent  sd_none 'sites_l='
 
 echo
 echo "=== (d) COVERAGE — every attribute the root emits is DEFINED in that document's own legend =========="
