@@ -86,6 +86,31 @@ inline bool isSuperRoot( std::string_view root ) noexcept
     return root == "super" || root == "base";
 }
 
+// The innermost function/method of `id`'s file whose span strictly holds `id`'s span; kNoNode when none. `byFile` is
+// fileId → that file's functions/methods sorted by sigStartByte. Shared by ReceiverEvidence and graph.h FalseEdgeRules.
+inline NodeId innermostEnclosingFn( const IngestResult& ing, const std::vector<std::vector<NodeId>>& byFile, NodeId id )
+{
+    const Symbol& inner = ing.symbols[ id ];
+    if( inner.fileId >= byFile.size() )
+    {
+        return kNoNode;
+    }
+    NodeId best = kNoNode;
+    for( NodeId c : byFile[ inner.fileId ] )
+    {
+        const Symbol& s = ing.symbols[ c ];
+        if( s.sigStartByte > inner.sigStartByte )
+        {
+            break;   // sorted by start: nothing later can hold it
+        }
+        if( c != id && s.endByte >= inner.endByte && ( s.sigStartByte < inner.sigStartByte || s.endByte > inner.endByte ) )
+        {
+            best = c;   // later starts are more inner
+        }
+    }
+    return best;
+}
+
 struct ReceiverEvidence
 {
     static constexpr std::size_t kWalkCap = 64;   // classes visited per base walk; deterministic (sorted chaUp)
@@ -320,28 +345,7 @@ struct ReceiverEvidence
 
     // ── queries ───────────────────────────────────────────────────────────────────────────────────────────────────────
     // the innermost function/method of the same file whose span strictly holds `id`; kNoNode when none
-    NodeId enclosingFn( NodeId id ) const
-    {
-        const Symbol& inner = ing.symbols[ id ];
-        if( inner.fileId >= fnsByFile.size() )
-        {
-            return kNoNode;
-        }
-        NodeId best = kNoNode;
-        for( NodeId c : fnsByFile[ inner.fileId ] )
-        {
-            const Symbol& s = ing.symbols[ c ];
-            if( s.sigStartByte > inner.sigStartByte )
-            {
-                break;
-            }
-            if( c != id && s.endByte >= inner.endByte && ( s.sigStartByte < inner.sigStartByte || s.endByte > inner.endByte ) )
-            {
-                best = c;
-            }
-        }
-        return best;
-    }
+    NodeId enclosingFn( NodeId id ) const { return innermostEnclosingFn( ing, fnsByFile, id ); }
     // the class a typed local names in `from` or a function enclosing it; nullptr when untyped (or tombstoned)
     const std::string* typedLocal( NodeId from, std::string_view var ) const
     {

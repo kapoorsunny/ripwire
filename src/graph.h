@@ -4907,29 +4907,7 @@ struct FalseEdgeRules
         return false;
     }
     // the innermost function/method of the same file whose span strictly holds `id`'s span; kNoNode when none
-    NodeId enclosingFunction( NodeId id ) const
-    {
-        const Symbol& inner = ing.symbols[ id ];
-        if( inner.fileId >= functionsByFile.size() )
-        {
-            return kNoNode;
-        }
-        NodeId best = kNoNode;
-        for( NodeId c : functionsByFile[ inner.fileId ] )
-        {
-            const Symbol& s = ing.symbols[ c ];
-            if( s.sigStartByte > inner.sigStartByte )
-            {
-                break;   // sorted by start: nothing later can hold it
-            }
-            const bool holds = c != id && s.endByte >= inner.endByte && ( s.sigStartByte < inner.sigStartByte || s.endByte > inner.endByte );
-            if( holds )
-            {
-                best = c;   // later starts are more inner
-            }
-        }
-        return best;
-    }
+    NodeId enclosingFunction( NodeId id ) const { return innermostEnclosingFn( ing, functionsByFile, id ); }
 
     // Rule (1) for a receiverless call, per language. Nothing dropped → Keep: the ladder decides exactly as before. What
     // is left when something was dropped is narrowed by the language's own visibility where the extractor records it;
@@ -5206,6 +5184,36 @@ inline std::vector<std::string> goModuleTreePaths( std::string_view text )
     return paths;
 }
 
+// FE-B: a Go package's import path — its go.mod's module path, then the package directory below the go.mod's directory
+// (`example.com/qm` + `quoted/lib` under `quoted` → `example.com/qm/lib`); "" when the go.mod has no module line.
+inline std::string goPackageImportPath( std::string_view modulePath, std::string_view modDir, std::string_view pkgDir )
+{
+    if( modulePath.empty() )
+    {
+        return {};
+    }
+    std::string_view below = pkgDir.substr( std::min( modDir.size(), pkgDir.size() ) );
+    below.remove_prefix( below.starts_with( '/' ) ? 1 : 0 );
+    std::string path( modulePath );
+    if( !below.empty() )
+    {
+        path.append( 1, '/' ).append( below );
+    }
+    return path;
+}
+
+// FE-B: record `fileId`'s package import path, its go.mod found in disk directory `disk` — root-relative, the walk's
+// `walkRel` cut at `walkCut` (npos: the root itself)
+inline void noteGoPackagePath( const IngestResult& ing, FalseEdgeRules& rules, const HashMap<std::string, std::string>& modLineOfDir,
+                               const std::string& disk, std::uint32_t fileId, std::string_view walkRel, std::size_t walkCut )
+{
+    if( const auto ml = modLineOfDir.find( disk ); ml != modLineOfDir.end() )
+    {
+        const std::string_view modDir = walkCut == std::string_view::npos ? std::string_view{} : walkRel.substr( 0, walkCut );
+        rules.goPackagePath[ fileId ] = goPackageImportPath( ml->second, modDir, includerDir( rootRelPath( ing, fileId ) ) );
+    }
+}
+
 // FE-A's Go module census: for every Go file, the go.mod at or above its directory INSIDE the root (read once per
 // directory); every module path found joins goModules. A file with none above it is unknown (goUnderModule 0).
 inline void collectGoModules( const IngestResult& ing, FalseEdgeRules& rules )
@@ -5223,7 +5231,6 @@ inline void collectGoModules( const IngestResult& ing, FalseEdgeRules& rules )
         }
         std::string_view rel  = rootRelPath( ing, s.fileId );
         std::string      disk = diskPath( ing, s.fileId );
-        const std::string_view fileDir = includerDir( rel );
         // walk up as many directories as the root-relative path has, never above the root
         while( true )
         {
@@ -5246,14 +5253,7 @@ inline void collectGoModules( const IngestResult& ing, FalseEdgeRules& rules )
             if( !it->second.empty() )
             {
                 rules.goUnderModule[ s.fileId ] = 1;
-                // FE-B: the package's import path — the module path, then the file's directory below the go.mod's
-                if( const auto ml = modLineOfDir.find( disk ); ml != modLineOfDir.end() && !ml->second.empty() )
-                {
-                    const std::string_view modDir = relCut == std::string_view::npos ? std::string_view{} : rel.substr( 0, relCut );
-                    std::string_view       below  = fileDir.substr( std::min( modDir.size(), fileDir.size() ) );
-                    below.remove_prefix( below.starts_with( '/' ) ? 1 : 0 );
-                    rules.goPackagePath[ s.fileId ] = below.empty() ? ml->second : ml->second + "/" + std::string( below );
-                }
+                noteGoPackagePath( ing, rules, modLineOfDir, disk, s.fileId, rel, relCut );
                 for( const std::string& m : it->second )
                 {
                     if( seenModule.try_emplace( m, '\0' ).second )
