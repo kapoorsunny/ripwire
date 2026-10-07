@@ -37,6 +37,8 @@
 #      implementors_shown= + implementors_next=; (negative) all rows listed => no shown/next attribute.
 #   L  <lego> implementors_floor: an inherit clause naming the interface that bound nowhere (a cross-language base)
 #      floors the count on the bundle AND the targeted verb; (negative) without it, no marker.
+#   L2 (negatives) a bound Rust `impl Trait for T` and a twice-opened Ruby class do not floor (the graph re-keys
+#      their derived type); (near miss) a Rust impl for a type the tree never defines still floors.
 #   M  MCP twins: grep's `enclosing` JSON carries callers_floor/floor_next exactly where the CLI <enc> does; the MCP
 #      `for` lego block equals the CLI's.
 #   N  legend: every new attribute is defined in the answer that carries it (compact and full dialects).
@@ -288,6 +290,27 @@ IF_L="$( first_iface "$( run tsl --lego=Router )" )"
 IF_LB="$( run tsl '--for=which router classes implement the Router interface' | grep -oE '<iface n="Router"[^>]*>' | head -1 )"
 if [ "$( attr "$IF_LB" implementors_floor )" = 1 ]; then ok "(L) the --for bundle carries the same floor"; else no "(L) bundle: $IF_LB"; fi
 case "$( first_iface "$( run ts --lego=Router )" )" in *implementors_floor=*) no "(L) a fully bound interface carries implementors_floor" ;; *) ok "(L) no floor when every inherit clause bound" ;; esac
+
+# ── L2: the derived type is the one the GRAPH bound, not the reference's enclosing symbol ─────────────────
+# graph.h's inheritance pass re-keys two languages' derived type: a Rust `impl Trait for T` header sits outside T's
+# span (the ref carries T's NAME in `qualifier`; fromSymbol is whatever encloses the impl), and a reopened Ruby class
+# is ONE implementor (rubyBases.canonicalClass), so the clause in the second `class Foo < Base` comes from a symbol id
+# the implementor list does not hold. Both are BOUND clauses and must not floor; a Rust impl for a type the tree
+# never defines is the near miss that still must.
+echo "=== L2: a bound Rust impl / a reopened Ruby class is not evidence of a miss; an impl for an undefined type is ==="
+mkdir -p "$W/rs" "$W/rsg" "$W/rb"
+printf 'pub trait Shape { fn area(&self) -> u32; }\npub struct Widget { n: u32 }\nimpl Shape for Widget { fn area(&self) -> u32 { self.n } }\n' > "$W/rs/lib.rs"
+cp "$W/rs/lib.rs" "$W/rsg/lib.rs"; printf 'impl Shape for Ghost { fn area(&self) -> u32 { 0 } }\n' >> "$W/rsg/lib.rs"
+printf 'class Base\nend\nclass Foo < Base\n  def a; end\nend\nclass Foo < Base\n  def b; end\nend\n' > "$W/rb/a.rb"
+IF_RS="$( first_iface "$( run rs --lego=Shape )" )"
+[ "$( attr "$IF_RS" implementors )" = 1 ] || no "(L2) premise: Rust Shape must have its one implementor: $IF_RS"
+case "$IF_RS" in *implementors_floor=*) no "(L2) a bound Rust impl floors implementors=: $IF_RS" ;; *) ok "(L2) Rust impl Shape for Widget (bound): no floor" ;; esac
+IF_RB="$( first_iface "$( run rb --lego=Base )" )"
+[ "$( attr "$IF_RB" implementors )" = 1 ] || no "(L2) premise: the reopened Ruby class must be one implementor: $IF_RB"
+case "$IF_RB" in *implementors_floor=*) no "(L2) a reopened Ruby class floors implementors=: $IF_RB" ;; *) ok "(L2) Ruby class Foo < Base opened twice (bound): no floor" ;; esac
+IF_RSG="$( first_iface "$( run rsg --lego=Shape )" )"
+[ "$( attr "$IF_RSG" implementors )" = 1 ] && [ "$( attr "$IF_RSG" implementors_floor )" = 1 ] \
+    && ok "(L2) Rust impl Shape for an undefined Ghost (unbound) still floors" || no "(L2) near miss: $IF_RSG"
 
 # ── M: MCP twins ─────────────────────────────────────────────────────────────────────────────────────────
 echo "=== M: the MCP grep and for twins say the same thing ==="
