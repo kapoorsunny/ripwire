@@ -268,11 +268,17 @@ inline std::vector<CallerFloor> callerFloors( const IngestResult& ing, const Gra
     if( !pending.empty() )
     {
         // A call from a symbol with an edge into ANY definition of the name was bound somewhere — to this row or to a
-        // same-named sibling — so it is not evidence of a miss.
+        // same-named sibling — so it is not evidence of a miss. Nor is a call from a definition of the name ITSELF: the
+        // graph drops self-loops (CallDisposition::Self), so recursion commits no edge, yet the call bound to this very
+        // definition. By name, like the rest: a definition calling a same-named function elsewhere is read as recursion.
         const auto* inRo = g.inEdges.rowOffsets();
         const auto* inCi = g.inEdges.colIndices();
         const countfloor::IdsOfName boundCallers = countfloor::relatedByName( ing, rowsOfName, g.wOutDeg.size(),
-            [ & ]( NodeId id, std::vector<NodeId>& into ) { into.insert( into.end(), inCi + inRo[id], inCi + inRo[id + 1] ); } );
+            [ & ]( NodeId id, std::vector<NodeId>& into )
+            {
+                into.push_back( id );
+                into.insert( into.end(), inCi + inRo[id], inCi + inRo[id + 1] );
+            } );
         countfloor::markUnboundSpellings( ing, rowsOfName, boundCallers, countfloor::isCallSpelling, countfloor::fromIsBound,
                                           [ & ]( std::uint32_t row ) { out[row].isFloor = true; } );
 
