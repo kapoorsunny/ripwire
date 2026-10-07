@@ -727,6 +727,7 @@ jobs:
       # file, an edit, a root switch, a memory release) and queried again each time. A cached ValueRefIndex once outlived
       # the index it pointed into (heap-use-after-free) and no single-query gate could see it. The gate drives that session
       # on this binary for 20 cycles and checks every answer against a one-shot CLI run; one binary plays both roles.
+      # A failure leaves the gate's sanitizer reports in /tmp/asanlog-mcpreload.* for the upload step below.
       - name: Sanitizer-only class — MCP index reloads under ASan (test/mcpreloadasancheck.sh)
         run: RIPWIRE_BIN=asan/ripwire bash test/mcpreloadasancheck.sh
 

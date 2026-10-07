@@ -911,5 +911,12 @@ else
     ok "no process of this gate outlives it"
 fi
 echo "mcpreloadasancheck: ${ELAPSED}s"
+# keep the sanitizer reports past the mktemp cleanup, where CI's failure upload (/tmp/asanlog*) finds them: the FAIL row above
+# keeps only the first 3000 characters of one report, and the freed-by / allocated-by stacks are the part that follows
+if [ "$fail" -ne 0 ] && [ -n "$( ls -A "$TMP/san" 2>/dev/null )" ]; then
+    KEEP="$( mktemp -d "${RIPWIRE_SAN_KEEP_DIR:-/tmp}/asanlog-mcpreload.XXXXXX" 2>/dev/null )" \
+        && cp "$TMP"/san/* "$TMP"/*.err "$KEEP"/ 2>/dev/null \
+        && echo "mcpreloadasancheck: sanitizer reports kept in $KEEP"
+fi
 if [ "$fail" -eq 0 ]; then echo "mcpreloadasancheck: ALL PASS"; else echo "mcpreloadasancheck: FAIL"; fi
 exit "$fail"
