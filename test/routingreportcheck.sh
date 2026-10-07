@@ -372,6 +372,9 @@ python3 "$SCRIPT" --routing "$DC/routing.jsonl" --meter "$DC/substitution.jsonl"
 python3 "$SCRIPT" --routing "$DC/routing.jsonl" --meter "$DC/substitution.jsonl" --today 2026-10-07 2>&1 \
     | grep -Eq 'registered readout date: 20[0-9]{2}-[0-9]{2}-[0-9]{2} -- ' && ok "D9: the shipped docs/EVALS.md carries a parseable readout date" \
     || no "D9: docs/EVALS.md's prompt-router registration has no parseable readout date"
+python3 "$SCRIPT" --routing "$DC/routing.jsonl" --meter "$DC/substitution.jsonl" --today not-a-date >/dev/null 2>"$TMP/today.err"; RCT=$?
+[ "$RCT" = 2 ] && grep -q -- '--today must be YYYY-MM-DD' "$TMP/today.err" && ok "D10: a malformed --today is a usage error (exit 2), not a silent default" \
+    || no "D10: --today not-a-date gave rc=$RCT stderr=$( cat "$TMP/today.err" )"
 
 echo ""
 if [ "$fail" = 0 ]; then

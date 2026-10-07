@@ -355,6 +355,31 @@ def report_one_router(router, routing_rows, meter_rows):
     return 0
 
 
+def parse_today(arg):
+    """`--today` as a date (default: the current UTC date), or None when it is not YYYY-MM-DD."""
+    if not arg:
+        return datetime.datetime.now(datetime.timezone.utc).date()
+    try:
+        return datetime.date.fromisoformat(arg)
+    except ValueError:
+        return None
+
+
+def print_readout(evals_path, today):
+    """The registered readout date lines. They belong to the PROMPT router's registration; the toolcall
+    router has its own registration and is not dated here."""
+    for line in readout_lines(*read_readout_dates(evals_path), today):
+        print(line)
+
+
+def pick_routers(requested, routing_rows):
+    """The routers to report: the one asked for, else every router in the log (prompt first), else the
+    empty prompt-router table so a log with nothing in it still shows its shape."""
+    if requested:
+        return [requested]
+    return routers_present(routing_rows) or [DEFAULT_ROUTER]
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="adoption-within-two A/B readout for the Claude Code routers (docs/EVALS.md §4 and "
@@ -388,9 +413,8 @@ def main():
               % args.meter, file=sys.stderr)
         return 1
 
-    try:
-        today = datetime.date.fromisoformat(args.today) if args.today else datetime.datetime.now(datetime.timezone.utc).date()
-    except ValueError:
+    today = parse_today(args.today)
+    if today is None:
         print("routing_ab_report: --today must be YYYY-MM-DD, got %r" % args.today, file=sys.stderr)
         return 2
 
@@ -402,19 +426,9 @@ def main():
              len(meter_rows), meter_bad, "found" if meter_existed else "not found"))
     if args.since or args.until:
         print("window: [%s, %s)" % (args.since or "-inf", args.until or "+inf"))
-    # The registered readout date belongs to the PROMPT router's registration; the toolcall router has
-    # its own registration and is not dated here.
-    for line in readout_lines(*read_readout_dates(args.evals), today):
-        print(line)
+    print_readout(args.evals, today)
 
-    if args.router:
-        routers = [args.router]
-    else:
-        routers = routers_present(routing_rows)
-        if not routers:
-            routers = [DEFAULT_ROUTER]   # nothing in the log yet -- still show the empty prompt-router table
-
-    for router in routers:
+    for router in pick_routers(args.router, routing_rows):
         report_one_router(router, routing_rows, meter_rows)
 
     return 0
