@@ -288,6 +288,10 @@ tools = json.loads( line )[ "result" ][ "tools" ]
 # ARGUMENT, no prose: whereis takes `listing` (defs|refs|all, the CLI --whereis-listing= twin), whose default (defs) lists the
 # definitions and counts the references. Attributed: whereis schema 714 -> 810 B (+96 B, the field and its obliged
 # description), whereis description unchanged at 701 B, every other tool unchanged. Headroom after this line: 22 B.
+# RE-MEASURED 2026-10-07 (lane/lean-answers-068 fix round 1), CEILING UNMOVED at 46,850: 46,828 -> 46,846 B. The listing
+# field's description now says what its default does ("defs (refs counted), refs or all; default: the shorter page":
+# absent `listing` serves the defs page only when it is strictly shorter than the all page), +18 B in whereis's schema;
+# every other tool unchanged. Headroom after this line: 4 B.
 CEILING = 46850
 manifest = len( json.dumps( { "tools": tools }, separators = ( ",", ":" ) ) )
 descBytes   = sum( len( t[ "description" ] ) for t in tools )

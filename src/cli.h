@@ -385,7 +385,7 @@ struct Config
     std::string_view laneBrief;                              // --brief=FILE: one non-blank line per lane, each ranked on its own
     bool             whereisFlag     = false;               // --whereis was given at all (a bare/empty value still routes to the
                                                              // handler and refuses loudly rather than falling through to the map)
-    std::string_view whereisListing;                        // --whereis-listing=defs|refs|all (default defs; crossref.h WhereisListing)
+    std::string_view whereisListing;                        // --whereis-listing=defs|refs|all (default: the shorter of defs and all; crossref.h WhereisListing)
     std::string_view whereis;                               // --whereis=SYM: every ref whose TREE contains SYM,
                                                              // HEAD first, with on-head= saying whether the live line has it at all.
                                                              // Scans each ref's FULL tree; each distinct blob is read once (content-
@@ -2094,12 +2094,16 @@ inline constexpr char kHelpTail[] =
         "                               is invisible. Add --with-history: a <fate> row then says v=\"never\" or v=\"removed\"\n"
         "                               with the commit, date and file that removed it. Remote-tracking refs are excluded\n"
         "                               (they mirror local ones); refs are capped, narrow with --stray-content=SUBSTR.\n"
-        "                               LISTING: by default only the kind=\"def\" rows are listed; the kind=\"ref\" rows are\n"
-        "                               counted in one <refs count=N next=...> element (see --whereis-listing).\n"
-        "    --whereis-listing=WHICH    with --whereis: which rows to list, defs (the default), refs or all\n"
-        "                               defs lists every kind=\"def\" row and COUNTS the kind=\"ref\" rows in one\n"
-        "                               <refs count=N next=...> element whose next= lists exactly them (refs). With no ref\n"
-        "                               row, or no def row (the mentions are then the answer), every hit is listed and the\n"
+        "                               LISTING: by default only the kind=\"def\" rows are listed and the kind=\"ref\" rows\n"
+        "                               counted in one <refs count=N next=...> element, when that page is strictly shorter\n"
+        "                               than listing every hit; otherwise every hit is listed (see --whereis-listing).\n"
+        "    --whereis-listing=WHICH    with --whereis: which rows to list, defs, refs or all (default: the shorter page).\n"
+        "                               The default lists defs when that page is strictly shorter in bytes than all, else\n"
+        "                               all (a tie lists all). defs lists every kind=\"def\" row and COUNTS the kind=\"ref\"\n"
+        "                               rows in one <refs count=N next=...> element whose next= lists exactly them\n"
+        "                               (refs). kind=\"def\" is the parser's label: a definition it does not\n"
+        "                               model (define_method, setattr, a name bound by assignment) is a counted ref. With no\n"
+        "                               ref row, or no def row (the mentions are then the answer), every hit is listed and the\n"
         "                               root carries no listing=. all lists every row, the whole hit list. shown=/capped=\n"
         "                               and --limit/--offset window the LISTED rows; hits= counts every row. Refused\n"
         "                               without --whereis, and on an unknown value.\n"

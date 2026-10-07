@@ -2313,7 +2313,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     // — the shared triple (flag + problem + the per-fault clause selectorrefuse.h speaks for
                     // the CLI), not a hits="0" answer about the literal string. `seedFault` distinguishes it
                     // from the non-git degrade, which is the other way whereisText returns "".
-                    crossref::WhereisListing listing = crossref::WhereisListing::Defs;
+                    crossref::WhereisListing listing = crossref::WhereisListing::ShorterOfDefsAll;
                     const std::string listingRefusal = whereisListingFromArg( strArg( "listing" ),
                                                                               mcpdetail::findRawValue( args, "listing" ).isPresent, listing );
                     resp = !listingRefusal.empty() ? errResultMsg( -32602, listingRefusal ) : pagedResult( [ & ]( McpPageArgs pg )

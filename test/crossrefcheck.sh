@@ -502,6 +502,9 @@ printf '#include "lean.h"\nint zqLean( int x )\n{\n    return x + 1;\n}\nint zqD
 printf '#include "lean.h"\nint useA( void ) { return zqLean( 1 ); }\nint useB( void ) { return zqLean( 2 ); }\n' >"$LR/use.c"
 printf '# notes\n\nzqLean is the entry point; zqMentionOnly is a word no code defines.\n' >"$LR/NOTES.md"
 { printf '#include "lean.h"\n'; i=0; while [ $i -lt 70 ]; do printf 'int many%d( void ) { return zqLean( %d ); }\n' $i $i; i=$((i+1)); done; } >"$LR/many.c"
+# fix round 1 (review B1): a symbol with ONE short ref row, where the defs page pays more than it elides
+printf 'int zqOne( void ) { return 1; }\n' >"$LR/one.c"
+printf 'int oneUse( void ) { return zqOne(); }\n' >"$LR/one_use.c"
 lg add -A; lg commit -qm base
 LHEAD="$( git -C "$LR" rev-parse --short=9 HEAD )"; LFEAT="$( git -C "$LR" rev-parse --short=9 feat-lean )"
 lw(){ "$BIN" "$LR" --whereis="$1" --no-cache "${@:2}" 2>/dev/null; }
@@ -580,6 +583,71 @@ if command -v python3 >/dev/null 2>&1; then
         || no "LEAN (L10): the MCP twin differs from the CLI"
 else
     printf '  SKIP  LEAN (L10) MCP twin (no python3)\n'
+fi
+
+# ── THE DEFAULT IS THE SHORTER PAGE (fix round 1, review B1; crossref.h whereisServedListing) ────────────────────
+# The default serves the defs page only when it is STRICTLY shorter, in bytes, than the listing=all page (as written
+# AND in the compact dialect); otherwise it serves the all page. An explicit --whereis-listing=defs is served as asked,
+# so each arm reads the two explicit pages of the same binary and checks which one the default is, byte for byte.
+nbytes(){ printf '%s' "$1" | wc -c | tr -d ' '; }
+# (L11) a 1-ref symbol: the defs page is LONGER than the all page, so the default IS the all page (no listing=, no <refs>)
+O_D="$( lw zqOne )"; O_A="$( lw zqOne --whereis-listing=all )"; O_F="$( lw zqOne --whereis-listing=defs )"
+{ [ -n "$( printf '%s' "$O_A" | hits_of ref )" ] && printf '%s' "$O_F" | grep -q '<refs count="1"' \
+  && [ "$( nbytes "$O_F" )" -gt "$( nbytes "$O_A" )" ] && [ "$O_D" = "$O_A" ]; } \
+    && ok "LEAN (L11): 1-ref symbol — defs page $( nbytes "$O_F" ) B > all page $( nbytes "$O_A" ) B, so the default is byte-identical to listing=all" \
+    || { no "LEAN (L11): the 1-ref default is not the (shorter) all page: default $( nbytes "$O_D" ) B, all $( nbytes "$O_A" ) B, defs $( nbytes "$O_F" ) B"; printf '%s\n' "$O_D" | lroot; }
+# (L12) a many-ref symbol (73 refs) stays lean: the default IS the explicit defs page, strictly shorter than all
+M_F="$( lw zqLean --whereis-listing=defs )"; M_A="$( lw zqLean --whereis-listing=all )"
+{ [ "$LDEF" = "$M_F" ] && printf '%s' "$LDEF" | lroot | grep -q ' listing="defs"' && [ "$( nbytes "$M_F" )" -lt "$( nbytes "$M_A" )" ]; } \
+    && ok "LEAN (L12): 73-ref symbol — the default is the defs page ($( nbytes "$M_F" ) B < all $( nbytes "$M_A" ) B)" \
+    || no "LEAN (L12): the many-ref default is not the defs page (default $( nbytes "$LDEF" ) B, defs $( nbytes "$M_F" ) B, all $( nbytes "$M_A" ) B)"
+# (L13) the TIE: three repos identical but for the length of the one ref row's text. The probe repo measures how much
+# longer the defs page is (D); padding the ref row by D more bytes makes the two pages EQUAL. A tie serves all (equal
+# bytes, more rows); one byte more and defs is strictly shorter, one byte less and all is.
+mk_tie(){ local d="$TMP/tie$1"; mkdir -p "$d"; git -C "$d" init -q -b main >/dev/null 2>&1; git -C "$d" config commit.gpgsign false
+          printf 'int zqTie( int x ) { return x; }\n' >"$d/tie.c"
+          printf 'int useT( void ) { return zqTie( 1 ); } // %s\n' "$( head -c "$1" </dev/zero | tr '\0' 'p' )" >"$d/use.c"
+          git -C "$d" add -A >/dev/null 2>&1; git -C "$d" commit -qm tie >/dev/null 2>&1; printf '%s' "$d"; }
+tw(){ "$BIN" "$1" --whereis=zqTie --no-cache "${@:2}" 2>/dev/null; }
+TP="$( mk_tie 1 )"; TD=$(( $( nbytes "$( tw "$TP" --whereis-listing=defs )" ) - $( nbytes "$( tw "$TP" --whereis-listing=all )" ) ))
+if [ "$TD" -gt 1 ] 2>/dev/null; then
+    for k in -1 0 1; do
+        TR="$( mk_tie $(( 1 + TD + k )) )"
+        T_D="$( tw "$TR" )"; T_F="$( tw "$TR" --whereis-listing=defs )"; T_A="$( tw "$TR" --whereis-listing=all )"
+        TF="$( nbytes "$T_F" )"; TA="$( nbytes "$T_A" )"
+        case $k in
+            -1) { [ $(( TF - TA )) -eq 1 ] && [ "$T_D" = "$T_A" ]; } \
+                    && ok "LEAN (L13a): defs page 1 B LONGER ($TF vs $TA) — the default is the all page" \
+                    || no "LEAN (L13a): defs $TF / all $TA, default $( nbytes "$T_D" ) B — want the all page" ;;
+            0)  { [ "$TF" -eq "$TA" ] && [ "$T_D" = "$T_A" ] && [ "$T_D" != "$T_F" ]; } \
+                    && ok "LEAN (L13b): defs page and all page EQUAL ($TF B) — the tie serves the all page (more rows)" \
+                    || no "LEAN (L13b): tie defs $TF / all $TA, default $( nbytes "$T_D" ) B — want the all page on a tie" ;;
+            1)  { [ $(( TA - TF )) -eq 1 ] && [ "$T_D" = "$T_F" ]; } \
+                    && ok "LEAN (L13c): defs page 1 B SHORTER ($TF vs $TA) — the default is the defs page" \
+                    || no "LEAN (L13c): defs $TF / all $TA, default $( nbytes "$T_D" ) B — want the defs page" ;;
+        esac
+    done
+else
+    no "LEAN (L13): the tie probe measured no defs-page overhead (D='$TD'): the probe did not run"
+fi
+# (L14) MCP twin: the same served page over MCP — the 1-ref default is the all page, the tie serves all, the
+# many-ref default is the defs page; each byte-identical to the CLI.
+mcpq(){ printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"whereis","arguments":{"path":"%s","symbol":"%s"%s}}}\n' "$1" "$2" "$3" \
+           | "$BIN" --mcp 2>/dev/null | python3 -c 'import sys,json
+for line in sys.stdin:
+    line=line.strip()
+    if not line: continue
+    d=json.loads(line); c=d.get("result",{}).get("content")
+    if c: print(c[0].get("text",""),end="")
+    elif "error" in d: print("ERROR",d["error"].get("code"),end="")'; }
+if command -v python3 >/dev/null 2>&1; then
+    TT="$TMP/tie$(( 1 + TD ))"
+    { [ "$( mcpq "$LR" zqOne '' )" = "$O_A" ] && [ "$( mcpq "$LR" zqOne ',"listing":"defs"' )" = "$O_F" ] \
+      && [ "$( mcpq "$LR" zqLean '' )" = "$M_F" ] && [ -d "$TT" ] && [ "$( mcpq "$TT" zqTie '' )" = "$( tw "$TT" --whereis-listing=all )" ]; } \
+        && ok "LEAN (L14): MCP whereis serves the same page as the CLI default — all on the 1-ref symbol and the tie, defs on the 73-ref symbol" \
+        || no "LEAN (L14): the MCP default serves a different page than the CLI"
+else
+    printf '  SKIP  LEAN (L14) MCP twin (no python3)\n'
 fi
 
 if command -v xmllint >/dev/null 2>&1; then

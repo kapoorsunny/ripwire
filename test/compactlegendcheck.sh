@@ -520,6 +520,12 @@ probeFor()
 #   ripwire.whereis/v1 611->887: the default listing's readings — listing=, the <refs count= next=> element (and the
 #   generic next= reading it pulls in), head_date= (the tip/date hoist) and complete='s "(of its listing=)" (+276 B). The
 #   answer they ride is the lean one: its rows shrink from every reference to the definitions alone.
+# RE-PINNED 2026-10-07 (lane/lean-answers-068 fix round 1, review B1 + its non-blocking item 2), measured on this gate's
+# fixture: ripwire.whereis/v1 887->1023: the listing= reading gains "; default: defs only if strictly shorter than all"
+# (+49 B: the default now serves the defs page only when it is strictly shorter than the all page) and "; a def the
+# parser does not model (define_method, setattr, assignment) is a counted ref" (+87 B) — +136 B, nothing else moved.
+# Both ride only a page that carries listing=. The OLD path keeps its own pin: the whereis-listing=all twin after the
+# universe loop holds the whole-list page's legend at 700 B (measured 692), so it cannot grow inside this headroom.
 PIN_TABLE='
 ripwire.edit-check/v1             610   595
 ripwire.map/v1                   910   892
@@ -581,7 +587,7 @@ ripwire.at/v1                    180   161
 ripwire.from-trace/v1            1300  1281
 ripwire.plan-lint/v1              570   551
 ripwire.merge-scout/v1            570   558
-ripwire.whereis/v1                900   887
+ripwire.whereis/v1               1040  1023
 ripwire.community/v1             730   719
 ripwire.layout/v1                1220  1203
 ripwire.pack-task/v1             990   974
@@ -720,6 +726,18 @@ else
 fi
 [ "$nRefuse" -ge 60 ] && ok "(U) $nRefuse non-XML flags refuse --legend=compact (empty stdout, non-zero exit); $nSkip write/serve/exec flags not probed" \
                       || no "(U) only $nRefuse non-XML flags refused compact (want ≥ 60)"
+# (U-TWIN) the whole-list whereis page (--whereis-listing=all, the pre-listing answer) keeps its OWN pin: the default's pin
+# rose to 1040 B for the listing= readings, and without this twin the old path could grow inside that headroom unseen.
+# 700 = measured 692 (the base's 611 plus the head_date= reading) + 10, rounded up to 10.
+( cd "$REPO" && "$BIN" . --whereis=distance --whereis-listing=all >"$TMP/wall.c" 2>/dev/null </dev/null ); rcWall=$?
+( cd "$REPO" && "$BIN" . --whereis=distance --whereis-listing=all --legend=full >"$TMP/wall.f" 2>/dev/null </dev/null )
+wallLb="$( leg prose "$TMP/wall.c" "$TMP/wall.f" )"
+if [ "$rcWall" -eq 0 ] && [ "$( leg schema "$TMP/wall.c" )" = "ripwire.whereis/v1" ] && ! grep -o '<whereis [^>]*>' "$TMP/wall.c" | grep -q ' listing=' \
+   && [ -n "$wallLb" ] && [ "$wallLb" -gt 0 ] 2>/dev/null && [ "$wallLb" -le 700 ]; then
+    ok "(U-TWIN) --whereis=distance --whereis-listing=all compact PROSE legend is $wallLb B (<= its 700 B pin; the default's pin is 1040)"
+else
+    no "(U-TWIN) --whereis-listing=all compact PROSE legend is '${wallLb:-none}' B (pin 700; exit $rcWall): $( leg legend "$TMP/wall.c" | head -c 200 )"
+fi
 
 echo
 echo "=== (F) the DEFAULT is the default posture; --legend=full restores MORE legend over the SAME payload (L1) ==="

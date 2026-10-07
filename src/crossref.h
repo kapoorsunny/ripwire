@@ -98,6 +98,7 @@
 #include "serialize.h"          // escapeXml
 #include "pageview.h"           // §P8: pageWindow / pageDisclosure — the shared --limit/--offset contract
 #include "nextverb.h"           // nextAttrXml / nextFlag — the <refs next=> follow-up of the default listing
+#include "compactlegend.h"      // compactDeliveredBytes — the default listing is chosen on the bytes the compact dialect delivers
 #include "workspace.h"          // wsdetail::segmentsOf
 #include "filter.h"             // §P11.5: rw::pathTierOf — the shared source/test/doc ORDERING tier
 #include "infra/Diagnostics.h"  // ASSUME / DISCLOSE
@@ -151,7 +152,12 @@ constexpr std::size_t   kWhereisHits      = 60;
 //         list holds no ref row (nothing to elide) or no def row (the mentions ARE the answer then).
 //   Refs  the kind="ref" rows only, in the hit list's order: the <refs next=> page.
 //   All   every row.
-enum class WhereisListing : std::uint8_t { Defs, Refs, All };
+//   ShorterOfDefsAll  the DEFAULT (no flag, no MCP `listing`): the Defs page when it is STRICTLY shorter in bytes than
+//         the All page, else the All page (review B1: on a symbol with one or two refs the Defs page pays more for its
+//         <refs> element, listing= and their legend readings than the ref rows it elides, and a lean answer that is
+//         longer while listing less is strictly worse). Measured, never guessed: whereisServedListing renders both.
+//         An explicit defs is served as asked.
+enum class WhereisListing : std::uint8_t { Defs, Refs, All, ShorterOfDefsAll };
 
 // ── blob facts (the per-sha memo payload) ────────────────────────────────────────────────────────────────
 
@@ -2846,6 +2852,7 @@ struct ListedHits
 
 inline ListedHits listedHits( const WhereResult& res, WhereisListing listing )
 {
+    EXPECTS( listing != WhereisListing::ShorterOfDefsAll, "the default is resolved to Defs or All (whereisServedListing) before the rows are picked" );
     const std::size_t defs = std::size_t( std::count_if( res.hits.begin(), res.hits.end(), []( const WhereHit& h ) { return h.isDef; } ) );
     const std::size_t refs = res.hits.size() - defs;
     ListedHits out;
@@ -2892,11 +2899,12 @@ inline bool whereisRowOnHeadCommit( const WhereHit& h, std::string_view headSha,
     return !head.empty() && !headDate.empty() && std::string_view( h.tip ).substr( 0, 9 ) == head && h.date == headDate;
 }
 
-// The listing a validated --whereis-listing= / MCP `listing` value names; "" (absent) is the default, defs. Both surfaces
-// refuse any other value before they get here.
+// The listing a validated --whereis-listing= / MCP `listing` value names; "" (absent) is the default, the shorter of
+// defs and all (WhereisListing::ShorterOfDefsAll). Both surfaces refuse any other value before they get here.
 inline WhereisListing whereisListingOf( std::string_view v ) noexcept
 {
-    return v == "refs" ? WhereisListing::Refs : v == "all" ? WhereisListing::All : WhereisListing::Defs;
+    return v == "refs" ? WhereisListing::Refs : v == "all" ? WhereisListing::All
+         : v == "defs" ? WhereisListing::Defs : WhereisListing::ShorterOfDefsAll;
 }
 
 // The <refs next=>: the same symbol, listing=refs — exactly the kind="ref" rows the default listing counted.
@@ -3020,15 +3028,11 @@ inline void writeWhereisRows( std::FILE* out, const WhereResult& res, const List
 //
 // Paging lives in its own entry point rather than as two defaulted parameters on writeWhereis() so the
 // un-paginated contract — the one the MCP `whereis` verb calls — keeps its exact three-argument shape.
-inline void writeWhereisPage( std::FILE* out, const WhereResult& res, std::size_t maxHits, int pageLimit, int pageOffset,
-                              WhereisListing listing )
+inline void writeWhereisListedPage( std::FILE* out, const WhereResult& res, std::size_t maxHits, int pageLimit, int pageOffset,
+                                    const ListedHits& listed )
 {
     std::vector<char> esc;
     const XmlEscaper  ex = [ & ]( std::string_view s ) { return std::string( escapeXml( s, esc ) ); };
-
-    // The LISTED rows (WhereisListing): indices into res.hits, in the hit list's own order, so a listing is a
-    // subsequence of the whole list and its rows print byte-identically to the same rows of listing=all.
-    const ListedHits listed = listedHits( res, listing );
 
     // The emitted window. An explicit --limit overrides maxHits (the caller's 60-hit display default, or
     // SIZE_MAX under --detail); --offset skips whole rows and clamps at the end, so offset-past-the-end is
@@ -3087,12 +3091,18 @@ inline void writeWhereisPage( std::FILE* out, const WhereResult& res, std::size_
                        "the other end (what this page did not print). Page with limit= and offset=; the more element is "
                        "absent exactly when this page reached the end of the hit list. "
                        // lean-answers lane — the default LISTING and the tip/date hoist, defined where they appear.
-                       "LISTING: by default only the kind=\"def\" rows are listed (listing=\"defs\" on the root) and the "
+                       "LISTING: by default only the kind=\"def\" rows are listed (listing=\"defs\" on the root) when that page is "
+                       "STRICTLY shorter in bytes than the page listing every hit (compared unpaged, as written and in the compact "
+                       "dialect); otherwise the default lists every hit. Under listing=\"defs\" the "
                        "kind=\"ref\" rows are COUNTED by the trailing refs element: count= is exactly the number of kind=\"ref\" "
                        "rows in the hit list, none of them printed here, and its next= lists exactly those rows (listing=\"refs\", "
                        "the same rows byte for byte that listing=all prints). listing= is absent when every hit is listed: the hit "
-                       "list holds no kind=\"ref\" row, or no kind=\"def\" row (then the mentions are the answer), or the whole list "
-                       "was asked for (the whereis-listing flag, value all). shown=, capped=, the paging attributes and the more "
+                       "list holds no kind=\"ref\" row, or no kind=\"def\" row (then the mentions are the answer), or the defs page "
+                       "would not be shorter, or the whole list was asked for (the whereis-listing flag, value all; its value defs "
+                       "lists the definitions whatever the size). kind=\"def\" on a HEAD row is the parser's label, not a proof: a "
+                       "definition the parser does not model (a Ruby define_method, a setattr, a name bound by assignment such as an "
+                       "alias in a class body) is a kind=\"ref\" row, so under listing=\"defs\" it is among the counted refs. "
+                       "shown=, capped=, the paging attributes and the more "
                        "element window the LISTED rows; hits= still counts every row. "
                        "TIP AND DATE: a row whose commit is HEAD's omits tip= and date=: its tip is at= without +dirty and its "
                        "date is head_date= on the root. Every other row carries both. "
@@ -3126,6 +3136,51 @@ inline void writeWhereisPage( std::FILE* out, const WhereResult& res, std::size_
 
     writeWhereisRows( out, res, listed, hitPage, headDate, ex );
     rw::emitRaw( out, "</whereis>" );
+}
+
+// The bytes one whereis page DELIVERS on the posture that prices it: the compact dialect (the CLI and MCP default),
+// or the page as written when that dialect has nothing to rewrite.
+inline std::size_t whereisDeliveredBytes( std::string_view page )
+{
+    const std::size_t compact = compactDeliveredBytes( page, "whereis" );
+    return compact != 0 ? compact : page.size();
+}
+
+// THE DEFAULT, MEASURED (review B1). The Defs page pays a fixed overhead — listing=, the <refs count= next=> element
+// and, under the compact legend, their readings — that eliding one or two short ref rows does not repay: on 24 of 58
+// sampled symbols the Defs page was LONGER than the All page while listing fewer rows. So both pages are rendered and
+// Defs is served only when it is STRICTLY shorter both as written (the full legend, whose prose is the same text on
+// both pages, so this compares the payload) and as the compact dialect delivers it (its per-answer readings ride only
+// the page that carries their attribute, so a reading the All page's ref rows trigger can tip either way). A tie serves All: equal
+// bytes, more rows. Both pages are rendered UNPAGED over the same row cap, so the choice is a fact of the answer, not
+// of --limit/--offset: every page of one answer lists the same rows. A render that fails serves All (the whole answer).
+inline ListedHits whereisServedListing( const WhereResult& res, std::size_t maxHits, WhereisListing listing )
+{
+    if( listing != WhereisListing::ShorterOfDefsAll )
+    {
+        return listedHits( res, listing );
+    }
+    ListedHits defs = listedHits( res, WhereisListing::Defs );
+    if( defs.attr.empty() )
+    {
+        return defs;   // Defs already degraded to every hit (no ref row, or no def row): nothing to compare
+    }
+    ListedHits     all      = listedHits( res, WhereisListing::All );
+    const Rendered defsPage = renderToString( [ & ]( std::FILE* f ) { writeWhereisListedPage( f, res, maxHits, 0, 0, defs ); } );
+    const Rendered allPage  = renderToString( [ & ]( std::FILE* f ) { writeWhereisListedPage( f, res, maxHits, 0, 0, all ); } );
+    const bool     defsShorter = defsPage.ok && allPage.ok && defsPage.text.size() < allPage.text.size()
+                              && whereisDeliveredBytes( defsPage.text ) < whereisDeliveredBytes( allPage.text );
+    return defsShorter ? std::move( defs ) : std::move( all );
+}
+
+// One --whereis answer page: the listing it serves (whereisServedListing), then that page.
+inline void writeWhereisPage( std::FILE* out, const WhereResult& res, std::size_t maxHits, int pageLimit, int pageOffset,
+                              WhereisListing listing )
+{
+    // The LISTED rows (WhereisListing): indices into res.hits, in the hit list's own order, so a listing is a
+    // subsequence of the whole list and its rows print byte-identically to the same rows of listing=all.
+    const ListedHits listed = whereisServedListing( res, maxHits, listing );
+    writeWhereisListedPage( out, res, maxHits, pageLimit, pageOffset, listed );
 }
 
 // The un-paginated form — unchanged contract, for callers that want the whole (capped) listing.
