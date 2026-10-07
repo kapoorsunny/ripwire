@@ -26,6 +26,7 @@
 #include "clones.h"
 #include "cloneidiom.h"         // idiom-class demotion — the closed 3-idiom shape classifier that turns an idiom-COLLISION clone group into a minor row instead of a gating one
 #include "lintrules.h"          // findQualityConstructs — the built-in error-masking rule table (GitClear +47% kind) + the placeholder shapes
+#include "defectshape.h"        // the defect-shape kind's four scanners (format-arity, utf8-cut, dedup-first, vacuous-assert)
 #include "arch.h"               // fnv1a64
 #include "pathguard.h"          // CWE-59/367: rw::pathguard::openNoFollowTruncate — writeBaseline truncates, so its open must refuse a link atomically
 #include "gitmine.h"            // shSingleQuote + gitFileCommitCountsInDayWindow — short-horizon-churn window mining
@@ -249,6 +250,21 @@ inline std::string baselineCanonId( const IngestResult& ing, NodeId i, std::stri
     return canonicalIdRelTo( ing, ing.symbols[i], root );
 }
 
+// The defect-shape kind's per-site record. `anchor` is the definition the site sits in (its qualityKey) or, for
+// top-level code, defectFileAnchor( path ). `site` is fnv1a64 of the facet name and the site's NORMALIZED text,
+// with the facet in its low two bits; two values are reserved: 0 is the FILE-PRESENCE record (the file was
+// scanned at all — the origin oracle of a file anchor), 1 is "the file did not read" (its sites are unknown, so
+// no current site in that file may be judged new against it).
+struct DefectSiteKey
+{
+    std::uint64_t anchor = 0;
+    std::uint64_t site   = 0;
+    friend bool operator==( const DefectSiteKey&, const DefectSiteKey& )  = default;
+    friend auto operator<=>( const DefectSiteKey&, const DefectSiteKey& ) = default;
+};
+inline constexpr std::uint64_t kDefectFilePresent    = 0;
+inline constexpr std::uint64_t kDefectFileUnreadable = 1;
+
 // A deterministic snapshot of the structural-quality state. Each per-symbol metric map is keyed by
 // hash(baselineCanonId) and stores the MAX over the overload set sharing that id (see computeSnapshot) — so a
 // low-metric overload written last can never manufacture a phantom regression on the next delta (the trap that
@@ -267,6 +283,7 @@ struct Snapshot
     std::vector<std::uint64_t>             cloneGroups; // sorted hash(sorted member canonIds)
     std::vector<std::uint64_t>             dead;        // sorted hash(canonId) of dead-candidate symbols
     std::vector<std::uint64_t>             publicApi;   // Q1 contract drift — sorted hash(canonId) of PUBLIC/exported symbols (see isPublicApi)
+    std::vector<DefectSiteKey>             defectSites; // the defect-shape kind — sorted (anchor, site) records, one per offending site (a multiset), plus each scanned file's presence record
 };
 
 // Q1 api-surface — the PUBLIC/exported contract surface. DEFINITION (deterministic, documented):
@@ -983,6 +1000,52 @@ inline std::uint64_t qualityKey( const IngestResult& ing, NodeId i, std::string_
     const Symbol& s = ing.symbols[i];
     return pathQualifiedKey( relForHash( ing.files[ s.fileId ], root ), s );   // the Symbol overload: the one keying rule per language
 }
+
+// ─── the defect-shape kind (the twelfth) ─────────────────────────────────────────────────────────────────
+// The anchor of top-level code: a key no definition can carry (no symbol has an empty name).
+inline std::uint64_t defectFileAnchor( std::string_view relPath )
+{
+    return pathQualifiedKey( relPath, "<file>", "" );
+}
+
+inline defectshape::Facet defectFacetOf( std::uint64_t site ) noexcept
+{
+    return static_cast<defectshape::Facet>( site & 3u );
+}
+
+// A site's identity: the facet and its normalized text. Never one of the two reserved file records (0, 1).
+inline std::uint64_t defectSiteValue( defectshape::Facet f, std::string_view text )
+{
+    std::string id( defectshape::facetName( f ) );
+    id.push_back( '\0' );
+    id.append( text );
+    std::uint64_t h = fnv1a64( id ) & ~std::uint64_t( 3 );
+    if( h == 0 )
+    {
+        h = 4;
+    }
+    const std::uint64_t v = h | static_cast<std::uint64_t>( f );
+    ENSURES( v != kDefectFilePresent && v != kDefectFileUnreadable && defectFacetOf( v ) == f, "a site value is never a reserved file record and carries its facet" );
+    return v;
+}
+
+// A defect-shape ROW's identity — the ack key: the anchor AND the facet, so a format-arity ack and a utf8-cut
+// ack on one definition are two acks (checklist 16: a facet is part of the finding, not a label on it).
+inline std::uint64_t defectRowKey( std::uint64_t anchor, defectshape::Facet f ) noexcept
+{
+    return anchor ^ ( 0x9E3779B97F4A7C15ull * ( static_cast<std::uint64_t>( f ) + 1 ) );
+}
+
+// One current-side site with what the delta needs to print it: the anchoring definition (kNoNode for a file
+// anchor), its file and 1-based line.
+struct DefectSiteAt
+{
+    DefectSiteKey key;
+    NodeId        owner  = kNoNode;
+    std::uint32_t fileId = 0;
+    std::uint32_t line   = 0;
+};
+
 
 // §D#4 short-horizon-churn — a per-identity hash of the symbols' RAW body bytes, for CHANGE detection that
 // metrics miss. `hot(){ return 2; }` → `hot(){ return 3; }` moves NO metric (same ccx/loc/nest/params), and
@@ -3393,7 +3456,11 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // argument holds as a VALUE (valuerefindex.h ValueRefIndex::isValueReferenced, checked after every other exemption,
 // counted as value-ref-excluded= like --dead-code): the dead SET moved, as in v9/v12/v15. kParserVer moved with
 // the extraction (the Value/Through rows) and its mirror moved with it. Bumped 16 -> 17.
-constexpr std::uint32_t kQSnapCacheScheme = 17;
+// v18 (lane/cr-qd-kinds-068, the defect-shape kind) — the blob gained the defect-shape (anchor, site) records
+// after publicApi: a BLOB SHAPE change. A v17 blob has none, so served here it would read every format-arity
+// site in the tree as newly added. Bumped by the v4/v5 rule (the producer identity already keeps this build's
+// blobs apart; the bump keeps the history above complete).
+constexpr std::uint32_t kQSnapCacheScheme = 18;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
 // The qsnap EXCLUDES-config key folds the qsnap SCHEME (independent of the ingest cache's kHeadSnapCacheScheme)
@@ -3488,8 +3555,9 @@ inline bool qsnapCountFits( const char* p, const char* end, std::uint32_t count,
 }
 
 // Serialize a Snapshot to a self-validating blob: [magic][scheme][cacheVer][parserVer][producer][fnv(headSha)] then each
-// of the 9 fields as a uint32 count followed by its flat records (btree maps in sorted key order, vectors
-// as-is), then an fnv1a64 checksum over all preceding bytes. Byte-stable for a fixed Snapshot.
+// field as a uint32 count followed by its flat records (btree maps in sorted key order, vectors as-is; the
+// defect-shape records last, as anchor+site pairs), then an fnv1a64 checksum over all preceding bytes.
+// Byte-stable for a fixed Snapshot.
 // P0.2 (r27): cacheVer/parserVer are the EXTRACTION IDENTITY every field below is a function of — see the note
 // at kIngestCacheVersionMirror. They are in the filename key too; carrying them here as well means a blob
 // reached by any other route (hand-copied, collided) is REJECTED rather than believed.
@@ -3523,6 +3591,12 @@ inline std::string serializeSnapshot( const Snapshot& s, const std::string& head
     putVec( s.cloneGroups );
     putVec( s.dead );
     putVec( s.publicApi );
+    qsnapPut( buf, std::uint32_t( s.defectSites.size() ) );   // v18: the defect-shape (anchor, site) records, in sorted order
+    for( const DefectSiteKey& d : s.defectSites )
+    {
+        qsnapPut( buf, d.anchor );
+        qsnapPut( buf, d.site );
+    }
 
     const std::uint64_t sum = fnv1a64( std::string_view( buf.data(), buf.size() ) );
     qsnapPut( buf, sum );
@@ -3646,7 +3720,28 @@ inline bool deserializeSnapshot( const std::string& blob, const std::string& hea
         return true;
     };
 
-    if( !getValMap( s.ccxBySym ) || !getValMap( s.locBySym ) || !getValMap( s.nestBySym ) || !getValMap( s.paramsBySym ) || !getValMap( s.defsBySym ) || !getValMap( s.maskBySym ) || !getValMap( s.maskReportBySym ) || !getValMap( s.placeholderBySym ) || !getHashMap( s.bodyHashBySym ) || !getVec( s.cloneGroups ) || !getVec( s.dead ) || !getVec( s.publicApi ) )
+    const auto getDefectSites = [ & ]( std::vector<DefectSiteKey>& v ) -> bool
+    {
+        std::uint32_t n = 0;
+        if( !qsnapGet( p, end, n ) || !qsnapCountFits( p, end, n, 2 * sizeof( std::uint64_t ) ) )
+        {
+            return false;   // a corrupt blob: the caller's "cache corrupt — recomputing" path
+        }
+        v.reserve( n );
+        for( std::uint32_t i = 0; i < n; ++i )
+        {
+            DefectSiteKey d;
+            if( !qsnapGet( p, end, d.anchor ) || !qsnapGet( p, end, d.site ) )
+            {
+                return false;
+            }
+            v.push_back( d );
+        }
+        return true;
+    };
+
+    if( !getValMap( s.ccxBySym ) || !getValMap( s.locBySym ) || !getValMap( s.nestBySym ) || !getValMap( s.paramsBySym ) || !getValMap( s.defsBySym ) || !getValMap( s.maskBySym ) || !getValMap( s.maskReportBySym ) || !getValMap( s.placeholderBySym ) || !getHashMap( s.bodyHashBySym ) || !getVec( s.cloneGroups ) || !getVec( s.dead ) || !getVec( s.publicApi )
+        || !getDefectSites( s.defectSites ) )
     {
         return false;
     }
@@ -3654,6 +3749,7 @@ inline bool deserializeSnapshot( const std::string& blob, const std::string& hea
     std::sort( s.cloneGroups.begin(), s.cloneGroups.end() );   // computeDelta binary_searches these — enforce order
     std::sort( s.dead.begin(),        s.dead.end() );
     std::sort( s.publicApi.begin(),   s.publicApi.end() );
+    std::sort( s.defectSites.begin(), s.defectSites.end() );   // computeDelta merges these in key order
     out = std::move( s );
     return true;
 }
@@ -4553,6 +4649,86 @@ inline std::vector<std::uint64_t> baselineCloneGroupHashes( const IngestResult& 
     return out;
 }
 
+// Every defect-shape site in the tree, anchored on the innermost enclosing definition (byte-span containment,
+// the same rule error-masking counts by) or on the file. Languages: C++ (format-arity, utf8-cut,
+// dedup-first), Python (format-arity), Bash under a test-script path (vacuous-assert). Each scanned file also
+// leaves its presence record; a file that does not read leaves the unreadable record instead and contributes
+// no site (a partial read is evidence of nothing, forEachSymbolBody's rule) — the delta then judges no current
+// site in that file against it. Sorted by key; deterministic (files in id order, scanners pure).
+inline std::vector<DefectSiteAt> defectSitesOf( const IngestResult& ing, std::string_view root, const std::vector<char>* fileInBaseline )
+{
+    std::vector<DefectSiteAt> out;
+    const SymbolsByFile byFile = symbolsByFileInIdOrder( ing, []( const Symbol& s ) { return s.endByte > s.sigStartByte && s.kind != SymKind::ModuleScope; } );
+    for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+    {
+        if( !fileIsInBaseline( fileInBaseline, f ) )
+        {
+            continue;
+        }
+        const std::string_view rel  = relForHash( ing.files[f], root );
+        const Lang             lang = langOfPath( rel );
+        if( lang != Lang::Cpp && lang != Lang::Python && !( lang == Lang::Bash && isTestScriptPath( rel ) ) )
+        {
+            continue;
+        }
+        const std::uint64_t        fileAnchor = defectFileAnchor( rel );
+        std::optional<std::string> bytes      = docparse::detail::readWholeFile( diskPath( ing, f ) );
+        if( !bytes )
+        {
+            out.push_back( { { fileAnchor, kDefectFileUnreadable }, kNoNode, f, 0 } );
+            continue;
+        }
+        out.push_back( { { fileAnchor, kDefectFilePresent }, kNoNode, f, 0 } );
+        const std::string_view          src = *bytes;
+        std::vector<defectshape::Span> fnSpans;
+        if( f < byFile.size() )
+        {
+            for( NodeId i : byFile[f] )
+            {
+                const Symbol& s = ing.symbols[i];
+                if( ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && s.endByte <= src.size() )
+                {
+                    fnSpans.push_back( { s.sigStartByte, s.endByte } );
+                }
+            }
+        }
+        std::vector<defectshape::Site> sites;
+        if( lang == Lang::Cpp && defectshape::cppMayHoldShapes( src ) )
+        {
+            sites = defectshape::scanCpp( src, fnSpans );
+        }
+        else if( lang == Lang::Python && src.find( ".format" ) != std::string_view::npos )
+        {
+            sites = defectshape::scanPython( src );
+        }
+        else if( lang == Lang::Bash && src.find( "grep" ) != std::string_view::npos )
+        {
+            sites = defectshape::scanBashTestScript( src, fnSpans );
+        }
+        for( const defectshape::Site& st : sites )
+        {
+            ASSUME( st.startByte < src.size(), "a scanner reports a site at a byte of the file it scanned" );
+            const NodeId        owner  = enclosingDefOf( ing, byFile, f, st.startByte );
+            const std::uint64_t anchor = owner == kNoNode ? fileAnchor : qualityKey( ing, owner, root );
+            const std::uint32_t line   = static_cast<std::uint32_t>( 1 + std::count( src.begin(), src.begin() + st.startByte, '\n' ) );
+            out.push_back( { { anchor, defectSiteValue( st.facet, st.text ) }, owner, f, line } );
+        }
+    }
+    std::stable_sort( out.begin(), out.end(), []( const DefectSiteAt& a, const DefectSiteAt& b ) { return a.key < b.key; } );
+    return out;
+}
+
+inline std::vector<DefectSiteKey> defectSiteKeys( const std::vector<DefectSiteAt>& sites )
+{
+    std::vector<DefectSiteKey> out;
+    out.reserve( sites.size() );
+    for( const DefectSiteAt& s : sites )
+    {
+        out.push_back( s.key );
+    }
+    return out;
+}
+
 inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::string_view root,
                                  const std::vector<char>* fileInBaseline )
 {
@@ -4608,6 +4784,10 @@ inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::s
         snap.maskReportBySym   = std::move( counts.maskReport );
         snap.placeholderBySym  = std::move( counts.placeholder );
     }
+
+    // the defect-shape baseline: every offending site (a sorted multiset of anchor + site identity) and each
+    // scanned file's presence record. Filtered to the baseline files inside defectSitesOf (IDENTITY BASIS).
+    snap.defectSites = defectSiteKeys( defectSitesOf( ing, root, fileInBaseline ) );
 
     // §D#4 short-horizon-churn baseline: per-canonId RAW-body hash so the delta detects a rewrite that moved no
     // metric (a literal-only edit). Compared, never bar-checked — presence-or-difference IS the rewrite signal.
@@ -5018,6 +5198,10 @@ inline bool writeBaseline( const Snapshot& s, const std::string& path, std::stri
     {
         f << "api " << std::hex << h << std::dec << '\n';
     }
+    for( const DefectSiteKey& d : s.defectSites )
+    {
+        f << "defect " << std::hex << d.anchor << ' ' << d.site << std::dec << '\n'; // the defect-shape kind: anchor + site identity (both hex)
+    }
     // Was an unconditional `return true`: a stream that failed to flush still reported a written baseline.
     // The descriptor answers for the bytes, so a full disk is now a failure the caller can report.
     return rw::pathguard::writeAllAndClose( fd, f.str() );
@@ -5160,7 +5344,7 @@ inline bool readBaseline( const std::string& path, Snapshot& out, BaselineReadSt
           if( is.fail() ) { DISCLOSE( stats, BaselineReadStats::DisclosureWhy::MalformedLine ); return; } m[h] = v; };
 
         if( kind == "ccx" || kind == "loc" || kind == "nest" || kind == "params" || kind == "mask" || kind == "maskr" || kind == "stub" || kind == "body" || kind == "clone" || kind == "dead" || kind == "api" || kind == "head" || kind == "defs"
-         || kind == "producer" )
+         || kind == "producer" || kind == "defect" )
         {
             ++recognizedLineCount;                                    // structure seen — this file IS a baseline
         }
@@ -5213,6 +5397,19 @@ inline bool readBaseline( const std::string& path, Snapshot& out, BaselineReadSt
         {
             readSet( out.publicApi );
         }
+        else if( kind == "defect" )
+        {
+            DefectSiteKey d;
+            is >> std::hex >> d.anchor >> d.site >> std::dec;
+            if( is.fail() )
+            {
+                DISCLOSE( stats, BaselineReadStats::DisclosureWhy::MalformedLine );
+            }
+            else
+            {
+                out.defectSites.push_back( d );
+            }
+        }
         else if( kind == "producer" )
         {
             readProducerRecord( is, stats );
@@ -5240,6 +5437,7 @@ inline bool readBaseline( const std::string& path, Snapshot& out, BaselineReadSt
     std::sort( out.cloneGroups.begin(), out.cloneGroups.end() );
     std::sort( out.dead.begin(),        out.dead.end() );
     std::sort( out.publicApi.begin(),   out.publicApi.end() );
+    std::sort( out.defectSites.begin(), out.defectSites.end() );
     return true;
 }
 
@@ -5761,7 +5959,7 @@ inline std::uint32_t churnEditWindowCommitCount( DiffHunkMemo& memo, const std::
 struct Regression
 {
     std::string   kind;   // "complexity" | "duplication" | "dead-code" | "verbosity" | "nesting" | "params" | "api-surface"
-                          //   | "error-masking" | "short-horizon-churn" | "new-clone-of-reused-helper" (§D#4) | "placeholder"
+                          //   | "error-masking" | "short-horizon-churn" | "new-clone-of-reused-helper" (§D#4) | "placeholder" | "defect-shape"
     std::string   sym;    // canonical id (or, for duplication, the space-joined member ids)
     std::uint32_t was = 0;
     std::uint32_t now = 0;
@@ -5769,7 +5967,8 @@ struct Regression
                                   //   short-horizon-churn rows carry pathQualifiedKey instead (W1-S2): a bare canonId folds scope-less same-named symbols across files, so one ack would suppress — and one finding would name — the WRONG file's symbol
     bool          isMinor = false;// materiality tier: true = below the kind's minor-delta bar → reported sev="minor", does not gate exit 2
     std::string   facet;          // B10.2 — optional classification facet (attribute NAME chosen by the kind in main.cpp):
-                                  //   short-horizon-churn: "self" | "ambient"; api-surface: "new-symbol" | "contract-change". Empty = no facet.
+                                  //   short-horizon-churn: "self" | "ambient"; api-surface: "new-symbol" | "contract-change";
+                                  //   defect-shape: "format-arity" | "utf8-cut" | "dedup-first" | "vacuous-assert". Empty = no facet.
     bool          isNewSymbol = false;// r26 ORIGIN axis: true = the finding exists ONLY because the code is new (emitted origin="new-symbol",
                                   //   counted in new-symbol=, never gates); false = preexisting-worse. See the ORIGIN block in computeDelta.
     // P2.5 (r27) — the LOCATOR. `sym` is a canonical id whose display tail is often a bare, one-letter local
@@ -5795,6 +5994,16 @@ struct Regression
     bool isZeroMagnitude() const noexcept { return was == 0 && now == 0; }
 };
 
+// THE EXIT PREDICATE, in one place: every surface that says what gates — the XML gating= count and per-row
+// gating attribute, the --json / MCP "gating", the exit code, --ack-only=gating, the scoped-out would-gate
+// count, the allow-dirty absorbed count and the stderr naming line — asks this. A row gates when it is major
+// (not sev="minor") AND either preexisting-worse or a defect-shape format-arity row: new-symbol rows never
+// gate, except defect-shape format-arity, because a placeholder/argument mismatch is a defect, not debt.
+inline bool rowGates( const Regression& r ) noexcept
+{
+    return !r.isMinor && ( !r.isNewSymbol || ( r.kind == "defect-shape" && r.facet == defectshape::facetName( defectshape::Facet::FormatArity ) ) );
+}
+
 // B10.2 — kind → the ATTRIBUTE NAME its facet value is emitted under. `Regression::facet` carries only the
 // VALUE, so exactly one place decides what to call it. That place used to be THREE places (the XML
 // quality-delta emitter, its --json twin, and the MCP quality_delta emitter each held the same conditional
@@ -5813,6 +6022,7 @@ inline constexpr FacetAttr kFacetAttrs[] = {
     { "short-horizon-churn",        "churn"   },   // self / ambient
     { "api-surface",                "surface" },   // new-symbol / contract-change
     { "duplication",                "idiom"   },   // the recognized clone-body shape (cloneidiom.h)
+    { "defect-shape",               "defect"  },   // format-arity / utf8-cut / dedup-first / vacuous-assert
     { "new-clone-of-reused-helper", "idiom"   },   // T13/fix2 gave this kind duplication's idiom demotion (Regression::facet
                                                     // is populated the same way, from the same CloneIdiomVerdict); this row was
                                                     // missing, so a demoted row's idiom name never reached the reader even
@@ -7224,6 +7434,30 @@ inline std::size_t remapSnapshotIdentity( Snapshot& base, const IdentityAliases&
     healSet( base.dead );
     healSet( base.publicApi );
     // base.cloneGroups is deliberately untouched — see the WHAT IS NOT REMAPPED note above.
+
+    // the defect-shape records: a renamed definition's sites are re-filed under its current anchor, same
+    // add-never-overwrite rule (an anchor the baseline already holds keeps its own records). Whether a site is
+    // NEW never depends on this — that is decided by its text, repo-wide — only the row's was= count does.
+    std::vector<DefectSiteKey> addSites;
+    for( const auto& [ from, to ] : al.toCurrent )
+    {
+        const auto lo = std::lower_bound( base.defectSites.begin(), base.defectSites.end(), DefectSiteKey{ from, 0 } );
+        const auto toLo = std::lower_bound( base.defectSites.begin(), base.defectSites.end(), DefectSiteKey{ to, 0 } );
+        if( toLo != base.defectSites.end() && toLo->anchor == to )
+        {
+            continue;
+        }
+        for( auto it = lo; it != base.defectSites.end() && it->anchor == from; ++it )
+        {
+            addSites.push_back( { to, it->site } );
+            ++moved;
+        }
+    }
+    if( !addSites.empty() )
+    {
+        base.defectSites.insert( base.defectSites.end(), addSites.begin(), addSites.end() );
+        std::sort( base.defectSites.begin(), base.defectSites.end() );
+    }
     return moved;
 }
 
@@ -7637,6 +7871,22 @@ inline std::optional<StaleAckWhy> staleForChurn( std::uint64_t key, const Snapsh
     return ( snap.bodyHashBySym.find( key ) == snap.bodyHashBySym.end() ) ? std::optional<StaleAckWhy>( StaleAckWhy::TargetGone ) : std::nullopt;
 }
 
+// defect-shape: the ack key is defectRowKey( anchor, facet ), so the facet is part of the finding's identity
+// (one ack never suppresses a different shape on the same definition). A key no current site produces is
+// finding-gone; the anchor cannot be recovered from the mixed key, so target-gone is never claimed (the
+// clone kinds' rule).
+inline std::optional<StaleAckWhy> staleForDefectShape( std::uint64_t key, const Snapshot& snap )
+{
+    for( const DefectSiteKey& d : snap.defectSites )
+    {
+        if( d.site != kDefectFilePresent && d.site != kDefectFileUnreadable && defectRowKey( d.anchor, defectFacetOf( d.site ) ) == key )
+        {
+            return std::nullopt;
+        }
+    }
+    return StaleAckWhy::FindingGone;
+}
+
 inline std::vector<StaleAck> computeStaleAcks( const gtl::btree_map<std::string, AckRecord>& acks, const Snapshot& snap )
 {
     std::vector<StaleAck> out;
@@ -7678,6 +7928,10 @@ inline std::vector<StaleAck> computeStaleAcks( const gtl::btree_map<std::string,
         else if( base == "short-horizon-churn" )
         {
             why = staleForChurn( rec.key, snap );
+        }
+        else if( base == "defect-shape" )
+        {
+            why = staleForDefectShape( rec.key, snap );
         }
         // an unrecognized kind (a future addition, or a hand-edited line) is left unclassified rather than
         // guessed — same "degrade, do not fabricate" rule readAckRecords already applies to a malformed line.
@@ -8634,6 +8888,134 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
             {
                 regs.push_back( { "placeholder", g.canonId[i], wasStub, nowStub, key, false, {}, true } );   // new-symbol by construction (above)
                 stampLoc( i );
+            }
+        }
+    }
+
+    // ── defect-shape (the twelfth kind) ───────────────────────────────────────────────────────────────────
+    // A site is NEW when its identity (facet + normalized text) occurs more often in the current tree than in
+    // the baseline, REPO-WIDE: an untouched, moved or renamed defect is not new, an edited one is, and a swap
+    // (one site fixed and another added in the same definition) still is. The excess of each identity is
+    // credited to the anchors that hold more copies of it now than at the baseline, in anchor-key order
+    // (deterministic). An anchor credited with a new site of a facet gets ONE row for that facet; was= and now=
+    // count the anchor's sites of that facet on each side. format-arity gates on ANY origin — a placeholder /
+    // argument mismatch is a defect, not debt; utf8-cut, dedup-first and vacuous-assert are report-only:
+    // sev="minor" by facet, not by size. A file the baseline could not read judges none of its sites.
+    {
+        const std::vector<DefectSiteAt> nowSites = defectSitesOf( ing, root, nullptr );
+        const auto isRealSite = []( std::uint64_t v ) { return v != kDefectFilePresent && v != kDefectFileUnreadable; };
+        std::vector<std::uint64_t> baseVals, nowVals, baseUnreadable;
+        for( const DefectSiteKey& d : base.defectSites )
+        {
+            if( isRealSite( d.site ) )
+            {
+                baseVals.push_back( d.site );
+            }
+            else if( d.site == kDefectFileUnreadable )
+            {
+                baseUnreadable.push_back( d.anchor );
+            }
+        }
+        for( const DefectSiteAt& d : nowSites )
+        {
+            if( isRealSite( d.key.site ) )
+            {
+                nowVals.push_back( d.key.site );
+            }
+        }
+        std::sort( baseVals.begin(), baseVals.end() );
+        std::sort( nowVals.begin(), nowVals.end() );
+        std::sort( baseUnreadable.begin(), baseUnreadable.end() );
+        const auto countOf = []( const std::vector<std::uint64_t>& v, std::uint64_t x )
+        {
+            const auto r = std::equal_range( v.begin(), v.end(), x );
+            return static_cast<std::uint32_t>( r.second - r.first );
+        };
+        // the repo-wide excess still to credit, per identity
+        std::vector<std::pair<std::uint64_t, std::uint32_t>> excess;
+        for( std::size_t k = 0; k < nowVals.size(); )
+        {
+            const std::uint64_t v  = nowVals[k];
+            const std::uint32_t nN = countOf( nowVals, v );
+            const std::uint32_t nB = countOf( baseVals, v );
+            if( nN > nB )
+            {
+                excess.push_back( { v, nN - nB } );
+            }
+            k += nN;
+        }
+        const auto baseAnchorCount = [ & ]( std::uint64_t anchor, std::uint64_t site )
+        {
+            const auto r = std::equal_range( base.defectSites.begin(), base.defectSites.end(), DefectSiteKey{ anchor, site } );
+            return static_cast<std::uint32_t>( r.second - r.first );
+        };
+        const auto facetCount = []( const auto& sites, std::uint64_t anchor, defectshape::Facet f, auto keyOf )
+        {
+            std::uint32_t n = 0;
+            for( const auto& s : sites )
+            {
+                const DefectSiteKey& k = keyOf( s );
+                n += ( k.anchor == anchor && k.site != kDefectFilePresent && k.site != kDefectFileUnreadable && defectFacetOf( k.site ) == f ) ? 1u : 0u;
+            }
+            return n;
+        };
+        struct Credited
+        {
+            std::uint64_t      anchor = 0;
+            defectshape::Facet facet  = defectshape::Facet::FormatArity;
+            const DefectSiteAt* first = nullptr;
+        };
+        std::vector<Credited> credited;
+        for( std::size_t k = 0; k < nowSites.size(); )
+        {
+            const DefectSiteKey key = nowSites[k].key;
+            std::size_t         e   = k;
+            while( e < nowSites.size() && nowSites[e].key == key )
+            {
+                ++e;
+            }
+            const std::uint32_t headA = static_cast<std::uint32_t>( e - k );
+            const DefectSiteAt& at    = nowSites[k];
+            k                         = e;
+            if( !isRealSite( key.site ) || at.fileId >= ing.files.size()
+                || std::binary_search( baseUnreadable.begin(), baseUnreadable.end(), defectFileAnchor( relForHash( ing.files[ at.fileId ], root ) ) ) )
+            {
+                continue;
+            }
+            const std::uint32_t baseA = baseAnchorCount( key.anchor, key.site );
+            const auto ex = std::lower_bound( excess.begin(), excess.end(), std::pair<std::uint64_t, std::uint32_t>{ key.site, 0 } );
+            if( headA <= baseA || ex == excess.end() || ex->first != key.site || ex->second == 0 )
+            {
+                continue;
+            }
+            ex->second -= std::min( ex->second, headA - baseA );
+            const defectshape::Facet f = defectFacetOf( key.site );
+            const bool seen = std::any_of( credited.begin(), credited.end(), [ & ]( const Credited& c ) { return c.anchor == key.anchor && c.facet == f; } );
+            if( !seen )
+            {
+                credited.push_back( { key.anchor, f, &at } );
+            }
+        }
+        for( const Credited& c : credited )
+        {
+            const std::uint32_t was = facetCount( base.defectSites, c.anchor, c.facet, []( const DefectSiteKey& d ) -> const DefectSiteKey& { return d; } );
+            const std::uint32_t now = facetCount( nowSites, c.anchor, c.facet, []( const DefectSiteAt& d ) -> const DefectSiteKey& { return d.key; } );
+            const NodeId        owner = c.first->owner;
+            const std::string   rel( relForHash( ing.files[ c.first->fileId ], root ) );
+            const bool          isNew = ( owner != kNoNode )
+                                          ? !existedAtBaseline( c.anchor )
+                                          : !std::binary_search( base.defectSites.begin(), base.defectSites.end(), DefectSiteKey{ c.anchor, kDefectFilePresent } );
+            const std::string   sym = ( owner != kNoNode && owner < g.canonId.size() && !g.canonId[owner].empty() ) ? g.canonId[owner] : rel;
+            regs.push_back( { "defect-shape", sym, was, now, defectRowKey( c.anchor, c.facet ), !defectshape::facetGatesOnAnyOrigin( c.facet ),
+                              std::string( defectshape::facetName( c.facet ) ), isNew } );
+            if( owner != kNoNode )
+            {
+                stampLoc( owner );
+            }
+            else
+            {
+                regs.back().path = rel;
+                regs.back().line = c.first->line;
             }
         }
     }

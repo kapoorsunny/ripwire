@@ -443,7 +443,7 @@ std::size_t partitionByScope( const rw::quality::Scope& scope, std::vector<rw::q
     std::size_t wouldGate = 0;
     for( const rw::quality::Regression& r : outOfScope )
     {
-        if( r.isNewSymbol || r.isMinor )
+        if( !rw::quality::rowGates( r ) )
         {
             continue;
         }
@@ -520,7 +520,7 @@ std::optional<int> refuseForeignAckSelection( const rw::Config& cfg, const rw::q
 // this prose either: several gates grep the header counters (regressions=, gating=, stale=) and a
 // quoted example here would be matched ahead of the real one.
 
-// Always. The verb, the eleven kinds, the three axes, the exit predicate, and the two counters that are
+// Always. The verb, the twelve kinds, the three axes, the exit predicate, and the two counters that are
 // printed even at zero. Every row in the document — finding rows and stale-ack rows alike — carries
 // kind=, so it is defined here rather than in either conditional row dictionary.
 // P8 (L7): the bar= literals in emitRow mirror quality.h's constants — pinned here so a moved bar cannot drift the row
@@ -530,17 +530,18 @@ static_assert( rw::quality::kCcxBar == 15 && rw::quality::kLocBar == 60 && rw::q
 inline constexpr const char* kQdLegendCore =
     "<!-- ripwire quality-delta: only what a change made WORSE against the floor baseline= names below. "
     "Descriptive: weigh and fix the real ones, do not game the number (a wrong abstraction beats a low "
-    "score). ELEVEN KINDS, and kind= on every row names which one: complexity over the ccx bar, verbosity "
+    "score). TWELVE KINDS, and kind= on every row names which one: complexity over the ccx bar, verbosity "
     "(LOC), nesting, params, duplication, dead-code, api-surface (new public contract drift), "
-    "error-masking, short-horizon-churn, new-clone-of-reused-helper, placeholder (added stub/TODO). "
+    "error-masking, short-horizon-churn, new-clone-of-reused-helper, placeholder (added stub/TODO), "
+    "defect-shape (a known defect shape, named by defect=). "
     "THREE independent axes, in this "
     "order: (1) acked findings are suppressed entirely (acked= counts them); (2) ORIGIN — a finding on a "
     "symbol that EXISTED at the baseline is preexisting-worse (no origin attribute), one that exists only "
     "because the code is NEW carries origin=\"new-symbol\"; (3) MATERIALITY — a small numeric delta is "
-    "sev=\"minor\", and minor= counts them. EXIT 2 fires only on preexisting-worse AND major, the gating= "
-    "count; new-symbol rows "
-    "never gate, so exit 0 is NOT a verdict on them — nothing that existed got worse, but the new debt is "
-    "yours: read them. Clone kinds are new-symbol only when EVERY member is new; short-horizon-churn is "
+    "sev=\"minor\", and minor= counts them. EXIT 2 fires only on a row that is preexisting-worse AND major, or "
+    "a defect-shape format-arity row of any origin: the gating= count. new-symbol rows never gate, except "
+    "defect-shape format-arity, so exit 0 is NOT a verdict on the other new-symbol rows — nothing that "
+    "existed got worse, but the new debt is yours: read them. Clone kinds are new-symbol only when EVERY member is new; short-horizon-churn is "
     "preexisting by construction. preexisting-worse= and new-symbol= partition regressions=. stale= is a "
     "FOURTH axis, never gating and never counted in regressions=: rows in the .ripwire_quality_acks ledger "
     "whose target no longer applies. "
@@ -715,6 +716,24 @@ inline constexpr const char* kQdRowLegend =
     "Every row the header's gating= counter counts also carries a gating attribute "
     "set to 1 — marked positively, never by the ABSENCE of sev or origin. ";
 
+// Emitted only when a defect-shape row is in the document: the four facets defect= names, which one gates and
+// why, what a file-anchored row's sym= is, and what the kind does NOT check (so no row is not a verdict there).
+inline constexpr const char* kQdDefectShapeLegend =
+    "defect-shape rows name a known defect SHAPE this change added, in defect=: format-arity (a literal "
+    "std::format/print/format_to, fmt::, rw::emitTo/formatTo or Python \"literal\".format format whose "
+    "fields do not match its arguments), utf8-cut (C++ display text cut at a byte cap and given an ellipsis "
+    "with no UTF-8 boundary back-off in the function), dedup-first (C++ std::unique keeping the first of a "
+    "run over a type with a severity field that neither the predicate nor the sort before it reads) and "
+    "vacuous-assert (a Bash test script's absence assertion read off a command whose failure is never "
+    "checked, so a crash reads as PASS). A site is new only when its normalized text is not among the "
+    "baseline's sites of that shape, so a moved or renamed one is not; was= and now= count the shape's sites "
+    "in the anchor, the innermost definition or, for top-level code, the file (then sym= is the path). "
+    "format-arity gates on any origin: a placeholder/argument mismatch is a defect, not debt. utf8-cut, "
+    "dedup-first and vacuous-assert are always sev=\"minor\": report-only by facet, not by size. Python "
+    "percent-formatting and f-strings are not checked, nor a format held in a named constant, a macro or a "
+    "runtime wrapper, a pack expansion, an unqualified format() call, a named dedup predicate, or a utf8 cut "
+    "in a function that backs off a continuation byte anywhere: no row there is no verdict. ";
+
 // Emitted only when a placeholder row is in the document: why every one of them carries origin="new-symbol",
 // including one that landed in a symbol that existed at the baseline.
 inline constexpr const char* kQdPlaceholderLegend =
@@ -824,6 +843,10 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p )
     {
         return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "placeholder"; } );
     };
+    const auto anyDefectShapeRow = [] ( const std::vector<rw::quality::Regression>& v )
+    {
+        return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "defect-shape"; } );
+    };
 
     std::fputs( kQdLegendCore, stdout );
 
@@ -913,6 +936,10 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p )
         if( anyPlaceholderRow( p.rows ) || anyPlaceholderRow( p.disclosedRows ) )
         {
             rw::emitRaw( stdout, kQdPlaceholderLegend );
+        }
+        if( anyDefectShapeRow( p.rows ) || anyDefectShapeRow( p.disclosedRows ) )
+        {
+            rw::emitRaw( stdout, kQdDefectShapeLegend );
         }
     }
 
@@ -1043,9 +1070,9 @@ DirtyPinVerdict inspectDirtyBaselinePin( const MainDispatch& d, const std::strin
 
     for( const quality::Regression& r : regs )
     {
-        if( r.isNewSymbol || r.isMinor )
+        if( !quality::rowGates( r ) )
         {
-            continue;   // the exit predicate, spelled exactly as runQualityDelta's gatingCount spells it
+            continue;   // the exit predicate — the one rowGates every surface asks
         }
         ++verdict.absorbed;
         if( verdict.firstRow.empty() )
@@ -1249,7 +1276,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                     // "api-surface" also covers the never-gating new-symbol rows, so acking by kind would
                     // sweep in 59 findings to accept 8. --ack-only=contract-change accepts exactly the
                     // deliberate ones. The pseudo-token "gating" selects whatever would actually exit 2.
-                    const bool gates = !r.isMinor && !r.isNewSymbol && inScope;
+                    const bool gates = quality::rowGates( r ) && inScope;
                     if( !pat.empty() && ( r.kind.find( pat ) != std::string::npos || r.sym.find( pat ) != std::string::npos || ( !r.facet.empty() && r.facet.find( pat ) != std::string::npos ) || ( pat == "gating" && gates ) ) )
                     {
                         return true;
@@ -1434,8 +1461,9 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         // r26 ORIGIN SPLIT — three counts over the VISIBLE (post-ack) findings, one pass:
         //   minorCount      — the materiality tier (unchanged axis).
         //   newSymbolCount  — findings that exist only because the code is NEW (quality.h's origin axis).
-        //   gatingCount     — the EXIT PREDICATE: preexisting-worse AND major. Emitted as gating= so the
-        //                     header alone tells you the exit code (it used to be "regressions > minor").
+        //   gatingCount     — the EXIT PREDICATE (quality::rowGates): major AND preexisting-worse, or a defect-shape
+        //                     format-arity row of any origin. Emitted as gating= so the header alone tells you
+        //                     the exit code (it used to be "regressions > minor").
         // preexisting-worse = regressions − new-symbol by construction (the axis is a partition), so the two
         // header counters always sum to regressions= — an invariant the gate asserts.
         std::size_t minorCount = 0, newSymbolCount = 0, gatingCount = 0;
@@ -1449,7 +1477,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             {
                 ++newSymbolCount;
             }
-            else if( !r.isMinor )
+            if( quality::rowGates( r ) )
             {
                 ++gatingCount;
             }
@@ -1490,7 +1518,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             const quality::Regression* first = nullptr;
             for( const quality::Regression& r : regs )
             {
-                if( !r.isNewSymbol && !r.isMinor ) { first = &r; break; }
+                if( quality::rowGates( r ) ) { first = &r; break; }
             }
             if( first )
             {
@@ -1499,8 +1527,20 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                 // M12: displaySym, not first->sym raw — the XML/JSON rows both normalize sym's path segment
                 // for display (quality::displaySym); this stderr line was the one caller that skipped it,
                 // so it named "./src/…::rw::…" beside a row that named the same finding "src/…::rw::…".
-                rw::emitTo( stderr, "ripwire: --quality-delta gating: {} preexisting-worse major finding(s); first: {} {}{} (was={} now={})\n",
-                              gatingCount, first->kind.c_str(), quality::displaySym( first->sym, deltaRoot ).c_str(), at.c_str(), first->was, first->now );
+                // a gating row on NEW code is only ever defect-shape format-arity (rowGates); the line names that
+                // part only when there is one, so every run without it keeps its bytes.
+                const std::size_t newGating = static_cast<std::size_t>( std::count_if( regs.begin(), regs.end(), []( const quality::Regression& r )
+                                                                                       { return r.isNewSymbol && quality::rowGates( r ); } ) );
+                if( newGating == 0 )
+                {
+                    rw::emitTo( stderr, "ripwire: --quality-delta gating: {} preexisting-worse major finding(s); first: {} {}{} (was={} now={})\n",
+                                  gatingCount, first->kind.c_str(), quality::displaySym( first->sym, deltaRoot ).c_str(), at.c_str(), first->was, first->now );
+                }
+                else
+                {
+                    rw::emitTo( stderr, "ripwire: --quality-delta gating: {} gating finding(s), {} of them defect-shape format-arity on new code; first: {} {}{} (was={} now={})\n",
+                                  gatingCount, newGating, first->kind.c_str(), quality::displaySym( first->sym, deltaRoot ).c_str(), at.c_str(), first->was, first->now );
+                }
             }
         }
 
@@ -1559,7 +1599,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                 {
                     rw::emitTo( stdout, ",\"p\":\"{}:{}\"", jsonStr( r.path ).c_str(), r.line ); // P2.5 locator
                 }
-                if( gatingAllowed && !r.isNewSymbol && !r.isMinor )
+                if( gatingAllowed && quality::rowGates( r ) )
                 {
                     rw::emitRaw( stdout, ",\"gating\":true" ); // P2.5 — the exit predicate, stated per row
                 }
@@ -1693,7 +1733,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             {
                 locAttr = " p=\"" + ex( r.path ) + ":" + std::to_string( r.line ) + "\"";
             }
-            const char* gatingAttr = ( gatingAllowed && !r.isNewSymbol && !r.isMinor ) ? " gating=\"1\"" : "";
+            const char* gatingAttr = ( gatingAllowed && quality::rowGates( r ) ) ? " gating=\"1\"" : "";
             // P8 (L7): the threshold beside the number it judges — bar= on the four numeric kinds (quality.h's
             // kCcxBar/kLocBar/kNestBar/kParamBar), so was=/now= read without the legend.
             const char* barAttr = r.kind == "complexity" ? " bar=\"15\"" : r.kind == "verbosity" ? " bar=\"60\""
