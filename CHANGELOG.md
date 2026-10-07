@@ -16,6 +16,14 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 ## [Unreleased]
 
 
+### Fixed — the skill scanner's per-line / joined-body dedupe keeps the worst row of a (line, rule)
+
+The scanner's two passes can report the same (line, rule), and the dedupe sorted with a non-stable sort on (line, rule)
+and kept the first row, so which severity survived was left to the sort. It now sorts stably with the worst severity first
+(the rule the shell-script pass merge already follows), as one shared helper. No input reaches the collision today (a
+rule's severity is a function of its line), so output is unchanged; `test/skillscan.sh` drives the helper with colliding
+pairs in both orders.
+
 ### Fixed — a `--scan-skills` / `wrap` finding's excerpt is cut on a character boundary
 
 A skill line longer than the 120-byte excerpt cap was cut at a byte offset, so a multibyte UTF-8 character straddling the

@@ -527,6 +527,46 @@ else
     no "(excerpt cap) the harness did not compile: $( head -3 "$TMP/excerpt.err" )"
 fi
 
+# ── check 22: the per-line / joined-body dedupe keeps the WORST row of a (line, rule), whatever order they arrive in ──
+# scanSkillTextOn's per-line pass and its joined-body pass can report the same (line, rule); the dedupe keeps one. It sorted
+# with a non-stable std::sort on (line, rule) and kept the first, so which row survived was whatever the sort left first:
+# a WARN could hide a CRITICAL (exit 2 -> 1, and wrap stops refusing) — the same class mergeScriptPasses was fixed for
+# (check 20). Every rule's severity is a function of the line today, so no CLI input reaches the collision; the arm drives
+# dedupeFindingsKeepWorst directly. 40 pairs, WARN pushed before CRITICAL in half of them and after in the other half, plus
+# a lone row each side: past std::sort's insertion-sort cutoff, equal keys do not keep their arrival order.
+cat >"$TMP/dedupe.cpp" <<'CPP'
+#include "skillscan.h"
+#include <cstdio>
+int main()
+{
+    using rw::SkillFinding; using rw::SkillSeverity;
+    std::vector<SkillFinding> v;
+    for( int line = 1; line <= 40; ++line )
+    {
+        const bool warnFirst = ( line % 2 ) != 0;
+        v.push_back( { warnFirst ? SkillSeverity::Warn : SkillSeverity::Critical, line, "INJECTION:disregard", warnFirst ? "w" : "c" } );
+        v.push_back( { warnFirst ? SkillSeverity::Critical : SkillSeverity::Warn, line, "INJECTION:disregard", warnFirst ? "c" : "w" } );
+    }
+    v.push_back( { SkillSeverity::Warn, 41, "SCOPE-CREEP:bash", "only" } );
+    v.push_back( { SkillSeverity::Info, 3, "X:y", "other-rule" } );
+    rw::dedupeFindingsKeepWorst( v );
+    int rows = 0, nonCritical = 0, strayCritical = 0;
+    for( const SkillFinding& f : v )
+    {
+        ++rows;
+        if( std::string_view( f.rule ) == "INJECTION:disregard" ) { nonCritical += f.sev != SkillSeverity::Critical; strayCritical += f.excerpt != "c"; }
+    }
+    std::printf( "rows=%d non_critical_kept=%d wrong_excerpt=%d\n", rows, nonCritical, strayCritical );
+}
+CPP
+if "$CXX" -std=c++23 -I "$ROOT/src" -I "$ROOT/src/infra" -I "$ROOT/third_party" "$TMP/dedupe.cpp" "$ROOT/src/infra/diagnostics.cpp" -o "$TMP/dedupe" >"$TMP/dedupe.err" 2>&1; then
+    GOT="$( "$TMP/dedupe" )"
+    if [ "$GOT" = "rows=42 non_critical_kept=0 wrong_excerpt=0" ]; then ok "(dedupe) 40 colliding (line, rule) pairs keep the CRITICAL row whichever came first (42 rows: 40 + the two lone ones)"
+    else no "(dedupe) want 'rows=42 non_critical_kept=0 wrong_excerpt=0', got: $GOT"; fi
+else
+    no "(dedupe) the harness did not compile (no dedupeFindingsKeepWorst?): $( head -3 "$TMP/dedupe.err" )"
+fi
+
 # ── summary ───────────────────────────────────────────────────────────────────────────────────────
 if [ "$fail" = "0" ]; then
     echo "ALL PASS"

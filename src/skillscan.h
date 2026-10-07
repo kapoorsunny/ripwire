@@ -1178,6 +1178,28 @@ static_assert( kSkillInjectionSpanBytes < kSkillJoinedOverlapBytes && kSkillJoin
                "a joined-body window overlap must exceed the longest INJECTION match, or a match across a window edge is lost" );
 inline constexpr std::size_t kSkillScanStackBytes     = 256 * 1024 * 1024;   // the grep scan threads' size (search.h kGrepScanStackBytes)
 
+// Sort findings (line, rule, severity WORST first) STABLY, then keep the first row per (line, rule): so a (line, rule) reported
+// twice keeps its worst severity, and the earlier row on a tie. Keeping the first row after a non-stable sort on (line, rule)
+// alone left the survivor to whatever the sort put first — a WARN could hide a CRITICAL and quiet the exit from 2 to 1.
+// Today every rule's severity is a function of the line alone, so the severity key only ever breaks ties; it is the invariant,
+// not a behaviour change, and the skillscan gate's dedupe arm holds it. Used by the per-line / joined-body dedupe in
+// scanSkillTextOn and by mergeScriptPasses.
+inline void dedupeFindingsKeepWorst( std::vector<SkillFinding>& findings )
+{
+    std::stable_sort( findings.begin(), findings.end(), []( const SkillFinding& a, const SkillFinding& b ) noexcept
+                      {
+                          if( a.line != b.line )
+                          {
+                              return a.line < b.line;
+                          }
+                          const int byRule = std::string_view( a.rule ).compare( b.rule );
+                          return byRule != 0 ? byRule < 0 : a.sev > b.sev;
+                      } );
+    findings.erase( std::unique( findings.begin(), findings.end(), []( const SkillFinding& a, const SkillFinding& b ) noexcept
+                                 { return a.line == b.line && std::string_view( a.rule ) == std::string_view( b.rule ); } ),
+                    findings.end() );
+}
+
 // Scan the raw text of a skill markdown file line by line, on a thread settled at `stackBytes`. Findings are sorted
 // (line, rule).
 // `wholeFileIsCode` (a shell script, see SkillFileKind): there is no frontmatter, every line is command context and no
@@ -1578,19 +1600,11 @@ inline std::vector<SkillFinding> scanSkillTextOn( std::string_view text, std::si
         addFinding( p.sev, joinedLineOf( pos ), p.rule, m.str( 0 ) );
     }
 
-    // ── sort by (line, rule) for deterministic output, then dedupe on (line, rule) ────────────────
+    // ── sort by (line, rule, worst severity first) for deterministic output, then dedupe on (line, rule) ────────────────
     // The per-line pass and the joined-body pass can both find the SAME instance (e.g. a phrase that sits
     // entirely on one line is found per-line, then found again — same line, same rule — in the joined
     // buffer); collapse those to a single finding so output stays deterministic and non-redundant.
-    std::sort( findings.begin(), findings.end(), []( const SkillFinding& a, const SkillFinding& b ) noexcept
-               {
-        if( a.line != b.line ) { return a.line < b.line;
-}
-        return std::string_view( a.rule ) < std::string_view( b.rule ); } );
-    findings.erase( std::unique( findings.begin(), findings.end(), []( const SkillFinding& a, const SkillFinding& b ) noexcept
-    {
-        return a.line == b.line && std::string_view( a.rule ) == std::string_view( b.rule );
-    } ), findings.end() );
+    dedupeFindingsKeepWorst( findings );
 
     return findings;
 }
@@ -1718,18 +1732,7 @@ inline SkillFileKind skillFileKindOf( std::string_view path, std::string_view te
 inline void mergeScriptPasses( std::vector<SkillFinding>& findings, std::vector<SkillFinding> code )
 {
     findings.insert( findings.end(), std::make_move_iterator( code.begin() ), std::make_move_iterator( code.end() ) );
-    std::stable_sort( findings.begin(), findings.end(), []( const SkillFinding& a, const SkillFinding& b ) noexcept
-                      {
-                          if( a.line != b.line )
-                          {
-                              return a.line < b.line;
-                          }
-                          const int byRule = std::string_view( a.rule ).compare( b.rule );
-                          return byRule != 0 ? byRule < 0 : a.sev > b.sev;
-                      } );
-    findings.erase( std::unique( findings.begin(), findings.end(), []( const SkillFinding& a, const SkillFinding& b ) noexcept
-                                 { return a.line == b.line && std::string_view( a.rule ) == std::string_view( b.rule ); } ),
-                    findings.end() );
+    dedupeFindingsKeepWorst( findings );
 }
 
 inline std::vector<SkillFinding> scanSkillText( std::string_view text, SkillFileKind kind = SkillFileKind::Markdown )
