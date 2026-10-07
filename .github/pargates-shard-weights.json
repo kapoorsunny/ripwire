@@ -112,6 +112,7 @@
 "deckclaimcheck.sh": 0.1,
 "deeptailcheck.sh": 1.0,
 "defaultceilingcheck.sh": 20.1,
+"defectshapecheck.sh": 14.2,
 "defoverdeclcheck.sh": 1.4,
 "degradedhintcheck.sh": 2.5,
 "dependencypincheck.sh": 2.0,
