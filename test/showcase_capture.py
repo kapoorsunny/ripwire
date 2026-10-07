@@ -489,6 +489,7 @@ add(S4, f"{BIN} . --stray-content={shlex.quote( _famB )} --plan", f"Select the g
 add(S4, f"{BIN} . --stray-content=zzzz-no-such-ref --plan", "A --plan filter that selects NO ref REFUSES (exit 1) naming the substring — before the wave-3 close this fell through to the '>512 refs match' sentence, and --abi under the same filter answered an empty measurement at exit 0.")
 add(S4, f"{BIN} . --stray-content={shlex.quote( _famB )} --abi", f"Cross-branch ABI-break gate over {_strayScope( _famB, _famBKind )}: struct byte-contract drift on each ref's AUTHORED paths — exit 2 when any drift row is found (the only kind that gates), 0 when the compared refs are clean, and exit 1 if the --stray-content filter matches no ref at all.", timeout=600)
 add(S4, f"{BIN} . --whereis=rankGraphTeleport", "Which ref's tree defines or mentions SYM — HEAD first, then every local branch.", timeout=600)
+add(S4, f"{BIN} . --whereis=rankGraphTeleport --whereis-listing=all", "The whole hit list, references included: the page the default is measured against. The default lists only the definitions (listing=\"defs\", the references counted in <refs count= next=>) when that page is strictly shorter in bytes, and this page otherwise.", timeout=600)
 add(S4, f"{BIN} . --whereis=computeOnePairOverlap --with-history", "Same, plus a git-history <fate> row (never / removed-by-commit) for names no tree carries.", timeout=600)
 add(S4, f"{BIN} . --flags", "The dark-content dashboard: gates BUILT but OFF. CHANGED: no longer invents gates from comments/heredocs, so the count only reflects real ifndef/define, CMake option(), and getenv gates.")
 add(S4, f"{BIN} . --flags --flip=RIPWIRE_ASAN", "Blast radius of turning ONE gate on: live code, symbols, transitive reach, covering tests.")
@@ -748,6 +749,7 @@ add(S9, mcp(MCP_INIT, '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'), "initia
     post=mcp(MCP_INIT, '{"jsonrpc":"2.0","id":2,"method":"tools/list"}') + f" | tail -1 | python3 {manifest_py}",
     post_label="The manifest, summarised (name / description bytes / required args) — what the host pays in context every session:")
 add(S9, mcp(MCP_INIT, mcp_call("for", task="pagerank power iteration")), "MCP `for`: always bundle=sigs (never the CLI's compact route), the same ranked signatures as --for.")
+add(S9, mcp(MCP_INIT, mcp_call("whereis", symbol="rankGraphTeleport"), mcp_call("whereis", symbol="computeOnePairOverlap").replace('"id":2', '"id":3', 1)) + " --mcp-legend=inline", "--mcp-legend=inline: every answer of the stdio session carries its own legend (the default, session, sends each definition once per session after the first answer).")
 add(S9, mcp(MCP_INIT, mcp_call("explore", task="add a new output format flag to the CLI", budget_tokens=2000)), "MCP `explore` = --pack-task under a token budget, one call.")
 add(S9, mcp(MCP_INIT, mcp_call("fetch_body", handle="rankGraphTeleport")), "MCP `fetch_body`: the lazy-body handle posture — bodies only after ranked retrieval, by bare name here.")
 add(S9, mcp(MCP_INIT, mcp_call("grep", pattern="DISCLOSE", limit=3)), "MCP `grep` with paging args.")
