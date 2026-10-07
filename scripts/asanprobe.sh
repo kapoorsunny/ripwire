@@ -60,8 +60,11 @@ ripwire_asan_probe()   # $1 = compiler, $2 = writable scratch dir; extra args = 
         return 1
     fi
     ASAN_OPTIONS=detect_leaks=0 gate_bounded "$cap" "$dir/asanprobe" >/dev/null 2>&1; rc=$?
-    if [ "$rc" -ne 0 ]; then
-        RIPWIRE_ASAN_PROBE_WHY="an empty -fsanitize=address program built by $cxx did not run to completion within ${cap} s (rc=$rc; the sanitizer runtime hangs before main on this macOS, fixed by a newer Command Line Tools/Xcode or by Homebrew llvm@22)"
+    if [ "$rc" -eq 142 ] || [ "$rc" -eq 124 ]; then   # 128+SIGALRM: gate_bounded's cap fired
+        RIPWIRE_ASAN_PROBE_WHY="an empty -fsanitize=address program built by $cxx did not run to completion within ${cap} s (rc=$rc: it hung, as the sanitizer runtime of Apple clang 17 / Command Line Tools 26.3 does before main on macOS 26; fixed by a newer Command Line Tools/Xcode or by Homebrew llvm@22)"
+        return 1
+    elif [ "$rc" -ne 0 ]; then
+        RIPWIRE_ASAN_PROBE_WHY="an empty -fsanitize=address program built by $cxx exited rc=$rc instead of 0 (the sanitizer runtime failed at start-up on this host)"
         return 1
     fi
     return 0

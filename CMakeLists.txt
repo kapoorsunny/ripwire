@@ -1024,8 +1024,17 @@ if(RIPWIRE_ASAN)
   if(APPLE AND CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND NOT CMAKE_CROSSCOMPILING
      AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     set(RIPWIRE_ASAN_PROBE_TIMEOUT 10 CACHE STRING "seconds the configure-time ASan start-up probe may take (macOS)")
+    # CMake never re-detects CMAKE_CXX_COMPILER_VERSION (or the host OS version) in an existing build tree, and a Command
+    # Line Tools/Xcode update replaces the compiler behind the same /usr/bin/c++. So the key also carries the ASan
+    # runtime the compiler links today (its path and modification time): an in-place toolchain update re-runs the probe.
+    execute_process(COMMAND ${CMAKE_CXX_COMPILER} ${CMAKE_CXX_COMPILER_ARG1} -print-file-name=libclang_rt.asan_osx_dynamic.dylib
+      OUTPUT_VARIABLE _ripwire_asan_rt OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    set(_ripwire_asan_rt_stamp "")
+    if(EXISTS "${_ripwire_asan_rt}")
+      file(TIMESTAMP "${_ripwire_asan_rt}" _ripwire_asan_rt_stamp "%s" UTC)
+    endif()
     set(_ripwire_asan_probe_key
-      "${CMAKE_CXX_COMPILER}|${CMAKE_CXX_COMPILER_VERSION}|${CMAKE_HOST_SYSTEM_VERSION}|${CMAKE_OSX_SYSROOT}|${CMAKE_EXE_LINKER_FLAGS}")
+      "${CMAKE_CXX_COMPILER}|${CMAKE_CXX_COMPILER_VERSION}|${CMAKE_HOST_SYSTEM_VERSION}|${CMAKE_OSX_SYSROOT}|${CMAKE_EXE_LINKER_FLAGS}|${_ripwire_asan_rt}@${_ripwire_asan_rt_stamp}")
     if(NOT "${_ripwire_asan_probe_key}" STREQUAL "${_RIPWIRE_ASAN_PROBE_PASSED}")
       set(_ripwire_asan_probe_dir "${CMAKE_BINARY_DIR}/CMakeFiles/ripwire_asan_probe")
       file(MAKE_DIRECTORY "${_ripwire_asan_probe_dir}")
@@ -1058,7 +1067,12 @@ if(RIPWIRE_ASAN)
         TIMEOUT ${RIPWIRE_ASAN_PROBE_TIMEOUT}
         RESULT_VARIABLE _ripwire_asan_probe_run_rc
         OUTPUT_QUIET ERROR_QUIET)
-      if(NOT _ripwire_asan_probe_run_rc EQUAL 0)
+      if(NOT _ripwire_asan_probe_run_rc EQUAL 0 AND NOT _ripwire_asan_probe_run_rc MATCHES "timeout")
+        message(FATAL_ERROR "RIPWIRE_ASAN: an empty program built with ${CMAKE_CXX_COMPILER} -fsanitize=address exited "
+          "(${_ripwire_asan_probe_run_rc}) instead of returning 0: this toolchain's AddressSanitizer runtime fails at "
+          "start-up. Update the Command Line Tools / Xcode, or configure with Homebrew LLVM (CONTRIBUTING.md, Sanitizer "
+          "build).")
+      elseif(NOT _ripwire_asan_probe_run_rc EQUAL 0)
         message(FATAL_ERROR "RIPWIRE_ASAN: an empty program built with ${CMAKE_CXX_COMPILER} -fsanitize=address did not "
           "run to completion within ${RIPWIRE_ASAN_PROBE_TIMEOUT} s (${_ripwire_asan_probe_run_rc}). This toolchain's "
           "AddressSanitizer runtime deadlocks in its own start-up, before main, on this macOS (seen with Apple clang "
