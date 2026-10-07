@@ -50,6 +50,11 @@
 #
 # LeakSanitizer is OFF here (detect_leaks=0, as CI's macOS asan leg): the subject is lifetime, not leaks, and a leak report at
 # the exit of a long-lived server would be a different finding with its own gate.
+# The freed-chunk quarantine stays ON everywhere but the memory-release sessions (RLSANENV: quarantine_size_mb=0 and
+# allocator_release_to_os_interval_ms=0, because that arm's footprint must fall back under the 64M floor, which a quarantine
+# prevents). With it off, a freed chunk is handed out again at once, and a use-after-free that lands on a same-size reuse reads
+# live memory and reports nothing: the class this gate exists to catch. (The known bug reported as heap-buffer-overflow with
+# the quarantine off everywhere, and as the heap-use-after-free it is with it on.)
 #
 # Usage:
 #   bash test/mcpreloadasancheck.sh [PLAIN_BIN]        # CLI reference binary (default build/ripwire); ASan binary asan/ripwire
@@ -132,7 +137,7 @@ SAN = os.path.join(WORK, "san")
 SRVTMP, CLITMP = os.path.join(WORK, "srvtmp"), os.path.join(WORK, "clitmp")
 DARWIN = sys.platform == "darwin"
 SANENV = {
-    "ASAN_OPTIONS": "detect_leaks=0:halt_on_error=1:abort_on_error=1:quarantine_size_mb=0:allocator_release_to_os_interval_ms=0:log_path=%s/asan" % (SAN,),
+    "ASAN_OPTIONS": "detect_leaks=0:halt_on_error=1:abort_on_error=1:log_path=%s/asan" % (SAN,),
     "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1:log_path=%s/ubsan" % SAN,
 }
 for cand in ("/opt/homebrew/opt/llvm@22/bin/llvm-symbolizer", "/usr/bin/llvm-symbolizer"):
@@ -142,6 +147,8 @@ for cand in ("/opt/homebrew/opt/llvm@22/bin/llvm-symbolizer", "/usr/bin/llvm-sym
         SANENV["UBSAN_OPTIONS"] += ":external_symbolizer_path=" + cand
         break
 TOPK = "6"
+# the release arm only: its footprint must fall under the 64M floor, so the freed-chunk quarantine is off THERE
+RLSANENV = dict(SANENV, ASAN_OPTIONS=SANENV["ASAN_OPTIONS"] + ":quarantine_size_mb=0:allocator_release_to_os_interval_ms=0")
 fails, notes = [], []
 checks = 0
 stats = {"stamp": 0, "content": 0, "edit": 0, "switch": 0, "release": 0, "cold": 0, "changed": 0}
@@ -595,7 +602,7 @@ def release_attempt(k, refR, refA, kk):
     process that has run the whole cycle never falls back under it, so the release path gets a fresh process. Root R's
     resident index alone carries it over the line, so the SECOND call on R releases that index (releaseMcpIndexMemory) and
     rebuilds the unchanged tree; the next call, on A, releases R's rebuild again and rebuilds A. Only those calls are made."""
-    s = Server(ASAN, ["--top-k=" + TOPK, "--max-memory=64M"], SRVTMP + "_rl", os.path.join(WORK, "release.err"), SANENV)
+    s = Server(ASAN, ["--top-k=" + TOPK, "--max-memory=64M"], SRVTMP + "_rl", os.path.join(WORK, "release.err"), RLSANENV)
     status = "ok"
     try:
         s.rpc("initialize")
@@ -637,7 +644,7 @@ def release_session(k, refR, refA, kk):
     if not stats.get("rl_warm"):
         # the memory guard stops a parse that runs past five seconds, and a cold sanitizer parse of R can: warm the ingest
         # cache once, unlimited, so every limited session below reads facts from it and its ingest is short
-        w = Server(ASAN, ["--top-k=" + TOPK], SRVTMP + "_rl", os.path.join(WORK, "warm.err"), SANENV)
+        w = Server(ASAN, ["--top-k=" + TOPK], SRVTMP + "_rl", os.path.join(WORK, "warm.err"), RLSANENV)
         try:
             w.rpc("initialize")
             kind, payload, _ = w.tool("find_symbol", path=R, symbol="cb")
