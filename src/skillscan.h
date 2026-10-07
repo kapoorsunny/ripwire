@@ -93,6 +93,31 @@ inline std::string_view trimRight( std::string_view s ) noexcept
     return s;
 }
 
+// A finding's excerpt cap: at most kSkillExcerptMaxBytes bytes in all, "..." included.
+inline constexpr std::size_t kSkillExcerptMaxBytes = 120;
+
+// The trimmed, clipped excerpt of one skill line. The text is UNTRUSTED and arbitrary UTF-8, so the cut never lands inside a
+// multibyte character: it backs off to the code-point boundary, the same rule as serialize.h's truncateUtf8WithEllipsis
+// (that header is not reachable from here), and the ASCII "..." is added only when bytes were really dropped — a line of
+// exactly the cap is kept whole.
+inline std::string clipSkillExcerpt( std::string_view lineText )
+{
+    std::string excerpt( trimRight( lineText ) );
+    if( excerpt.size() <= kSkillExcerptMaxBytes )
+    {
+        return excerpt;
+    }
+    std::size_t cut = kSkillExcerptMaxBytes - 3;   // room for the "..."
+    while( cut > 0 && ( static_cast<unsigned char>( excerpt[cut] ) & 0xC0 ) == 0x80 )
+    {
+        --cut;
+    }
+    excerpt.resize( cut );
+    excerpt += "...";
+    ENSURES( excerpt.size() <= kSkillExcerptMaxBytes, "the clipped excerpt fits the cap, ellipsis included" );
+    return excerpt;
+}
+
 // ── INJECTION phrase table (CRITICAL, with a generic-word WARN fallback) ────────────────────────
 //
 // A4-F12 fix: bare substrings ("disregard", "you are now", "new persona") false-positive on
@@ -1210,9 +1235,7 @@ inline std::vector<SkillFinding> scanSkillTextOn( std::string_view text, std::si
     // helper: add a finding with a clipped excerpt
     const auto addFinding = [ & ]( SkillSeverity sev, int lineNum, const char* rule, std::string_view lineText, const char* why = nullptr )
     {
-        std::string excerpt( trimRight( lineText ) );
-        if( excerpt.size() > 120 ) { excerpt.resize( 117 ); excerpt += "..."; }
-        findings.push_back( { sev, lineNum, rule, std::move( excerpt ), why } );
+        findings.push_back( { sev, lineNum, rule, clipSkillExcerpt( lineText ), why } );
     };
     // helper: the regex boundary's answer as a plain hit, failing CLOSED on an undecided match — the line gets a
     // CRITICAL scan-incomplete finding (deduped per line below), so an unscannable skill can never read "clean".

@@ -16,6 +16,14 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 ## [Unreleased]
 
 
+### Fixed — a `--scan-skills` / `wrap` finding's excerpt is cut on a character boundary
+
+A skill line longer than the 120-byte excerpt cap was cut at a byte offset, so a multibyte UTF-8 character straddling the
+cap left an invalid tail in the excerpt (the text is arbitrary and untrusted). The cut now backs off to the code-point
+boundary, the same rule as the other text caps, and the `...` is added only when bytes were really dropped; a line of
+exactly the cap is shown whole. `test/skillscan.sh` pins a 2-byte and a 4-byte character at the cap, a line of exactly
+120 bytes, and a plain overlong line.
+
 ### Added — MCP `grep` rows carry the matched text and a `fetch_body` handle (CLI parity)
 
 The MCP `grep` hit row was `{file, line, in}`: no matched text, so an agent re-read every file it had just searched, and
