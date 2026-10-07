@@ -4762,6 +4762,8 @@ struct FalseEdgeRules
     std::vector<char>                           goDotImport;  // fileId → the file has `import . "…"`
     std::vector<std::string>                    goModules;    // every in-tree go.mod's module path
     std::vector<char>                           goUnderModule;   // fileId → a go.mod sits at or above the file, inside the root
+    std::vector<std::string>                    goPackagePath;   // fileId → its package's import path: the nearest go.mod's module
+                                                                 //   path + the directory below it ("" when no module line is found)
     HashMap<std::string, char>                  jsVocabulary;    // jsModuleVocabulary, built only when a JS alias exists
     HashMap<std::string, char>                  rustOutsideUse;  // "<fileId>#name": a Rust `use` of a path outside the crate names it
     std::vector<std::vector<NodeId>>            functionsByFile; // fileId → its functions/methods sorted by sigStartByte (enclosingFunction)
@@ -5209,7 +5211,9 @@ inline std::vector<std::string> goModuleTreePaths( std::string_view text )
 inline void collectGoModules( const IngestResult& ing, FalseEdgeRules& rules )
 {
     rules.goUnderModule.assign( ing.files.size(), 0 );
+    rules.goPackagePath.assign( ing.files.size(), std::string{} );
     HashMap<std::string, std::vector<std::string>> modOfDir;   // disk directory → its go.mod's tree paths (empty: no go.mod)
+    HashMap<std::string, std::string>              modLineOfDir;   // disk directory → its go.mod's own `module` path
     HashMap<std::string, char>        seenModule;
     for( const Symbol& s : ing.symbols )
     {
@@ -5219,6 +5223,7 @@ inline void collectGoModules( const IngestResult& ing, FalseEdgeRules& rules )
         }
         std::string_view rel  = rootRelPath( ing, s.fileId );
         std::string      disk = diskPath( ing, s.fileId );
+        const std::string_view fileDir = includerDir( rel );
         // walk up as many directories as the root-relative path has, never above the root
         while( true )
         {
@@ -5235,11 +5240,20 @@ inline void collectGoModules( const IngestResult& ing, FalseEdgeRules& rules )
                 if( const std::optional<std::string> text = docparse::detail::readWholeFile( disk + "/go.mod" ) )
                 {
                     it->second = goModuleTreePaths( *text );
+                    modLineOfDir.try_emplace( disk, goModulePathOf( *text ) );
                 }
             }
             if( !it->second.empty() )
             {
                 rules.goUnderModule[ s.fileId ] = 1;
+                // FE-B: the package's import path — the module path, then the file's directory below the go.mod's
+                if( const auto ml = modLineOfDir.find( disk ); ml != modLineOfDir.end() && !ml->second.empty() )
+                {
+                    const std::string_view modDir = relCut == std::string_view::npos ? std::string_view{} : rel.substr( 0, relCut );
+                    std::string_view       below  = fileDir.substr( std::min( modDir.size(), fileDir.size() ) );
+                    below.remove_prefix( below.starts_with( '/' ) ? 1 : 0 );
+                    rules.goPackagePath[ s.fileId ] = below.empty() ? ml->second : ml->second + "/" + std::string( below );
+                }
                 for( const std::string& m : it->second )
                 {
                     if( seenModule.try_emplace( m, '\0' ).second )
@@ -5825,6 +5839,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     {
         PROFILE_SCOPE_DESCRIBE( "buildGraph/2i: receiver-evidence tables" );
         recvEv.localNames = &fieldNarrow.localNameSet;
+        recvEv.goPackagePath = &falseEdges.goPackagePath;
         recvEv.build();
     }
     HashMap<std::uint64_t, char> nameOnlyEdges;   // (from<<32|to) of an edge some call bound by NAME ALONE (no receiver evidence)

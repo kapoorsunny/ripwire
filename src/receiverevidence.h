@@ -109,6 +109,7 @@ struct ReceiverEvidence
     mutable rw::SmallVec<NodeId, 2>                       found;
     bool                                                  active = false;
     const HashMap<std::string, char>*                     localNames = nullptr;   // graph.h FieldNarrowTables::localNameSet
+    const std::vector<std::string>*                       goPackagePath = nullptr;   // graph.h FalseEdgeRules::goPackagePath
 
     ReceiverEvidence( const IngestResult& i, const HashMap<std::string, std::vector<std::string>>& up, const HashMap<std::string, char>& classes )
         : ing( i ), chaUp( up ), classNames( classes ) {}
@@ -690,7 +691,14 @@ struct ReceiverEvidence
         const std::string_view target = rootRelPath( ing, ing.symbols[ c ].fileId );
         if( r.lang == Lang::Go )
         {
-            // an import path names a package DIRECTORY; the candidate's directory must end the path, segment-aligned
+            // an import path names a package: the candidate's own package import path (its go.mod's module path and the
+            // directory below it — a nested module's `quoted/lib` is `example.com/qm/lib`) proves it exactly
+            const std::uint32_t cf = ing.symbols[ c ].fileId;
+            if( goPackagePath != nullptr && cf < goPackagePath->size() && !( *goPackagePath )[ cf ].empty() && source == ( *goPackagePath )[ cf ] )
+            {
+                return true;
+            }
+            // else the candidate's directory must end the path, segment-aligned (a replace-only tree, no go.mod above)
             const std::string_view dir = includerDir( target );
             return !dir.empty() && source.size() >= dir.size() && source.ends_with( dir )
                 && ( source.size() == dir.size() || source[ source.size() - dir.size() - 1 ] == '/' );
