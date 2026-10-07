@@ -163,9 +163,11 @@ inline IdsOfName relatedByName( const IngestResult& ing, const RowsOfName& rowsO
 }
 
 // ONE pass over the reference table: a reference `isKind` accepts, spelled like a row's name, from a symbol that is not
-// in that name's `bound` set (or from file scope), marks every row of the name. `mark( row )` is the caller's verdict.
-template<class IsKind, class Mark>
-inline void markUnboundSpellings( const IngestResult& ing, const RowsOfName& rowsOfName, const IdsOfName& bound, IsKind&& isKind, Mark&& mark )
+// in that name's `bound` set (or from file scope), marks every row of the name. `isBound( r, ids )` decides whether the
+// reference is accounted for by that name's sorted `bound` ids (empty when the name has none); `mark( row )` is the verdict.
+template<class IsKind, class IsBound, class Mark>
+inline void markUnboundSpellings( const IngestResult& ing, const RowsOfName& rowsOfName, const IdsOfName& bound, IsKind&& isKind,
+                                  IsBound&& isBound, Mark&& mark )
 {
     for( const Reference& r : ing.references )
     {
@@ -178,10 +180,9 @@ inline void markUnboundSpellings( const IngestResult& ing, const RowsOfName& row
         {
             continue;
         }
-        const auto boundIt = bound.find( it->first );
-        const bool isBound = r.fromSymbol != kNoNode && boundIt != bound.end()
-                             && std::binary_search( boundIt->second.begin(), boundIt->second.end(), r.fromSymbol );
-        if( !isBound )
+        const auto                    boundIt = bound.find( it->first );
+        const std::span<const NodeId> ids     = boundIt != bound.end() ? std::span<const NodeId>( boundIt->second ) : std::span<const NodeId>();
+        if( !isBound( r, ids ) )
         {
             for( const std::uint32_t row : it->second )
             {
@@ -189,6 +190,31 @@ inline void markUnboundSpellings( const IngestResult& ing, const RowsOfName& row
             }
         }
     }
+}
+
+// The plain bound test: the reference's own enclosing symbol is one of the name's bound ids (sorted).
+inline bool fromIsBound( const Reference& r, std::span<const NodeId> ids ) noexcept
+{
+    return r.fromSymbol != kNoNode && std::binary_search( ids.begin(), ids.end(), r.fromSymbol );
+}
+
+// An inherit clause is bound when the graph listed its DERIVED type as an implementor. graph.h's inheritance pass names
+// that type two ways besides the enclosing symbol, and this must read it the same way or a bound clause reads as a miss:
+// a Rust `impl Trait for T` header lies outside T's span, so T's NAME rides in `qualifier` (empty for every other
+// language's inherit ref); and a reopened Ruby class is listed once, under its canonical opening, so the clause in
+// another opening comes from a symbol id the list does not hold but a symbol NAME it does. By name, like every floor
+// here: a same-named derived type elsewhere that the graph bound answers for this clause too ("may", not "does").
+inline bool inheritIsBound( const IngestResult& ing, const Reference& r, std::span<const NodeId> ids ) noexcept
+{
+    if( fromIsBound( r, ids ) )
+    {
+        return true;
+    }
+    const std::string_view derived = r.isInherit && !r.qualifier.empty()                           ? std::string_view( r.qualifier )
+                                     : r.fromSymbol != kNoNode && r.fromSymbol < ing.symbols.size() ? std::string_view( ing.symbols[ r.fromSymbol ].name )
+                                                                                                    : std::string_view();
+    return !derived.empty()
+           && std::ranges::any_of( ids, [ & ]( NodeId id ) { return id < ing.symbols.size() && ing.symbols[id].name == derived; } );
 }
 
 inline bool isCallSpelling( const Reference& r ) noexcept
@@ -247,7 +273,7 @@ inline std::vector<CallerFloor> callerFloors( const IngestResult& ing, const Gra
         const auto* inCi = g.inEdges.colIndices();
         const countfloor::IdsOfName boundCallers = countfloor::relatedByName( ing, rowsOfName, g.wOutDeg.size(),
             [ & ]( NodeId id, std::vector<NodeId>& into ) { into.insert( into.end(), inCi + inRo[id], inCi + inRo[id + 1] ); } );
-        countfloor::markUnboundSpellings( ing, rowsOfName, boundCallers, countfloor::isCallSpelling,
+        countfloor::markUnboundSpellings( ing, rowsOfName, boundCallers, countfloor::isCallSpelling, countfloor::fromIsBound,
                                           [ & ]( std::uint32_t row ) { out[row].isFloor = true; } );
 
         std::optional<ValueRefIndex> own;   // one more pass over the table: built only if a row is still open
@@ -299,6 +325,7 @@ inline std::vector<char> implementorFloors( const IngestResult& ing, const std::
     const countfloor::IdsOfName boundDerived = countfloor::relatedByName( ing, rowsOfName, graphImplementors.size(),
         [ & ]( NodeId id, std::vector<NodeId>& into ) { into.insert( into.end(), graphImplementors[id].begin(), graphImplementors[id].end() ); } );
     countfloor::markUnboundSpellings( ing, rowsOfName, boundDerived, []( const Reference& r ) { return r.isInherit || r.role == RefRole::Extends; },
+                                      [ & ]( const Reference& r, std::span<const NodeId> ids ) { return countfloor::inheritIsBound( ing, r, ids ); },
                                       [ & ]( std::uint32_t row ) { out[row] = 1; } );
     return out;
 }
