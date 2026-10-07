@@ -39,7 +39,9 @@ bodies(){ grep -o '<b t=' "$1" | wc -l | tr -d ' '; }
 # Re-pinned 2026-09-23 (cut-fix lane A): the tag may END with docs_dropped="N" — N shown rows whose doc comment the rank
 # tiers or the ladder removed (serialize.h sigsOpenTag), which used to happen with no trace. Measured on this query: the
 # default bundle carries it, so the shape without it no longer matched and arm #2 read "0 sigs blocks".
-sigblocks(){ grep -oE '<sigs( shown="[0-9]+" total="[0-9]+" capped="1")?( docs_dropped="[0-9]+")?>' "$1" | wc -l | tr -d ' '; }
+# knob-honesty-068: a capped tag also carries its continuation, next="…" (the call that serves it uncut) — the block is the
+# same <sigs> block, so the shape admits the attribute; the count it asserts is unchanged.
+sigblocks(){ grep -oE '<sigs( shown="[0-9]+" total="[0-9]+" capped="1")?( docs_dropped="[0-9]+")?( next="[^"]*")?>' "$1" | wc -l | tr -d ' '; }
 
 # ── #1: --detail=0 == no --detail (byte-identical, golden-neutral) ──────────────────────────────────────
 "$BIN" src --for="$TASK" --no-cache >"$TMP/plain" 2>/dev/null

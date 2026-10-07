@@ -2185,11 +2185,12 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     const std::size_t fixedBytes = headerStr.size() - rw::kForFileTailLegend.size() - mcpConfidenceExemptBytes - mcpIdRouteExemptBytes - mcpAtLegendExemptBytes
                                  + legoStr.size() + composeStr.size() + routeStr.size() + 6;   // + "</ctx>"
     const std::size_t sigsBudget = forBudgetBytes > fixedBytes ? forBudgetBytes - fixedBytes : 1;   // ≥1: 0 = "no budget"
-    // knob-honesty-068: the CLI twin's <sigs next=> (serialize.h SigsCutContinuation: exempt from the trim, so the served
-    // rows are the ones they were). The value spells the CLI flags, as every next= this surface emits does (mcp `for` with
-    // budget_tokens=T is the same call: this surface is signatures-only).
-    const rw::SigsCutContinuation mcpSigsNext{ task, 0, noRoute ? std::string_view( " --no-route" ) : std::string_view(), fixedBytes,
-                                               /*json=*/false };
+    // knob-honesty-068: the CLI twin's <sigs> continuation (serialize.h SigsCutContinuation). This surface is signatures-only,
+    // so its sig side IS the ceiling: charged under a caller's budget_tokens, exempt at the default. NO pasteable CLI argv here
+    // (the CLI ranks its own list, so a CLI re-run could continue a different one): the machine form next_budget_tokens=T —
+    // re-call `for` with budget_tokens=T — plus next_offset=, the resume index.
+    const rw::SigsCutContinuation mcpSigsNext{ task, 0, std::string_view(), fixedBytes,
+                                               /*charged=*/budgetTokens > 0, /*json=*/false, /*pasteHandle=*/false };
 
     // L3: field-notes surfacing — parity with the CLI --for lens. loadNoteIndex reads root/.ripwire_notes (a
     // small file); nullptr when EMPTY so the bundle stays byte-identical when there is nothing to surface.
@@ -2258,8 +2259,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     }
     // cut-fix lane A: the <sigs> tag's cut readings (docs_dropped=, shrunk-not-dropped) — the CLI twin's clauses, same
     // text, same splice point, present only when the tag carries the case (serialize.h sigsCutLegendNotes).
-    if( const std::string cutNotes = rw::sigsCutLegendNotes( mcpSigsCut.isCapped, mcpSigsCut.shown, mcpSigsCut.total, mcpSigsCut.docsDropped,
-                                                                 !mcpSigsCut.next.empty() );
+    if( const std::string cutNotes = rw::sigsCutReportLegend( mcpSigsCut );
         !cutNotes.empty() )
     {
         const std::size_t closeAt = headerStr.rfind( " -->" );

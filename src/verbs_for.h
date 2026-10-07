@@ -1455,8 +1455,9 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     const std::size_t fixedBytes = header.size() + kJsonEnvelopeBytes + kJsonSurfaceCountsBytes
                                   + ( in.noteIndex ? kJsonNotesStanzaBytes : 0 );
     const std::size_t sigsBudget = bundleBudget > fixedBytes ? bundleBudget - fixedBytes : 1;
-    // knob-honesty-068: the cut's continuation, exempt from the trim like the XML twin's next= (SigsCutContinuation)
-    const rw::SigsCutContinuation cutNext{ in.task, in.packTopN, in.rankFlags, fixedBytes, /*json=*/true };
+    // knob-honesty-068: the cut's continuation. This dialect serves no bodies, so its sig side IS the ceiling: charged under
+    // an explicit --token-budget, exempt at the default (the XML twin's rule, SigsCutContinuation)
+    const rw::SigsCutContinuation cutNext{ in.task, in.packTopN, in.rankFlags, fixedBytes, /*charged=*/in.tokenBudget > 0, /*json=*/true };
 
     const JsonSigLens lens{ /*metrics=*/true, in.fanIn, in.impure, in.churnPerFile, in.cloneMember,
                             in.tested, in.amp, /*rankAdaptivePayload=*/true, in.noteIndex };
@@ -1558,7 +1559,11 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     if( sigsCut.isCapped )
     {
         sigsCutStanza += ",\"sigs_shown\":" + std::to_string( sigsCut.shown ) + ",\"sigs_total\":" + std::to_string( sigsCut.total );
-        sigsCutStanza += rw::nextFieldJson( sigsCut.next, "sigs_next" );   // knob-honesty-068: the call serving the cut rows
+        if( rw::sigsCutHasNextOffset( sigsCut ) )   // knob-honesty-068: the resume index, then the call serving the cut rows
+        {
+            sigsCutStanza += ",\"sigs_next_offset\":" + std::to_string( sigsCut.lastShownRank );
+        }
+        sigsCutStanza += rw::nextFieldJson( sigsCut.next, "sigs_next" );
     }
     if( sigsCut.docsDropped > 0 )
     {
@@ -3000,10 +3005,12 @@ std::optional<int> runForLens( const MainDispatch& d )
         // (the same reason est_tokens is "omitted", not "wrong", on that path — see its DISCLOSE).
         std::size_t forDroppedPositive = 0;
         // knob-honesty-068: a capped <sigs> names the call that serves it uncut (serialize.h SigsCutContinuation, where the
-        // exempt-from-the-trim rule is argued: the ranked set is the one it was at every ceiling). Its bytes are measured
-        // downstream like every spliced disclosure: est_tokens, the header ladder and over_ceiling= see them.
-        const std::string             forRankFlags = forRankShapingFlags( cfg );
-        const rw::SigsCutContinuation forSigsNext{ cfg.forTask, cfg.packTopN, forRankFlags, fixedBytes, /*json=*/false };
+        // two regimes are argued): CHARGED exactly when an explicit ceiling's sig side is the whole ceiling (nothing
+        // downstream can pay, and the ceiling is hard); exempt at the default and when the sig side is frozen at the
+        // default's share (forSigSideCeiling), so those ranked sets — and forbudgetmonotoncheck's identity — are untouched.
+        const bool                    forSigsNextCharged = cfg.tokenBudget > 0 && sigSideCeiling == bundleBudget;
+        const std::string             forRankFlags       = forRankShapingFlags( cfg );
+        const rw::SigsCutContinuation forSigsNext{ cfg.forTask, cfg.packTopN, forRankFlags, fixedBytes, forSigsNextCharged, /*json=*/false };
         bool        forSigsCapped      = false;   // did the H1 ladder trim <sigs>? — decides the budget_bytes= legend clause below
         rw::SigsCutReport forSigsCut;             // cut-fix lane A: the <sigs> tag's shown/total/docs_dropped — its clauses below
         sigsPreRendered = preRender( [ & ]( std::FILE* sm )
@@ -3099,7 +3106,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // cut-fix lane A: the <sigs> tag's two cut readings (docs_dropped=, shrunk-not-dropped) ride the same splice, present
         // only when the tag carries the case (serialize.h sigsCutLegendNotes), so the reserve below already covers them.
         const std::string sigsCeilingNote   = ( forDefaultCeiling ? std::string( rw::kForBudgetBytesNote ) : std::string() )
-            + rw::sigsCutLegendNotes( forSigsCut.isCapped, forSigsCut.shown, forSigsCut.total, forSigsCut.docsDropped, !forSigsCut.next.empty() );
+            + rw::sigsCutReportLegend( forSigsCut );
         // ── the INDEXING-cap disclosure (mention.h CapDisclosure), at the same splice point and for the
         // same reason: a --for header is charged against the payload ceiling, so a disclosure folded into
         // the notes above is paid for in ranked rows. Measured on sixteen real invocations, that cost three

@@ -417,9 +417,9 @@ esac
 # The ladder disclosed its cut (shown= total= capped="1") and named no call that serves the cut rows: the bundle's only
 # next= was the r=1 row's (a body, or the widening page). Fixture: 40 matching C functions with long docs and long
 # parameter lists, so the DEFAULT ceiling drops rows. The tag must carry next= (+ its legend clause), pasting it must
-# serve all total= rows uncut in the same rank order, the shown rows must be its prefix, and under a tight explicit
-# ceiling it is still there and either fits (est_tokens <= budget_tokens) or the root says over_ceiling="1" — it is
-# exempt from the sig trim (no row is spent on it), so an overshoot is disclosed, never hidden. JSON + MCP twins.
+# serve all total= rows uncut in the same rank order, the shown rows must be its prefix. Under a tight explicit (hard)
+# ceiling it is CHARGED: still there, and est_tokens stays within budget_tokens. At an explicit ceiling wide enough that
+# the sig side is frozen at the default's it is EXEMPT: the <sigs> block is byte-identical to the default's. JSON + MCP.
 # Negatives: an uncapped tag (arm 8's fixture) carries none; --no-route is echoed. RED on 255dc199 (no next= on <sigs>).
 mkdir -p "$TMP/fxcut"
 python3 - "$TMP/fxcut" <<'PY'
@@ -440,9 +440,14 @@ tag = m.group( 1 )
 nx = re.search( r"\snext=\"([^\"]*)\"", tag )
 sh = re.search( r"shown=\"([0-9]+)\"", tag ); tt = re.search( r"total=\"([0-9]+)\"", tag )
 names = re.findall( r"<d [^>]*\bn=\"([^\"]*)\"", m.group( 2 ) )
+ranks = [ int( r ) for r in re.findall( r"<d [^>]*\br=\"([0-9]+)\"", m.group( 2 ) ) ]
+no_ = re.search( r"\snext_offset=\"([0-9]+)\"", tag ); nb_ = re.search( r"\snext_budget_tokens=\"([0-9]+)\"", tag )
 out = { "capped": "capped=\"1\"" in tag, "shown": int( sh.group( 1 ) ) if sh else len( names ), "total": int( tt.group( 1 ) ) if tt else len( names ),
         "next": nx.group( 1 ).replace( "&apos;", chr( 39 ) ).replace( "&quot;", chr( 34 ) ).replace( "&amp;", "&" ) if nx else "",
-        "clause": "[sigs next=:" in s[ : s.find( "<sigs" ) ], "names": names }
+        "clause": "[sigs next=:" in s[ : s.find( "<sigs" ) ], "names": names,
+        "next_offset": int( no_.group( 1 ) ) if no_ else None, "max_r": max( ranks ) if ranks else 0,
+        "next_budget_tokens": int( nb_.group( 1 ) ) if nb_ else None,
+        "offset_clause": "[sigs next_offset=:" in s[ : s.find( "<sigs" ) ], "budget_clause": "[sigs next_budget_tokens=:" in s[ : s.find( "<sigs" ) ] }
 root = re.search( r"<ctx[^>]*>", s ); r = root.group( 0 ) if root else ""
 for k in ( "est_tokens", "budget_tokens" ):
     v = re.search( r"\b%s=\"([0-9]+)\"" % k, r ); out[ k ] = int( v.group( 1 ) ) if v else None
@@ -460,7 +465,14 @@ case "$NX1" in
     "--for='gadget assembler' --signatures-only --token-budget="[0-9]*) ok "(9) the capped <sigs> names its call: next=\"$NX1\"" ;;
     *) no "(9) the capped <sigs> carries next='$NX1' (want --for='gadget assembler' --signatures-only --token-budget=N)" ;;
 esac
-[ "$( cfield "$C1" clause )" = true ] && ok "(9) the [sigs next=: …] clause defines it ahead of <sigs>" || no "(9) <sigs next=> rides with no legend clause"
+if [ "$( cfield "$C1" clause )" = true ]; then ok "(9) the [sigs next=: …] clause defines it ahead of <sigs>"; else no "(9) <sigs next=> rides with no legend clause"; fi
+# the resume index (the #362 candidate page's next_offset): the last printed row's candidate rank, defined by its own clause
+if [ "$( cfield "$C1" next_offset )" = "$( cfield "$C1" max_r )" ] && [ "$( cfield "$C1" next_offset )" = "$( cfield "$C1" shown )" ] \
+   && [ "$( cfield "$C1" offset_clause )" = true ]; then
+    ok "(9) next_offset=\"$( cfield "$C1" next_offset )\" is the resume index: the last printed row's rank (= shown, no pseudo slot here), defined"
+else
+    no "(9) next_offset='$( cfield "$C1" next_offset )' vs last printed r=$( cfield "$C1" max_r ), shown=$( cfield "$C1" shown ), clause=$( cfield "$C1" offset_clause )"
+fi
 # paste it (shlex-split, as an agent would)
 pasted(){ python3 -c 'import shlex,sys; print( "\0".join( shlex.split( sys.argv[1] ) ), end = "" )' "$1" > "$TMP/nx.argv"; ( cd "$TMP" && xargs -0 "$BIN" "$2" --no-cache < "$TMP/nx.argv" 2>/dev/null ); }
 C2="$( [ -n "$NX1" ] && pasted "$NX1" fxcut | cut_arm )"
@@ -472,19 +484,26 @@ fi
 python3 -c 'import json,sys; a=json.loads(sys.argv[1])["names"]; b=json.loads(sys.argv[2])["names"]; sys.exit(0 if a and b[:len(a)]==a else 1)' "$C1" "${C2:-{\"names\":[]\}}" 2>/dev/null \
     && ok "(9) the cut block's rows are a prefix of the continuation's (same ranked list, same order)" \
     || no "(9) the continuation does not extend the cut block's rows in order"
-# tight explicit ceiling: still named, and either inside the budget the root names or disclosed over it; the call recovers the rows
+# tight explicit ceiling: CHARGED — still named, and est_tokens stays within the hard ceiling the root names
 C3="$( cd "$TMP" && "$BIN" fxcut --for="gadget assembler" --token-budget=1500 --no-cache 2>/dev/null | cut_arm )"
 NX3="$( cfield "$C3" next )"
-{ [ "$( cfield "$C3" capped )" = true ] && [ -n "$NX3" ] \
-  && { [ "$( cfield "$C3" est_tokens )" -le "$( cfield "$C3" budget_tokens )" ] || [ "$( cfield "$C3" over )" = true ]; }; } \
-    && ok "(9) --token-budget=1500: next= present; est_tokens $( cfield "$C3" est_tokens ) vs budget_tokens 1500 (over_ceiling=$( cfield "$C3" over ))" \
+{ [ "$( cfield "$C3" capped )" = true ] && [ -n "$NX3" ] && [ "$( cfield "$C3" over )" = false ] \
+  && [ "$( cfield "$C3" est_tokens )" -le "$( cfield "$C3" budget_tokens )" ]; } \
+    && ok "(9) --token-budget=1500: next= present and charged (est_tokens $( cfield "$C3" est_tokens ) <= budget_tokens 1500)" \
     || no "(9) --token-budget=1500: $C3"
+# wide explicit ceiling (sig side frozen at the default's): EXEMPT — the block, next= included, is the default's byte for byte
+sigsblk(){ python3 -c 'import re,sys; m=re.search(r"<sigs[^>]*>.*?</sigs>",sys.stdin.read(),re.S); print(m.group(0) if m else "")'; }
+if [ "$( cd "$TMP" && "$BIN" fxcut --for="gadget assembler" --no-cache 2>/dev/null | sigsblk )" = "$( cd "$TMP" && "$BIN" fxcut --for="gadget assembler" --token-budget=8000 --no-cache 2>/dev/null | sigsblk )" ]; then
+    ok "(9) --token-budget=8000: exempt — the <sigs> block (its next= included) is the default's byte for byte"
+else
+    no "(9) --token-budget=8000: the <sigs> block differs from the default's (the exempt regime moved rows or its next=)"
+fi
 C4="$( [ -n "$NX3" ] && pasted "$NX3" fxcut | cut_arm )"
 [ -n "$C4" ] && [ "$( cfield "$C4" capped )" = false ] && [ "$( cfield "$C4" shown )" = "$( cfield "$C3" total )" ] \
     && ok "(9) --token-budget=1500: pasting its next= serves the block uncut" || no "(9) --token-budget=1500: the pasted next= left it cut: ${C4:-<none>}"
-# negatives: an uncapped tag carries no next=; a ranking flag is echoed (the re-run must rank the same list)
+# negatives: an uncapped tag carries no next=/next_offset=; a ranking flag is echoed (the re-run must rank the same list)
 U1="$( cd "$TMP" && "$BIN" fxdocs --for="widget helper" --no-cache 2>/dev/null | cut_arm )"
-[ "$( cfield "$U1" capped )" = false ] && [ -z "$( cfield "$U1" next )" ] && [ "$( cfield "$U1" clause )" = false ] \
+[ "$( cfield "$U1" capped )" = false ] && [ -z "$( cfield "$U1" next )" ] && [ "$( cfield "$U1" clause )" = false ] && [ "$( cfield "$U1" next_offset )" = null ] \
     && ok "(9) negative: an uncapped <sigs> carries no next= and no clause" || no "(9) negative: uncapped fixture: $U1"
 case "$( cd "$TMP" && "$BIN" fxcut --for="gadget assembler" --no-route --no-cache 2>/dev/null | cut_arm | python3 -c 'import json,sys; print(json.load(sys.stdin)["next"])' )" in
     *' --no-route'*) ok "(9) --no-route is echoed in the continuation" ;;
@@ -497,21 +516,34 @@ case "$JNX" in
     *' --signatures-only '*' --json') ok "(9) JSON twin: \"sigs_next\" names the --json call" ;;
     *) no "(9) JSON twin: sigs_next='$JNX'" ;;
 esac
+JNO="$( printf '%s' "$J1" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("sigs_next_offset"), d.get("sigs_shown"))' 2>/dev/null )"
+case "$JNO" in "None"*|"") no "(9) JSON twin: no sigs_next_offset ('$JNO')" ;; *) set -- $JNO; if [ "$1" = "$2" ]; then ok "(9) JSON twin: sigs_next_offset=$1 (the resume index)"; else no "(9) JSON twin: sigs_next_offset=$1 vs sigs_shown=$2"; fi ;; esac
 J2="$( [ -n "$JNX" ] && pasted "$JNX" fxcut | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("capped"), len(d["sigs"]), "sigs_next" in d)' 2>/dev/null )"
 [ "$J2" = "False $( printf '%s' "$J1" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("sigs_total"))' 2>/dev/null ) False" ] \
     && ok "(9) JSON twin: pasting sigs_next serves every row uncut" || no "(9) JSON twin: pasted sigs_next gave '$J2'"
-# MCP twin (signatures only, the same default ceiling): the same attribute on its <sigs>
-M1="$( printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"gadget assembler"}}}\n' "$TMP/fxcut" \
+# MCP twin (signatures only, its own ranking pipeline): NO pasteable CLI argv — the machine form next_budget_tokens=T (and
+# next_offset=); re-calling `for` with budget_tokens=T serves every row uncut
+mcpfor(){ printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"gadget assembler"%s}}}\n' "$TMP/fxcut" "$1" \
        | "$BIN" --mcp 2>/dev/null | python3 -c 'import json,sys
 for line in sys.stdin:
     line=line.strip()
     if not line: continue
     d=json.loads(line)
-    if d.get("id")==1: print(d["result"]["content"][0]["text"])' 2>/dev/null | cut_arm )"
-case "$( cfield "${M1:-{\}}" next 2>/dev/null )" in
-    "--for='gadget assembler' --signatures-only --token-budget="[0-9]*) ok "(9) MCP twin: the capped <sigs> carries the same next= shape" ;;
-    *) no "(9) MCP twin: ${M1:-<no output>}" ;;
-esac
+    if d.get("id")==1: print(d["result"]["content"][0]["text"])' 2>/dev/null | cut_arm; }
+M1="$( mcpfor '' )"
+MNB="$( cfield "${M1:-{\}}" next_budget_tokens 2>/dev/null )"
+if [ -n "$M1" ] && [ "$( cfield "$M1" capped )" = true ] && [ -z "$( cfield "$M1" next )" ] && [ "$MNB" != null ] && [ "$( cfield "$M1" budget_clause )" = true ] \
+   && [ "$( cfield "$M1" next_offset )" = "$( cfield "$M1" max_r )" ]; then
+    ok "(9) MCP twin: no CLI argv on <sigs>; next_budget_tokens=\"$MNB\" and next_offset=\"$( cfield "$M1" next_offset )\", both defined"
+else
+    no "(9) MCP twin: ${M1:-<no output>}"
+fi
+M2="$( [ "$MNB" != null ] && mcpfor ",\"budget_tokens\":$MNB" )"
+if [ -n "$M2" ] && [ "$( cfield "$M2" capped )" = false ] && [ "$( cfield "$M2" shown )" = "$( cfield "$M1" total )" ]; then
+    ok "(9) MCP twin: re-calling for with budget_tokens=$MNB serves all $( cfield "$M2" shown ) rows uncut"
+else
+    no "(9) MCP twin: the re-call with budget_tokens=$MNB did not serve the block uncut: ${M2:-<no output>}"
+fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit "$fail"

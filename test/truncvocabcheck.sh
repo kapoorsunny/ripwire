@@ -318,7 +318,9 @@ run "$TINY" --for="add one to a number" > "$TMP/tiny_for.xml"
 grep -q '<sigs>' "$TMP/tiny_for.xml" \
     && ok "(C) --for <sigs> untrimmed: bare <sigs>, no marker (rule 5: absent = untrimmed)" \
     || no "(C) --for <sigs> on a two-symbol corpus is not the bare untrimmed <sigs>"
-grep -qE '<sigs shown="[0-9]+" total="[0-9]+" capped="1">' "$TMP/sweep_forbudget.xml" \
+# knob-honesty-068: a trimmed tag also carries its continuation, next= (the call that serves it uncut) — the pair is
+# still asserted immediately after the tag name; only the closing `>` admits the trailing attributes the tag may carry.
+grep -qE '<sigs shown="[0-9]+" total="[0-9]+" capped="1"( docs_dropped="[0-9]+")?( next="[^"]*")?>' "$TMP/sweep_forbudget.xml" \
     && ok "(C) --for <sigs> trimmed by --token-budget: <sigs shown=N total=M capped=\"1\"> (rule 5, amended: the pair rides on a byte trim too)" \
     || no "(C) --for --token-budget=800 did not mark its trimmed payload <sigs shown= total= capped=\"1\">: $( grep -oE '<sigs[^>]*>' "$TMP/sweep_forbudget.xml" | head -1 )"
 
