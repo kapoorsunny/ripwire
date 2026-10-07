@@ -2185,6 +2185,11 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     const std::size_t fixedBytes = headerStr.size() - rw::kForFileTailLegend.size() - mcpConfidenceExemptBytes - mcpIdRouteExemptBytes - mcpAtLegendExemptBytes
                                  + legoStr.size() + composeStr.size() + routeStr.size() + 6;   // + "</ctx>"
     const std::size_t sigsBudget = forBudgetBytes > fixedBytes ? forBudgetBytes - fixedBytes : 1;   // ≥1: 0 = "no budget"
+    // knob-honesty-068: the CLI twin's <sigs next=> (serialize.h SigsCutContinuation: exempt from the trim, so the served
+    // rows are the ones they were). The value spells the CLI flags, as every next= this surface emits does (mcp `for` with
+    // budget_tokens=T is the same call: this surface is signatures-only).
+    const rw::SigsCutContinuation mcpSigsNext{ task, 0, noRoute ? std::string_view( " --no-route" ) : std::string_view(), fixedBytes,
+                                               /*json=*/false };
 
     // L3: field-notes surfacing — parity with the CLI --for lens. loadNoteIndex reads root/.ripwire_notes (a
     // small file); nullptr when EMPTY so the bundle stays byte-identical when there is nothing to surface.
@@ -2212,7 +2217,8 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
                         &mcpShownIds,                         // lane 2: see verbs_for.h shownSigIds
                         &mcpSigsCapped,                       // the ladder's own verdict — see the budget_bytes= splice below
                         mcpTopRowNext,                        // L-W: the widening page on a thin answer, else the body
-                        &mcpSigsCut );                        // cut-fix lane A: docs_dropped= / shrunk readings
+                        &mcpSigsCut,                          // cut-fix lane A: docs_dropped= / shrunk readings
+                        &mcpSigsNext );                       // knob-honesty-068: a capped block's own next=
     } );
     // A2: same insert-before-"-->" splice as the CLI twin (verbs_for.h) — absent entirely on the (overwhelming)
     // no-drop path, so headerStr's bytes are unchanged there (byte-identical to the pre-A2 output). Bare
@@ -2252,7 +2258,8 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     }
     // cut-fix lane A: the <sigs> tag's cut readings (docs_dropped=, shrunk-not-dropped) — the CLI twin's clauses, same
     // text, same splice point, present only when the tag carries the case (serialize.h sigsCutLegendNotes).
-    if( const std::string cutNotes = rw::sigsCutLegendNotes( mcpSigsCut.isCapped, mcpSigsCut.shown, mcpSigsCut.total, mcpSigsCut.docsDropped );
+    if( const std::string cutNotes = rw::sigsCutLegendNotes( mcpSigsCut.isCapped, mcpSigsCut.shown, mcpSigsCut.total, mcpSigsCut.docsDropped,
+                                                                 !mcpSigsCut.next.empty() );
         !cutNotes.empty() )
     {
         const std::size_t closeAt = headerStr.rfind( " -->" );

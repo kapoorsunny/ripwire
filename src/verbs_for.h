@@ -422,6 +422,11 @@ struct ForLensJsonInputs
     // MainDispatch) — REQUIRED like fileTail above, for the same reason: a defaulted bool is how a degrade
     // silently drops off this dialect while the XML twin keeps carrying it.
     bool                               notesDegraded;
+    // knob-honesty-068: what the "sigs_next" continuation echoes (serialize.h SigsCutContinuation) — REQUIRED like the two
+    // above: a capped JSON bundle names the call that serves its cut rows exactly as the XML twin's <sigs next=> does.
+    std::string_view                  task;
+    int                               packTopN;
+    std::string_view                  rankFlags;   // forRankShapingFlags( cfg ), owned by the caller for the call's duration
 };
 
 // The lens bundle's opening keys. Every note is absent-unless-present — the same silence-means-nothing-
@@ -1450,6 +1455,8 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     const std::size_t fixedBytes = header.size() + kJsonEnvelopeBytes + kJsonSurfaceCountsBytes
                                   + ( in.noteIndex ? kJsonNotesStanzaBytes : 0 );
     const std::size_t sigsBudget = bundleBudget > fixedBytes ? bundleBudget - fixedBytes : 1;
+    // knob-honesty-068: the cut's continuation, exempt from the trim like the XML twin's next= (SigsCutContinuation)
+    const rw::SigsCutContinuation cutNext{ in.task, in.packTopN, in.rankFlags, fixedBytes, /*json=*/true };
 
     const JsonSigLens lens{ /*metrics=*/true, in.fanIn, in.impure, in.churnPerFile, in.cloneMember,
                             in.tested, in.amp, /*rankAdaptivePayload=*/true, in.noteIndex };
@@ -1460,7 +1467,8 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
                           in.rootArg, /*hasRelevanceFloor=*/true,        // LB-A: same admission rule as the XML twin (R-R: root-relative p/id)
                           outDroppedPositive,                            // A2: exact count, see droppedPositiveCount (serialize.h)
                           outShownIds,                                   // lane 2: the emitted rows' ids — the tail excludes these files
-                          outCut ); };                                   // cut-fix lane A: the XML tag's shown/total/docs_dropped
+                          outCut,                                        // cut-fix lane A: the XML tag's shown/total/docs_dropped
+                          &cutNext ); };                                 // knob-honesty-068: "sigs_next" on a capped array
 
     // §B1.4: built once, used on both the degrade path below and the normal return — these three are plain
     // size_t values already computed by the caller (no rendering, no redaction seam), so unlike est_tokens
@@ -1550,6 +1558,7 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     if( sigsCut.isCapped )
     {
         sigsCutStanza += ",\"sigs_shown\":" + std::to_string( sigsCut.shown ) + ",\"sigs_total\":" + std::to_string( sigsCut.total );
+        sigsCutStanza += rw::nextFieldJson( sigsCut.next, "sigs_next" );   // knob-honesty-068: the call serving the cut rows
     }
     if( sigsCut.docsDropped > 0 )
     {
@@ -1793,6 +1802,20 @@ void restrictBodiesToRouteAnchor( const rw::IngestResult& ing, std::vector<rw::N
 // SIG posture and keeps the legacy whole-ceiling claim — the frozen share would trim the rows the caller
 // literally asked for down to the ladder floor. A free function over runForLens' locals (the
 // ForLensHeaderParts precedent) — runForLens is already one of the largest functions in this file.
+// knob-honesty-068: the flags that change WHICH rows the lens ranks (and so total=/the order <sigs> cuts), pre-spelled for the
+// capped block's continuation (serialize.h SigsCutContinuation::rankFlags) — the re-run must rank the same list.
+inline std::string forRankShapingFlags( const rw::Config& cfg )
+{
+    std::string f;
+    f += cfg.anchor         ? " --anchor"           : "";
+    f += cfg.noRoute        ? " --no-route"         : "";
+    f += cfg.adaptive       ? " --adaptive"         : "";
+    f += cfg.noMentionBoost ? " --no-mention-boost" : "";
+    f += cfg.cochangeBoost  ? " --cochange-boost"   : "";
+    f += cfg.noDocMention   ? " --no-doc-mention"   : "";
+    return f;
+}
+
 std::size_t forSigSideCeiling( bool autoBundleMode, int packTopN, std::size_t bundleBudget )
 {
     if( autoBundleMode && packTopN == 0 )
@@ -2747,7 +2770,8 @@ std::optional<int> runForLens( const MainDispatch& d )
                                                                    &forClone, testedPtr, ampPtr, redactPtr,
                                                                    cfg.packBudgetBytes, cfg.tokenBudget, notesPtr,
                                                                    legoTotal, composeTotal, routesTotal, flRootArg,
-                                                                   &forFileTail, d.notesDegraded } );
+                                                                   &forFileTail, d.notesDegraded, cfg.forTask, cfg.packTopN,
+                                                                   forRankShapingFlags( cfg ) } );
             // §B0: this early return skipped the end-of-function tally below, so a --for --json run redacted
             // SILENTLY — the one stderr line that tells the user a secret was in their tree never appeared.
             reportRedactions( stderr, redactCounts );
@@ -2975,6 +2999,11 @@ std::optional<int> runForLens( const MainDispatch& d )
         // headerStr is already flushed to stdout by the time that path runs and cannot be edited retroactively
         // (the same reason est_tokens is "omitted", not "wrong", on that path — see its DISCLOSE).
         std::size_t forDroppedPositive = 0;
+        // knob-honesty-068: a capped <sigs> names the call that serves it uncut (serialize.h SigsCutContinuation, where the
+        // exempt-from-the-trim rule is argued: the ranked set is the one it was at every ceiling). Its bytes are measured
+        // downstream like every spliced disclosure: est_tokens, the header ladder and over_ceiling= see them.
+        const std::string             forRankFlags = forRankShapingFlags( cfg );
+        const rw::SigsCutContinuation forSigsNext{ cfg.forTask, cfg.packTopN, forRankFlags, fixedBytes, /*json=*/false };
         bool        forSigsCapped      = false;   // did the H1 ladder trim <sigs>? — decides the budget_bytes= legend clause below
         rw::SigsCutReport forSigsCut;             // cut-fix lane A: the <sigs> tag's shown/total/docs_dropped — its clauses below
         sigsPreRendered = preRender( [ & ]( std::FILE* sm )
@@ -2990,7 +3019,8 @@ std::optional<int> runForLens( const MainDispatch& d )
                                 &shownSigIds,                                // lane 2: the rows actually emitted — the tail excludes THESE files
                                 &forSigsCapped,                              // did the ladder fire? — the budget_bytes= clause rides only then
                                 forTopRowNext,                               // L-W: the widening page on a thin answer, else the body
-                                &forSigsCut );                               // cut-fix lane A: which cut readings the tag owes
+                                &forSigsCut,                                 // cut-fix lane A: which cut readings the tag owes
+                                &forSigsNext );                              // knob-honesty-068: a capped block's own next=
             },
             sigsStr );
         if( !sigsPreRendered )
@@ -3069,7 +3099,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // cut-fix lane A: the <sigs> tag's two cut readings (docs_dropped=, shrunk-not-dropped) ride the same splice, present
         // only when the tag carries the case (serialize.h sigsCutLegendNotes), so the reserve below already covers them.
         const std::string sigsCeilingNote   = ( forDefaultCeiling ? std::string( rw::kForBudgetBytesNote ) : std::string() )
-            + rw::sigsCutLegendNotes( forSigsCut.isCapped, forSigsCut.shown, forSigsCut.total, forSigsCut.docsDropped );
+            + rw::sigsCutLegendNotes( forSigsCut.isCapped, forSigsCut.shown, forSigsCut.total, forSigsCut.docsDropped, !forSigsCut.next.empty() );
         // ── the INDEXING-cap disclosure (mention.h CapDisclosure), at the same splice point and for the
         // same reason: a --for header is charged against the payload ceiling, so a disclosure folded into
         // the notes above is paid for in ranked rows. Measured on sixteen real invocations, that cost three
@@ -3472,7 +3502,8 @@ std::optional<int> runForLens( const MainDispatch& d )
             packSignatures( stdout, ing, lensRank, forTopN, cfg.packBudgetBytes, true, fanInPtr, impurePtr, redactPtr,
                             &forChurn, &forClone, testedPtr, ampPtr, /*rankAdaptivePayload=*/true, sigsBudget, notesPtr, flRootArg,
                             /*hasRelevanceFloor=*/true, nullptr, nullptr, nullptr,   // LB-A: the direct-emission degrade path selects identically
-                            forTopRowNext );                                         // L-W: same next= rule on the degrade path
+                            forTopRowNext,                                           // L-W: same next= rule on the degrade path
+                            nullptr, &forSigsNext );                                 // knob-honesty-068: and the same <sigs next=>
         }
         if( legoPreRendered )
         {

@@ -79,11 +79,14 @@ inline std::string nextAttrXml( std::string_view invocation, std::string_view at
     return a;
 }
 
-// the JSON twin: `,"next":"…"` with the JSON escapes a flag value can need
-inline std::string nextFieldJson( std::string_view invocation )
+// the JSON twin: `,"next":"…"` with the JSON escapes a flag value can need; `key` names a SECONDARY listing's own
+// follow-up, as nextAttrXml's `attr` does (knob-honesty-068: --for --json's "sigs_next")
+inline std::string nextFieldJson( std::string_view invocation, std::string_view key = "next" )
 {
     if( invocation.empty() ) { return {}; }
-    std::string a = ",\"next\":\"";
+    std::string a = ",\"";
+    a += key;
+    a += "\":\"";
     for( const char c : invocation )
     {
         switch( c )
