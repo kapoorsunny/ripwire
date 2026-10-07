@@ -27,10 +27,11 @@ Three cuts were disclosed and still dead ends — counted, with no pasteable cal
   (the last printed row's rank, so a slot that prints no row cannot skew it). `--json` carries `"sigs_next"` and
   `"sigs_next_offset"`. The MCP twin carries no CLI argv (its ranking pipeline is its own): `next_budget_tokens=T` names
   the `budget_tokens` a re-call needs, beside the same `next_offset=`. Present-only legend clauses define each. At the
-  default ceiling, and at any explicit ceiling wide enough that the signature side is frozen at the default's, it is exempt
-  from the signature trim — the rows shown are the ones they were. Under a tighter explicit ceiling (a hard one) it is
-  charged like `shown=`/`total=`, so `est_tokens` stays within the budget; measured at `--token-budget=2000`, that costs one
-  row on 11 of 20 queries — a row the `next=` itself serves. No budget, ceiling or token conversion changed.
+  default ceiling, and at any explicit ceiling wide enough that the signature side is frozen at the default's, they are
+  exempt from the signature trim — the rows shown are the ones they were. Under a tighter explicit ceiling (a hard one)
+  `next=` rides alone and is charged inside the block, and a compact answer pays from the full dialect's row budget, so
+  `est_tokens` stays within the budget; measured at `--token-budget=2000` on 20 queries, that costs one row on 11 — a row
+  the `next=` itself serves. No budget, ceiling or token conversion changed.
 - **`--lint` / `--lint-rules` and `--sarif`.** A rule that spends its per-rule match budget (`count_capped="1"`) now makes
   the root carry `findings_next=` (SARIF: `runs[0].properties.findingsNext`): only the floored rules, under a 10x budget,
   through the new `--lint-max-per-rule=N` (the default stays 5000). A re-run still floored names its own.
