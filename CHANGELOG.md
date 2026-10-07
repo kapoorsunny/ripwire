@@ -16,6 +16,12 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 ## [Unreleased]
 
 
+### Fixed — test infrastructure: `rubyrecvnarrowcheck` absence arms no longer pass on a crashed run
+
+The four "`--callers=X` does not list the row" arms read an empty capture, so a binary that crashed or refused passed
+them. They now go through one helper that reads the absence only off a run that exited 0 and produced its `<callers>`
+root, and fails by name otherwise.
+
 ### Fixed — the skill scanner's per-line / joined-body dedupe keeps the worst row of a (line, rule)
 
 The scanner's two passes can report the same (line, rule), and the dedupe sorted with a non-stable sort on (line, rule)
