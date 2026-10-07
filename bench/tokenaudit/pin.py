@@ -18,6 +18,7 @@
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -34,11 +35,16 @@ PINNED = [
     ("pack-signatures", ["--pack-signatures"]),
     ("expand",          ["--expand=billableTotal"]),
     ("for-named",       ["--for=billableTotal"]),
+    # for-named's TWIN (PROCESS rule 4): the same question on the e=-free path. A leading NAME=VALUE token is an
+    # environment assignment, not argv (tokenbudgetcheck #18 reads it the same way); every other pin runs with
+    # RIPWIRE_FOR_ENDLINES unset.
+    ("for-named-noe",   ["RIPWIRE_FOR_ENDLINES=never", "--for=billableTotal"]),
     ("for-budgeted",    ["--for=dedupe", "--token-budget=400"]),
     ("pack-task",       ["--pack-task=dedupe"]),
 ]
 
 EST = b'est_tokens="'
+ENV_TOKEN = re.compile(r"^[A-Z][A-Z0-9_]*=")
 
 
 def est_of(out: bytes):
@@ -66,7 +72,7 @@ def main():
 
     lines = [
         "# est_calib pins — REAL tokenizer counts of ripwire's output on test/estcalibfix.",
-        "# label o200k cl100k est_at_pin_time argv...   (space-separated; no argv may contain a space)",
+        "# label o200k cl100k est_at_pin_time argv...   (space-separated; no argv may contain a space; a leading NAME=VALUE is env)",
         "# Regenerate: python3 bench/tokenaudit/pin.py --bin build/ripwire   (needs tiktoken)",
         "# Read by: test/tokenbudgetcheck.sh #18 — the calibration band. See bench/tokenaudit/README.md.",
     ]
@@ -75,7 +81,13 @@ def main():
         shutil.copytree(fixture, os.path.join(tmp, "f"))
         for label, argv in PINNED:
             # the pinned counts describe the FULL-legend document (tokenbudgetcheck #18 asks for the same posture)
-            p = subprocess.run([binpath, "f"] + argv + ["--legend=full"], capture_output=True, cwd=tmp)
+            n = 0
+            while n < len(argv) and ENV_TOKEN.match(argv[n]):
+                n += 1
+            envs, args = argv[:n], argv[n:]
+            env = {k: v for k, v in os.environ.items() if k != "RIPWIRE_FOR_ENDLINES"}
+            env.update(a.split("=", 1) for a in envs)
+            p = subprocess.run([binpath, "f"] + args + ["--legend=full"], capture_output=True, cwd=tmp, env=env)
             if p.returncode != 0:
                 print("pin.py: '%s' exited %d" % (label, p.returncode), file=sys.stderr)
                 return 1
