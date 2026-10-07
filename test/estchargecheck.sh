@@ -585,9 +585,42 @@ ALLOW="$( awk "BEGIN{printf \"%d\", $TBF*2.36*1.15}" )"
 "$BIN" src --for="$FOR_TASK" --token-budget=$TBF --detail=20 --with-graph --no-cache >"$TMP/f_tb.out" 2>"$TMP/f_tb.err"
 rc_ftb=$?
 FTB="$( bytes_of "$TMP/f_tb.out" )"
-{ [ "$rc_ftb" -eq 0 ] && [ "$FTB" -le "$ALLOW" ]; } 2>/dev/null \
-    && ok "#11 A7 --for --token-budget=$TBF --detail=20 --with-graph: $FTB B within the $ALLOW B allowance (exit 0, SHAPED)" \
-    || no "#11 A7 --for --token-budget=$TBF --detail=20 --with-graph: $FTB B vs the $ALLOW B allowance, exit $rc_ftb — the budget does not bound the appended sections"
+# THE <sigs> FLOOR TWIN (knob-honesty-068; orchestrator ruling 2026-10-07, PROCESS rules 4/5). A capped <sigs> under a hard
+# ceiling carries next= — the call that recovers its cut — and pays for it from its rows. At the rank 1..4 floor nothing is
+# left to shed, and the recovery handle ALWAYS ships: the document may then land past the allowance, and only if it says so.
+# This is not a wider allowance: every condition of the old bound still holds for everything except the disclosed handle.
+# sigs_floor_twin FILE ALLOW → exit 0 iff ALL of: the root carries over_ceiling="1"; the legend carries the floor clause
+# defining it; <sigs> is capped at shown<=4 (the floor) and carries next="--for=…"; est_tokens is positive and prices the
+# delivered bytes inside the 2.00-4.20 B/tok band (honest: it moved with the handle); and the document WITHOUT the handle
+# and its label (the next= attribute, over_ceiling="1", the clause) is within ALLOW — the old bound, intact.
+sigs_floor_twin(){ python3 - "$1" "$2" <<'PYF'
+import sys, re
+d = open( sys.argv[ 1 ], 'rb' ).read().decode( 'utf-8', 'replace' ); allow = int( sys.argv[ 2 ] )
+clause = ' [over_ceiling=1 also when <sigs> at its r=1..4 floor cannot pay its next=: the call ships anyway]'
+root = re.search( r'<ctx [^>]*>', d ); sigs = re.search( r'<sigs [^>]*>', d )
+why = []
+if not root or ' over_ceiling="1"' not in root.group( 0 ): why.append( 'no root over_ceiling="1"' )
+if clause not in d: why.append( 'no floor clause' )
+nxt = re.search( r' next="--for=[^"]*"', sigs.group( 0 ) ) if sigs else None
+shown = re.search( r' shown="(\d+)"', sigs.group( 0 ) ) if sigs else None
+if not sigs or ' capped="1"' not in sigs.group( 0 ) or not shown or int( shown.group( 1 ) ) > 4: why.append( '<sigs> not capped at its floor' )
+if not nxt: why.append( '<sigs> carries no next=' )
+est = re.search( r' est_tokens="(\d+)"', root.group( 0 ) ) if root else None
+b = len( d.encode( 'utf-8' ) )
+if not est or int( est.group( 1 ) ) <= 0 or not ( 200 <= b * 100 // int( est.group( 1 ) ) <= 420 ): why.append( 'est_tokens absent or out of band' )
+rest = b - ( len( nxt.group( 0 ) ) if nxt else 0 ) - len( ' over_ceiling="1"' ) - len( clause )
+if rest > allow: why.append( f'{rest} B without the handle > {allow} B' )
+print( '; '.join( why ) if why else f'{b} B, {rest} B without the handle <= {allow} B, est_tokens={est.group( 1 )}' )
+sys.exit( 1 if why else 0 )
+PYF
+}
+if { [ "$rc_ftb" -eq 0 ] && [ "$FTB" -le "$ALLOW" ]; } 2>/dev/null; then
+    ok "#11 A7 --for --token-budget=$TBF --detail=20 --with-graph: $FTB B within the $ALLOW B allowance (exit 0, SHAPED)"
+elif [ "$rc_ftb" -eq 0 ] && a7why="$( sigs_floor_twin "$TMP/f_tb.out" "$ALLOW" )"; then
+    ok "#11 A7 --for --token-budget=$TBF --detail=20 --with-graph: the <sigs> floor twin — $a7why, labelled over_ceiling=\"1\" with next= (exit 0, SHAPED)"
+else
+    no "#11 A7 --for --token-budget=$TBF --detail=20 --with-graph: $FTB B vs the $ALLOW B allowance, exit $rc_ftb — the budget does not bound the appended sections${a7why:+ (floor twin: $a7why)}"
+fi
 # and without an explicit --token-budget the bodies keep their own budget: the bundle must NOT have shrunk
 { [ "$( bytes_of "$TMP/f_for_detail.out" )" -gt "$ALLOW" ]; } 2>/dev/null \
     && ok "#11 A7 no --token-budget: --detail keeps its --pack-budget-bytes budget (unbudgeted bundle unshrunk)" \
@@ -624,7 +657,7 @@ for i in range( 4 ):
     with open( os.path.join( out, f"mod{i}.cpp" ), "w" ) as fh:
         fh.write( "\n".join( lines ) )
 PYG
-a7s_bad=""; a7s_badn=0; a7s_runs=0; a7s_inside_labelled=0
+a7s_bad=""; a7s_badn=0; a7s_runs=0; a7s_inside_labelled=0; a7s_floor=0
 # RE-ANCHORED 2026-09-13 (PR #215): the default sweep starts at 760, not 1200. --for's rung zero now triggers on the
 # EXACT ceiling (verbs_for.h), so a document 1..15% over its budget drops its three explanatory clauses before the
 # allowance is consulted; on this corpus the late-label band (over_ceiling="1" INSIDE the allowance — the residual
@@ -640,7 +673,11 @@ for spec in "default:760:1500:" "detail_graph:2880:3080:--detail=20 --with-graph
         s_b="$( bytes_of "$A7S/o.xml" )"
         s_a="$( awk "BEGIN{printf \"%d\", $N*2.36*1.15}" )"
         s_root="$( grep -aoE '^<ctx [^>]*>' "$A7S/o.xml" | head -1 )"
-        if [ "$s_rc" -ne 0 ] || { [ "$s_b" -gt "$s_a" ] && ! grep -aqF '[over_ceiling= is 1 on the root: the header floor' "$A7S/o.xml"; }; then
+        # past the allowance: the ladder's last rung says so, or (knob-honesty-068) the <sigs> floor twin above holds in full
+        if [ "$s_rc" -eq 0 ] && [ "$s_b" -gt "$s_a" ] && ! grep -aqF '[over_ceiling= is 1 on the root: the header floor' "$A7S/o.xml" \
+            && sigs_floor_twin "$A7S/o.xml" "$s_a" >/dev/null; then
+            a7s_floor=$(( a7s_floor + 1 ))
+        elif [ "$s_rc" -ne 0 ] || { [ "$s_b" -gt "$s_a" ] && ! grep -aqF '[over_ceiling= is 1 on the root: the header floor' "$A7S/o.xml"; }; then
             a7s_badn=$(( a7s_badn + 1 ))
             [ "$a7s_badn" -le 6 ] && a7s_bad="$a7s_bad $s_label@$N=${s_b}/${s_a}B(exit $s_rc)"
         elif [ "$s_b" -le "$s_a" ] && [ "${s_root#* over_ceiling=\"1\"}" != "$s_root" ]; then
@@ -649,13 +686,34 @@ for spec in "default:760:1500:" "detail_graph:2880:3080:--detail=20 --with-graph
     done
 done
 [ "$a7s_badn" -eq 0 ] \
-    && ok "#11 A7 sweep: $a7s_runs budgets over a git-less corpus (default 760..1500, --detail=20 --with-graph 2880..3080, step 10) — every document within N x 2.36 x 1.15 at exit 0, or on the ladder's disclosed last rung" \
+    && ok "#11 A7 sweep: $a7s_runs budgets over a git-less corpus (default 760..1500, --detail=20 --with-graph 2880..3080, step 10) — every document within N x 2.36 x 1.15 at exit 0, or on the ladder's disclosed last rung, or the disclosed <sigs> floor twin ($a7s_floor)" \
     || no "#11 A7 sweep: $a7s_badn of $a7s_runs budgets deliver past the allowance with no ladder rung fired (first:$a7s_bad) — a byte spliced in after the ladder priced the document"
 # control: the sweep must cross the band the defect lives in — a root that says over_ceiling="1" while the document
 # still fits the allowance (est_tokens > N at 2.50 B/tok, bytes <= 2.714 B/tok). No such budget = inert, re-anchor.
 [ "$a7s_inside_labelled" -gt 0 ] \
     && ok "#11 A7 sweep control: $a7s_inside_labelled budget(s) carry a root over_ceiling=\"1\" INSIDE the allowance — the sweep crosses the late-label band" \
     || no "#11 A7 sweep control: no budget carried over_ceiling=\"1\" inside the allowance — the sweep no longer reaches the est_tokens > N band, re-anchor its ranges"
+# A7 FLOOR TWIN, EXERCISED EVERY RUN (knob-honesty-068; ruling 2026-10-07). The A7 arm and the sweep accept the twin only as
+# an alternative, so a fixture that stopped reaching the floor would leave it untested. On this git-less corpus at
+# --token-budget=790 the default bundle's <sigs> sits at its rank 1..4 floor and cannot pay its next=: the twin must hold.
+# Its near miss, 850: the handle is paid (the block sheds its bytes above the floor) — next= rides inside the allowance, and neither
+# over_ceiling="1" nor the floor clause appears (a label that rode on every capped answer would pass the first half alone).
+( cd "$A7S" && "$BIN" corpus --for="serialize the map" --token-budget=790 --no-cache ) >"$A7S/floor.xml" 2>/dev/null; fl_rc=$?
+fl_a="$( awk 'BEGIN{printf "%d", 790*2.36*1.15}' )"
+if [ "$fl_rc" -eq 0 ] && fl_why="$( sigs_floor_twin "$A7S/floor.xml" "$fl_a" )"; then
+    ok "#11 A7 floor twin @790: $fl_why — next= ships at the floor and the overshoot is labelled over_ceiling=\"1\" with its clause"
+else
+    no "#11 A7 floor twin @790 (exit $fl_rc): ${fl_why:-?} — the <sigs> floor did not ship its next= with a labelled, honestly priced overshoot"
+fi
+( cd "$A7S" && "$BIN" corpus --for="serialize the map" --token-budget=850 --no-cache ) >"$A7S/paid.xml" 2>/dev/null; pd_rc=$?
+pd_b="$( bytes_of "$A7S/paid.xml" )"; pd_a="$( awk 'BEGIN{printf "%d", 850*2.36*1.15}' )"
+pd_root="$( grep -aoE '^<ctx [^>]*>' "$A7S/paid.xml" | head -1 )"
+if [ "$pd_rc" -eq 0 ] && [ "$pd_b" -le "$pd_a" ] && grep -aqE '<sigs [^>]* capped="1"[^>]* next="--for=' "$A7S/paid.xml" \
+   && [ "${pd_root#* over_ceiling=\"1\"}" = "$pd_root" ] && ! grep -aqF 'r=1..4 floor cannot pay its next=' "$A7S/paid.xml"; then
+    ok "#11 A7 floor twin near miss @850: the capped <sigs> pays for its next= — $pd_b B <= $pd_a B, no over_ceiling=, no floor clause"
+else
+    no "#11 A7 floor twin near miss @850 (exit $pd_rc): $pd_b B vs $pd_a B — expected a paid next= inside the allowance with no label"
+fi
 
 # A9/A10 — the header's own spliced attributes are inside the number. IDENTITY, not a band: for a bundle with
 # no --detail bodies, est_tokens is markup-only, so it must equal round(delivered bytes / 2.50) EXACTLY

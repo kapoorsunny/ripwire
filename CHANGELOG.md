@@ -29,9 +29,11 @@ Three cuts were disclosed and still dead ends — counted, with no pasteable cal
   the `budget_tokens` a re-call needs, beside the same `next_offset=`. Present-only legend clauses define each. At the
   default ceiling, and at any explicit ceiling wide enough that the signature side is frozen at the default's, they are
   exempt from the signature trim — the rows shown are the ones they were. Under a tighter explicit ceiling (a hard one)
-  `next=` rides alone and is charged inside the block, and a compact answer pays from the full dialect's row budget, so
-  `est_tokens` stays within the budget; measured at `--token-budget=2000` on 20 queries, that costs one row on 11 — a row
-  the `next=` itself serves. No budget, ceiling or token conversion changed.
+  `next=` rides alone and is paid from the block's rows, and a compact answer is cut to the rows the full one keeps, so
+  the answer stays within the budget wherever it can fit; measured at `--token-budget=2000` on 20 queries, that costs one
+  row on 11 — a row the `next=` itself serves. At the rank 1..4 floor, where no row is left to pay, `next=` still ships
+  (the call that recovers a cut is never the thing cut) and, when the answer then lands past its ceiling, the root says
+  `over_ceiling="1"` with a clause naming the cause. No budget, ceiling or token conversion changed.
 - **`--lint` / `--lint-rules` and `--sarif`.** A rule that spends its per-rule match budget (`count_capped="1"`) now makes
   the root carry `findings_next=` (SARIF: `runs[0].properties.findingsNext`): only the floored rules, under a 10x budget,
   through the new `--lint-max-per-rule=N` (the default stays 5000). A re-run still floored names its own.
@@ -39,7 +41,8 @@ Three cuts were disclosed and still dead ends — counted, with no pasteable cal
   selector lost its only continuation with no marker. It is now always emitted in full, like every other `next=`.
 
 Also: the `ripwire-handoff` skill passed `--top-k=20` to `--for`, which does not read it; it now spells
-`--signatures-only`. Gates: `forrankordercheck` (9), `lintbudgetcheck` (5), `impactimportcheck` (#9d).
+`--signatures-only`. Gates: `forrankordercheck` (9), `lintbudgetcheck` (5), `impactimportcheck` (#9d), `estchargecheck`
+(#11 A7 floor twin), `compactlegendcheck` (P4 floor twin).
 
 
 ### Added — MCP `grep` rows carry the matched text and a `fetch_body` handle (CLI parity)
