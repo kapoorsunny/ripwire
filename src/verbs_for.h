@@ -1468,8 +1468,8 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
                           in.rootArg, /*hasRelevanceFloor=*/true,        // LB-A: same admission rule as the XML twin (R-R: root-relative p/id)
                           outDroppedPositive,                            // A2: exact count, see droppedPositiveCount (serialize.h)
                           outShownIds,                                   // lane 2: the emitted rows' ids — the tail excludes these files
-                          outCut,                                        // cut-fix lane A: the XML tag's shown/total/docs_dropped
-                          &cutNext ); };                                 // knob-honesty-068: "sigs_next" on a capped array
+                          outCut ); };                                   // cut-fix lane A: the XML tag's shown/total/docs_dropped;
+                                                                         //   knob-honesty-068: carries cutNext IN ("sigs_next")
 
     // §B1.4: built once, used on both the degrade path below and the normal return — these three are plain
     // size_t values already computed by the caller (no rendering, no redaction seam), so unlike est_tokens
@@ -1496,6 +1496,7 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
 
     bool        sigsCapped         = false;   // the LADDER's verdict: decides the budget_bytes= stanza
     rw::SigsCutReport sigsCut;               // cut-fix lane A: what the array cut (gate or ladder) — "capped" and the sigs_* keys
+    sigsCut.continuationRequest = &cutNext;  // knob-honesty-068: IN — "sigs_next" / "sigs_next_offset" on a capped array
     std::size_t sigsDroppedPositive = 0;   // A2: set only by the memstream-buffered render below (nullptr on the ENOMEM degrade path)
     std::vector<rw::NodeId> jsonShownIds;   // lane 2: the sigs rows actually emitted (the XML twin's shownSigIds)
     std::string sigsJson;
@@ -3022,6 +3023,7 @@ std::optional<int> runForLens( const MainDispatch& d )
                                                    /*pasteHandle=*/true, /*ledgerGapBytes=*/forSigsNextCharged ? compactLedgerGapBytes : 0u };
         bool        forSigsCapped      = false;   // did the H1 ladder trim <sigs>? — decides the budget_bytes= legend clause below
         rw::SigsCutReport forSigsCut;             // cut-fix lane A: the <sigs> tag's shown/total/docs_dropped — its clauses below
+        forSigsCut.continuationRequest = &forSigsNext;   // knob-honesty-068: IN — the capped block's continuation
         sigsPreRendered = preRender( [ & ]( std::FILE* sm )
             {
                 packSignatures( sm, ing, lensRank, forTopN, cfg.packBudgetBytes, true, fanInPtr, impurePtr, redactPtr,
@@ -3035,8 +3037,8 @@ std::optional<int> runForLens( const MainDispatch& d )
                                 &shownSigIds,                                // lane 2: the rows actually emitted — the tail excludes THESE files
                                 &forSigsCapped,                              // did the ladder fire? — the budget_bytes= clause rides only then
                                 forTopRowNext,                               // L-W: the widening page on a thin answer, else the body
-                                &forSigsCut,                                 // cut-fix lane A: which cut readings the tag owes
-                                &forSigsNext );                              // knob-honesty-068: a capped block's own next=
+                                &forSigsCut );                               // cut-fix lane A: which cut readings the tag owes;
+                                                                             //   knob-honesty-068: carries forSigsNext IN
             },
             sigsStr );
         if( !sigsPreRendered )
@@ -3515,11 +3517,13 @@ std::optional<int> runForLens( const MainDispatch& d )
         }
         else
         {
+            rw::SigsCutReport degradeSigsCut;   // knob-honesty-068: carries the continuation request IN, as on the buffered path
+            degradeSigsCut.continuationRequest = &forSigsNext;
             packSignatures( stdout, ing, lensRank, forTopN, cfg.packBudgetBytes, true, fanInPtr, impurePtr, redactPtr,
                             &forChurn, &forClone, testedPtr, ampPtr, /*rankAdaptivePayload=*/true, sigsBudget, notesPtr, flRootArg,
                             /*hasRelevanceFloor=*/true, nullptr, nullptr, nullptr,   // LB-A: the direct-emission degrade path selects identically
                             forTopRowNext,                                           // L-W: same next= rule on the degrade path
-                            nullptr, &forSigsNext );                                 // knob-honesty-068: and the same <sigs next=>
+                            &degradeSigsCut );                                       // knob-honesty-068: and the same <sigs next=>
         }
         if( legoPreRendered )
         {

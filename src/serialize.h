@@ -4467,8 +4467,13 @@ inline std::size_t gateSigRowsRankFirst( std::vector<EntryT>& entries, std::vect
 // What the <sigs> block cut, for the callers that splice its legend clauses (the block's own tag carries the numbers).
 // shown/total are the tag's shown=/total= (total = rows handed to the gate); docsDropped counts SHOWN rows whose doc
 // comment the rank tiers or the ladder removed (the tag's docs_dropped=). isCapped mirrors the tag's capped="1".
+struct SigsCutContinuation;   // below: the caller's request for a cut's continuation (knob-honesty-068)
 struct SigsCutReport
 {
+    // IN (knob-honesty-068): the caller's continuation request, read by packSignatures / packSignaturesJson BEFORE they reset
+    // the report — carried here rather than as one more defaulted trailing parameter, so a train merge that adds another
+    // defaulted parameter to these 20+-parameter signatures cannot silently bind a value to the wrong one. nullptr ⇒ none.
+    const SigsCutContinuation* continuationRequest = nullptr;
     std::size_t shown       = 0;
     std::size_t total       = 0;
     std::size_t docsDropped = 0;
@@ -4513,8 +4518,8 @@ struct SigsCutReport
 // the last printed row's 1-based rank in the (score desc, id asc) candidate order, so a pseudo-symbol slot that prints no
 // row cannot skew it the way a printed-row count would. The root's at= stamps the index it was cut from; a continuation
 // whose at= differs was served by a different index (re-run from the start).
-// MCP: no pasteable argv (the CLI's ranking pipeline is not the twin's, so a CLI re-run could continue a different list) —
-// the tag carries the machine form instead: next_budget_tokens=T, the budget_tokens a re-call of the same tool needs.
+// MCP: the client continues by re-calling the TOOL, so the continuation is that tool's own argument, not a CLI argv — the
+// tag carries the machine form: next_budget_tokens=T, the budget_tokens a re-call of the same tool needs.
 // COMPATIBLE WITH #362 (the budgeted-bundle candidate page, issue #294): when that page lands, the resumable form is
 // `--for=TASK --token-budget=N --limit=L --offset=<next_offset>`, which serves ONLY the cut rows (walking pages until
 // has_more="0"); it replaces the VALUE of next= built here, not the attributes — next_offset= is already that page's
@@ -4528,8 +4533,8 @@ struct SigsCutContinuation
     std::size_t      fixedBytes = 0;     // what the re-run's ceiling must carry besides the block: the charged header + sibling blocks
     bool             charged    = false; // reserve it (and its legend clause) INSIDE the block's budget — see the regime rule above
     bool             json       = false; // the --json dialect: the re-run is --json too
-    bool             pasteHandle = true; // false on MCP: no pasteable CLI argv (the CLI ranks its own list) — the machine form,
-                                         //   next_budget_tokens=, is what a re-call of the same tool needs
+    bool             pasteHandle = true; // false on MCP: the client re-calls the tool, so no CLI argv — the machine form,
+                                         //   next_budget_tokens=, is the argument a re-call of the same tool needs
     std::size_t      ledgerGapBytes = 0; // a CHARGED one also reserves this: the sig room the caller's dialect was given beyond what
                                          //   its header honestly costs (the --for compact dialect, verbs_for.h compactLedgerGapBytes)
 };
@@ -4813,15 +4818,16 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                             std::string_view topRowNext = {},    // L-W (forpage.h): the r=1 row's next= when the caller
                                                              //   judged the answer THIN (the widening page); "" ⇒ the
                                                              //   --expand body follow-up, byte-identical to before.
-                            SigsCutReport* cutOut = nullptr,   // cut-fix lane A: the tag's shown/total/docs_dropped/capped,
+                            SigsCutReport* cutOut = nullptr )   // cut-fix lane A: the tag's shown/total/docs_dropped/capped,
                                                              //   for the caller's legend splices. Lens path only; zeroed
-                                                             //   (nothing cut) on every other path.
-                            const SigsCutContinuation* cutNext = nullptr )   // knob-honesty-068: a capped block's next= (the
-                                                             //   --for lens and its MCP twin); nullptr ⇒ none, byte-identical
+                                                             //   (nothing cut) on every other path. knob-honesty-068: its
+                                                             //   continuationRequest is an INPUT, read before the reset.
 {
+    const SigsCutContinuation* const cutNext = cutOut != nullptr ? cutOut->continuationRequest : nullptr;
     if( cutOut )
     {
         *cutOut = SigsCutReport {};
+        cutOut->continuationRequest = cutNext;
     }
     if( droppedPositiveOut )
     {
@@ -5160,6 +5166,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             *cappedOut = plan.ladderFires;
         }
         SigsCutReport cut = sigsCutReportOf( entries, totalRows, plan );
+        cut.continuationRequest = cutNext;
         sigsCutAttachContinuation( cut, cutNext, cutNextInv, cutNextTokens );   // nothing unless capped and asked for
         if( cutOut )
         {
@@ -9437,12 +9444,12 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
                                 std::size_t* droppedPositiveOut = nullptr, // A2: the XML sibling's own out-param —
                                                                            //   see packSignatures for the full contract.
                                 std::vector<NodeId>* shownIdsOut = nullptr, // lane 2: the emitted rows' ids — see packSignatures
-                                SigsCutReport* cutOut = nullptr,           // cut-fix lane A: the XML tag's shown/total/docs_dropped/
+                                SigsCutReport* cutOut = nullptr )          // cut-fix lane A: the XML tag's shown/total/docs_dropped/
                                                                            //   capped, for the caller's root keys (sigs_shown/
-                                                                           //   sigs_total/docs_dropped); see packSignatures
-                                const SigsCutContinuation* cutNext = nullptr )   // knob-honesty-068: the XML twin's next=, as the
-                                                                           //   caller's "sigs_next" root key; see packSignatures
+                                                                           //   sigs_total/docs_dropped); see packSignatures.
+                                                                           //   knob-honesty-068: continuationRequest is an INPUT
 {
+    const SigsCutContinuation* const cutNext = cutOut != nullptr ? cutOut->continuationRequest : nullptr;
     const bool rankAdaptivePayload = lens.rankAdaptivePayload;
     if( outCapped )
     {
@@ -9451,6 +9458,7 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
     if( cutOut )
     {
         *cutOut = SigsCutReport {};
+        cutOut->continuationRequest = cutNext;   // knob-honesty-068: the request survives the reset
     }
     if( droppedPositiveOut )
     {
@@ -9552,6 +9560,7 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
     if( cutOut )
     {
         *cutOut = sigsCutReportOf( entries, totalRows, plan );
+        cutOut->continuationRequest = cutNext;
         sigsCutAttachContinuation( *cutOut, cutNext, cutNextInv, cutNextTokens );   // knob-honesty-068: nothing unless capped and asked for
     }
     if( droppedPositiveOut )

@@ -2186,9 +2186,9 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
                                  + legoStr.size() + composeStr.size() + routeStr.size() + 6;   // + "</ctx>"
     const std::size_t sigsBudget = forBudgetBytes > fixedBytes ? forBudgetBytes - fixedBytes : 1;   // ≥1: 0 = "no budget"
     // knob-honesty-068: the CLI twin's <sigs> continuation (serialize.h SigsCutContinuation). This surface is signatures-only,
-    // so its sig side IS the ceiling: charged under a caller's budget_tokens, exempt at the default. NO pasteable CLI argv here
-    // (the CLI ranks its own list, so a CLI re-run could continue a different one): the machine form next_budget_tokens=T —
-    // re-call `for` with budget_tokens=T — plus next_offset=, the resume index.
+    // so its sig side IS the ceiling: charged under a caller's budget_tokens, exempt at the default. NO CLI argv here — an
+    // MCP client continues by re-calling the tool: the machine form next_budget_tokens=T (re-call `for` with budget_tokens=T)
+    // plus next_offset=, the resume index.
     const rw::SigsCutContinuation mcpSigsNext{ task, 0, std::string_view(), fixedBytes,
                                                /*charged=*/budgetTokens > 0, /*json=*/false, /*pasteHandle=*/false };
 
@@ -2204,6 +2204,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     std::size_t mcpDroppedPositive = 0;
     bool        mcpSigsCapped      = false;   // did the H1 ladder trim <sigs>? — decides the budget_bytes= disclosure below
     rw::SigsCutReport mcpSigsCut;             // cut-fix lane A: the <sigs> tag's cut readings, spliced below as the CLI twin does
+    mcpSigsCut.continuationRequest = &mcpSigsNext;   // knob-honesty-068: IN — the capped block's machine continuation
     std::vector<rw::NodeId> mcpShownIds;   // lane 2: the sigs rows actually emitted — the tail excludes these files, not the whole surface
     std::string sigsStr = renderToString( [ & ]( std::FILE* m2 )
     {
@@ -2218,8 +2219,8 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
                         &mcpShownIds,                         // lane 2: see verbs_for.h shownSigIds
                         &mcpSigsCapped,                       // the ladder's own verdict — see the budget_bytes= splice below
                         mcpTopRowNext,                        // L-W: the widening page on a thin answer, else the body
-                        &mcpSigsCut,                          // cut-fix lane A: docs_dropped= / shrunk readings
-                        &mcpSigsNext );                       // knob-honesty-068: a capped block's own next=
+                        &mcpSigsCut );                        // cut-fix lane A: docs_dropped= / shrunk readings;
+                                                              //   knob-honesty-068: carries mcpSigsNext IN
     } );
     // A2: same insert-before-"-->" splice as the CLI twin (verbs_for.h) — absent entirely on the (overwhelming)
     // no-drop path, so headerStr's bytes are unchanged there (byte-identical to the pre-A2 output). Bare

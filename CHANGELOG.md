@@ -25,7 +25,7 @@ Three cuts were disclosed and still dead ends — counted, with no pasteable cal
   whole ceiling, sized from the untrimmed block so nothing is cut (`--for=TASK --signatures-only [ranking flags]
   [--pack-top-n=N] --token-budget=T`) — and, when rows were dropped, `next_offset=`: the candidate index the cut starts at
   (the last printed row's rank, so a slot that prints no row cannot skew it). `--json` carries `"sigs_next"` and
-  `"sigs_next_offset"`. The MCP twin carries no CLI argv (its ranking pipeline is its own): `next_budget_tokens=T` names
+  `"sigs_next_offset"`. The MCP twin carries no CLI argv (an MCP client re-calls the tool): `next_budget_tokens=T` names
   the `budget_tokens` a re-call needs, beside the same `next_offset=`. Present-only legend clauses define each. At the
   default ceiling, and at any explicit ceiling wide enough that the signature side is frozen at the default's, they are
   exempt from the signature trim — the rows shown are the ones they were. Under a tighter explicit ceiling (a hard one)
