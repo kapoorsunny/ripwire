@@ -20,7 +20,13 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+# The ASan/UBSan pass below builds with ASAN_CXX: an explicit CXX as given, else Homebrew llvm@22 when installed, else c++
+# (scripts/asanprobe.sh: Apple clang 17 / Command Line Tools 26.3 on macOS 26.7 deadlocks every ASan binary before main).
+# The plain harness keeps using CXX, so its toolchain is the one the caller asked for.
+. "$ROOT/scripts/asanprobe.sh"
+EXPLICIT_CXX="${CXX:-}"
 CXX="${CXX:-c++}"
+ASAN_CXX="$( ripwire_asan_pick_cxx "$EXPLICIT_CXX" )"
 
 # §CI-P3: ask THIS front end how it spells C++23 rather than assuming the Clang-17 spelling — an
 # AppleClang 15 (LLVM 16) macos-14 runner rejects `-std=c++23` outright and took this gate with it
@@ -28,7 +34,7 @@ CXX="${CXX:-c++}"
 . "$ROOT/scripts/cxxstd.sh"
 CXXSTD="$( ripwire_cxx_std_flag "$CXX" )"
 HARNESS="$ROOT/test/connectcore_harness.cpp"
-WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
+WORK="$( mktemp -d )"; trap 'gate_bounded_reap; rm -rf "$WORK"' EXIT; gate_bounded_arm
 BIN="$WORK/connectcoreharness"
 
 echo "connectcorecheck: CXX=$CXX"
@@ -51,11 +57,16 @@ fi
 
 # ── ASan/UBSan pass: the same harness under the G1 sanitizer stack (integer BFS/MST must be clean) ───────────
 ASAN_BIN="$WORK/connectcoreharness_asan"
-if "$CXX" "$CXXSTD" -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all \
+ASAN_SKIPPED=""
+if ! ripwire_asan_probe "$ASAN_CXX" "$WORK"; then
+    # A named, expected missing premise (checklist 14/17): a toolchain whose ASan runtime cannot start a program.
+    echo "  SKIP  ASan/UBSan pass: $RIPWIRE_ASAN_PROBE_WHY. Set CXX to Homebrew llvm@22's clang++, or update the Command Line Tools/Xcode (CONTRIBUTING.md, Sanitizer build)."
+    ASAN_SKIPPED=1
+elif "$ASAN_CXX" "$( ripwire_cxx_std_flag "$ASAN_CXX" )" -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all \
         -I"$ROOT/src/infra" -I"$ROOT/third_party" -I"$ROOT/src" \
         "$HARNESS" "$ROOT/src/infra/diagnostics.cpp" -o "$ASAN_BIN" 2> "$WORK/asan_cc.log"; then
-    if "$ASAN_BIN" > /dev/null; then
-        echo "  PASS  ASan/UBSan run clean"
+    if gate_bounded 120 "$ASAN_BIN" > /dev/null; then
+        echo "  PASS  ASan/UBSan run clean ($ASAN_CXX)"
     else
         echo "  FAIL  ASan/UBSan run failed"; exit 2
     fi
@@ -63,5 +74,9 @@ else
     echo "  WARN  sanitizer build unavailable on this toolchain (skipped)"; sed 's/^/    /' "$WORK/asan_cc.log"
 fi
 
-echo "connectcorecheck: ALL PASS"
+if [ -n "$ASAN_SKIPPED" ]; then
+    echo "connectcorecheck: PASS (plain harness only; the ASan/UBSan pass was skipped above)"
+else
+    echo "connectcorecheck: ALL PASS"
+fi
 exit 0

@@ -38,7 +38,10 @@ LSAN_OPTIONS=suppressions=lsan_suppressions.txt ./asan/ripwire <dir> >/dev/null
 **macOS 26 with the Command Line Tools' AppleClang 17: ASan hangs before `main`.** Every
 `-fsanitize=address` binary, even an empty `main`, hangs in ASan's start-up (shadow-memory set-up
 walking the dyld shared cache), so each ASan gate just times out. CI's Xcode 26.6 AppleClang 21 is
-not affected, and CMake warns when it sees the affected pair. Configure the sanitizer tree with
+not affected, and an `-DRIPWIRE_ASAN=ON` configure on macOS now runs an empty ASan program once under a
+10 s timeout and stops with the fix if it hangs (the two fixes: update the Command Line Tools/Xcode, or use
+Homebrew LLVM 22 as below), while the gates that compile their own ASan harness prefer `llvm@22`'s `clang++`
+when it is installed (an explicit `CXX` wins) and otherwise SKIP by name. Configure the sanitizer tree with
 Homebrew LLVM 22 instead, linking its own libc++ so the headers and the dylib are one release
 (Homebrew clang otherwise links the system libc++ against its libc++ 22 headers):
 

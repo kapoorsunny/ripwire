@@ -567,6 +567,18 @@ left it behind when a suite timeout killed the gate. `scripts/gatebound.sh` now 
 also arm an `alarm` of their own, and a sanitized harness that will not start is a SKIP, like one that will not link.
 `test/pargatescheck.sh` arm (O) stops each gate mid-harness (TERM and KILL) and asserts no harness survives.
 
+### Fixed — an ASan runtime that hangs before `main` is reported at configure time, and the ASan-harness gates no longer time out on it
+
+On macOS 26.7 with Command Line Tools 26.3 (Apple clang 17.0.0), every `-fsanitize=address` binary deadlocks in the
+sanitizer runtime's own start-up, so each ASan gate ended as an `rc=124` timeout and an `-DRIPWIRE_ASAN=ON` tree built
+binaries that never reached `main`. An Apple `-DRIPWIRE_ASAN=ON` configure now builds and runs an empty ASan program
+under a 10 s timeout (`RIPWIRE_ASAN_PROBE_TIMEOUT`) and stops with the two fixes (update the Command Line Tools/Xcode, or
+configure with Homebrew `llvm@22`); a pass is cached and prints nothing, and non-ASan or non-Apple configures run no probe.
+The gates that compile their own ASan harness (`connectcorecheck`, `radixsimdcheck`, `dynmapsimdcheck`) prefer
+`llvm@22`'s `clang++` when installed (an explicit `CXX` wins); with no working ASan toolchain they, and
+`oswin32logiccheck` arm (B) and `strkerncheck`, print a named `SKIP` with the reason and exit 0. No assertion changed.
+`scripts/asanprobe.sh` holds the compiler choice and the probe.
+
 ### Fixed — C/C++: a body-less `enum X` in a function signature no longer poses as the function's encloser
 
 tmux writes `static enum cmd_retval` on one line and the function name on the next. The tags query indexes every named

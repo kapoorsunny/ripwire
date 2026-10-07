@@ -42,9 +42,10 @@ CXX="${CXX:-c++}"
 
 # ask THIS front end how it spells C++23 (see scripts/cxxstd.sh — AppleClang 15 rejects -std=c++23)
 . "$ROOT/scripts/cxxstd.sh"
+. "$ROOT/scripts/asanprobe.sh"
 CXXSTD="$( ripwire_cxx_std_flag "$CXX" )"
 SRC="$ROOT/test/verify_strkern.cpp"
-WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
+WORK="$( mktemp -d )"; trap 'gate_bounded_reap; rm -rf "$WORK"' EXIT; gate_bounded_arm
 ARCH="$( uname -m )"
 fail=0
 
@@ -56,6 +57,17 @@ LEGACY_ESCAPE_ARMS=4
 MIN_ASSERTIONS=19
 
 echo "strkerncheck: CXX=$CXX arch=$ARCH  target=ripwire_test_strkern"
+
+# ── 0: can this toolchain start an ASan program at all? ───────────────────────────────────────────────────
+# The CMake target below is built with RIPWIRE_ASAN=ON, whose configure step refuses (and says why) on a macOS whose
+# sanitizer runtime deadlocks before main, and every arm after it reads that target's output. A named, expected missing
+# premise (checklist 14/17), so the gate SKIPs here; nothing it asserts changes. Probe-only on purpose: the CMake leg
+# takes its compiler from CC/CXX/LDFLAGS (CONTRIBUTING.md, Sanitizer build), so a caller who exports Homebrew llvm@22
+# there gets the real run.
+if ! ripwire_asan_probe "$CXX" "$WORK"; then
+    echo "strkerncheck: SKIP — $RIPWIRE_ASAN_PROBE_WHY. Export CC/CXX/LDFLAGS for Homebrew llvm@22 or update the Command Line Tools/Xcode (CONTRIBUTING.md, Sanitizer build)."
+    exit 0
+fi
 
 # ── 1: the CMake target, under the complete G1 sanitizer stack ────────────────────────────────────────
 # FETCHCONTENT_FULLY_DISCONNECTED=ON because every dependency is vendored: a gate must not reach the
