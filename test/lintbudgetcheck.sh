@@ -190,7 +190,7 @@ U2="$( [ -n "$UNEXT" ] && "$BIN" "$GF" $UNEXT --no-cache 2>/dev/null )"
 URow="$( printf '%s' "$U2" | grep -oE '<rule name="many-goto"[^/]*/>' | head -1 )"
 case "$URow" in *'count="6000"'*) ! printf '%s' "$URow" | grep -q 'count_capped' ;; *) false ;; esac \
     && ok "user rules: pasting it counts all 6000, and that row is no longer floored" || no "user rules: pasted run: $URow"
-printf '%s' "$G1" | xmllint --noout - 2>/dev/null && ok "floored answer is well-formed XML" || no "floored answer is not well-formed XML"
+if printf '%s' "$G1" | xmllint --noout - 2>/dev/null; then ok "floored answer is well-formed XML"; else no "floored answer is not well-formed XML"; fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

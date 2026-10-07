@@ -770,7 +770,7 @@ inline std::size_t lintPackQueryBudget( std::size_t packDefault, std::size_t max
 }
 
 std::vector<std::vector<rw::AstMatch>> builtInLintCaptures( const rw::IngestResult& ing, const std::vector<rw::AstQuerySpec>& checks,
-                                                            std::vector<std::string>& keptBytes, std::size_t maxPerRule )
+                                                            std::vector<std::string>& keptBytes, std::size_t maxPerRule = rw::kLintMaxPerRule )
 {
     PROFILE_SCOPE_DESCRIBE( "lint: astQueryGrouped (built-in + atoms + cache + unreachable)" );
     const std::vector<rw::AstQuerySpec> atomChecks  = rw::atoms::atomsSpecs();

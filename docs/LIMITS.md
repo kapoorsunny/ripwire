@@ -17,7 +17,7 @@ it once, marked `×N`.
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 236 | 94 | 135 | **101** |
+| 236 | 94 | 136 | **100** |
 
 Plus 7 ranking and apportionment parameters, in their own table below: they are not caps, they
 are not counted as caps, and 236 + 7 is the 243 constants this generator parses out of `src/`.
@@ -134,7 +134,7 @@ Discloses: **none**
 
 ### `src/cli.h`
 
-Discloses: `capped`, `bridges_capped`, `files_capped`, `inc_capped`, `mention_idents_capped`, `mention_syms_capped`, `modules_capped`, `rows_capped`, `sibs_capped`, `syms_capped`, `tests_capped`, `unflagged_capped`, `untested_capped`
+Discloses: `capped`, `bridges_capped`, `count_capped`, `files_capped`, `inc_capped`, `mention_idents_capped`, `mention_syms_capped`, `modules_capped`, `rows_capped`, `sibs_capped`, `syms_capped`, `tests_capped`, `unflagged_capped`, `untested_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
@@ -571,7 +571,7 @@ Discloses: **none**
 
 ### `src/lintrules.h`
 
-Discloses: **none**
+Discloses: `count_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |

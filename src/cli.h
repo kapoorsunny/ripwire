@@ -4242,20 +4242,28 @@ inline void validateSarifModifierGuards( Config& c ) noexcept
 // is validated inside runLint, not here — see resolveLintSelection's own header for why.
 inline void validateLintSelectionModifierGuards( Config& c ) noexcept
 {
-    if( !c.lintSelect.empty() && !c.lint && c.lintRulesDir.empty() )
+    if( c.lint || !c.lintRulesDir.empty() )
     {
-        rw::emitRaw( stderr, "ripwire: --lint-select=PREFIX modifies --lint or --lint-rules=DIR — pass one (e.g. ripwire <dir> --lint --lint-select=cache-)\n" );
-        c.ok = false;
+        return;   // every modifier below has its verb
     }
-    if( !c.lintIgnore.empty() && !c.lint && c.lintRulesDir.empty() )
+    // one row per lint modifier, refused in this order (knob-honesty-068 folded the third into a table, not a third copy)
+    struct LintModifierGuard
     {
-        rw::emitRaw( stderr, "ripwire: --lint-ignore=PREFIX modifies --lint or --lint-rules=DIR — pass one (e.g. ripwire <dir> --lint --lint-ignore=naming-)\n" );
-        c.ok = false;
-    }
-    if( c.lintMaxPerRule > 0 && !c.lint && c.lintRulesDir.empty() )
+        bool        given;
+        const char* refusal;
+    };
+    const LintModifierGuard guards[] = {
+        { !c.lintSelect.empty(), "ripwire: --lint-select=PREFIX modifies --lint or --lint-rules=DIR — pass one (e.g. ripwire <dir> --lint --lint-select=cache-)\n" },
+        { !c.lintIgnore.empty(), "ripwire: --lint-ignore=PREFIX modifies --lint or --lint-rules=DIR — pass one (e.g. ripwire <dir> --lint --lint-ignore=naming-)\n" },
+        { c.lintMaxPerRule > 0,  "ripwire: --lint-max-per-rule=N modifies --lint or --lint-rules=DIR — pass one (e.g. ripwire <dir> --lint --lint-max-per-rule=50000)\n" },
+    };
+    for( const LintModifierGuard& g : guards )
     {
-        rw::emitRaw( stderr, "ripwire: --lint-max-per-rule=N modifies --lint or --lint-rules=DIR — pass one (e.g. ripwire <dir> --lint --lint-max-per-rule=50000)\n" );
-        c.ok = false;
+        if( g.given )
+        {
+            rw::emitRaw( stderr, g.refusal );
+            c.ok = false;
+        }
     }
 }
 

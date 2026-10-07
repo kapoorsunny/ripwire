@@ -225,6 +225,9 @@ sections your question needs.
    (comma-separated, `*` for "every rule"): `--lint-select=cache-` runs only the `cache-*` family, disclosing
    `selected="K of N"` on the root so a filtered zero is never confusable with an unfiltered one; an
    unresolvable PREFIX refuses with a near-miss rather than silently matching nothing.
+   **A rule row with `count_capped="1"`** spent its per-rule match budget (5000 by default), so its `count=` is a FLOOR;
+   the root then carries `findings_next=` — paste it: it re-runs only those rules under a 10x `--lint-max-per-rule=N`
+   (SARIF: `runs[0].properties.findingsNext`), and a re-run still floored names its own.
 
    **The one naming lens that proposes a FIX, not just evidence — `ripwire <dir> --naming-consistency --legend=compact`.**
    Every other pass on this page tells you WHAT is wrong; this one is the deliberate exception, and only for
