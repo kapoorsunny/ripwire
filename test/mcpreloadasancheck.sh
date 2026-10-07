@@ -48,8 +48,11 @@
 # Each rebuild is proved by the server's own timing line (rebuilt=1), so an arm that no longer reaches its path FAILs
 # instead of passing blind. A mutation that no compared answer shows (the new reference equal to the old) FAILs too.
 #
-# LeakSanitizer is OFF here (detect_leaks=0, as CI's macOS asan leg): the subject is lifetime, not leaks, and a leak report at
-# the exit of a long-lived server would be a different finding with its own gate.
+# LeakSanitizer is OFF here on BOTH CI legs (detect_leaks=0 in every sanitizer process of this gate; the ubuntu leg's job-level
+# detect_leaks=1 is overridden inside them, and macOS has no LeakSanitizer): the subject is lifetime, not leaks, and a leak
+# report at the exit of a long-lived server would be a different finding with its own gate. It is not switched on for Linux
+# because the Linux leg has never run this gate, so nothing proves that leg's exit-time leak set is empty, and an unproven
+# rc 23 would fail the gate for a reason that is not its subject. Turn it on once the train's first Linux run shows a clean set.
 # The freed-chunk quarantine stays ON everywhere but the memory-release sessions (RLSANENV: quarantine_size_mb=0 and
 # allocator_release_to_os_interval_ms=0, because that arm's footprint must fall back under the 64M floor, which a quarantine
 # prevents). With it off, a freed chunk is handed out again at once, and a use-after-free that lands on a same-size reuse reads
