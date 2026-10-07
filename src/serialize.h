@@ -4630,6 +4630,13 @@ inline void pushShownSigId( std::vector<NodeId>* shownIdsOut, const std::vector<
     }
 }
 
+// lean-answers lane: packSignatures' row spelling, passed as a NAMED type rather than a trailing bool, so a parameter
+// another change appends after it cannot bind to it positionally (a bool argument does not convert to this aggregate).
+struct SigRowSpelling
+{
+    bool elideZeroMetrics = false;   // omit a zero cx=/ccx=/in= on a row (SigRowFacts::elideZero); the legend says absent = 0
+};
+
 inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::vector<float>& rank,
                             int topN, std::size_t budgetBytes,
                             bool metrics = false, const std::vector<std::uint32_t>* fanIn = nullptr,
@@ -4678,8 +4685,8 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                             SigsCutReport* cutOut = nullptr,   // cut-fix lane A: the tag's shown/total/docs_dropped/capped,
                                                              //   for the caller's legend splices. Lens path only; zeroed
                                                              //   (nothing cut) on every other path.
-                            bool elideZeroMetrics = false )  // lean-answers lane: the --for lens's zero cx=/ccx=/in= omitted
-                                                             //   (SigRowFacts::elideZero); its legend says absent = 0. Off ⇒
+                            SigRowSpelling spelling = {} )   // lean-answers lane: the --for lens's zero cx=/ccx=/in= omitted
+                                                             //   (SigRowFacts::elideZero); its legend says absent = 0. Default ⇒
                                                              //   byte-identical (pack-task, from-trace and the map stay as they were).
 {
     if( cutOut )
@@ -4902,7 +4909,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                     }
                 }
 
-                const SigRowFacts rowFacts{ metrics, fanIn, qbuf, pure, globalRank, topRowNext, elideZeroMetrics };
+                const SigRowFacts rowFacts{ metrics, fanIn, qbuf, pure, globalRank, topRowNext, spelling.elideZeroMetrics };
                 std::string head = sigRowHead( ing, id, rowFacts, esc, rootArg );   // d1: rank fact (ladder path)
 
                 std::string doc = docCommentBefore( src, a );

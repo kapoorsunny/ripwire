@@ -2998,7 +2998,7 @@ std::optional<int> runForLens( const MainDispatch& d )
                                 &forSigsCapped,                              // did the ladder fire? — the budget_bytes= clause rides only then
                                 forTopRowNext,                               // L-W: the widening page on a thin answer, else the body
                                 &forSigsCut,                                 // cut-fix lane A: which cut readings the tag owes
-                                /*elideZeroMetrics=*/true );                 // lean-answers lane: zero cx=/ccx=/in= omitted (legend: absent = 0)
+                                SigRowSpelling{ .elideZeroMetrics = true } );   // lean-answers lane: zero cx=/ccx=/in= omitted (legend: absent = 0)
             },
             sigsStr );
         if( !sigsPreRendered )
@@ -3481,7 +3481,7 @@ std::optional<int> runForLens( const MainDispatch& d )
                             &forChurn, &forClone, testedPtr, ampPtr, /*rankAdaptivePayload=*/true, sigsBudget, notesPtr, flRootArg,
                             /*hasRelevanceFloor=*/true, nullptr, nullptr, nullptr,   // LB-A: the direct-emission degrade path selects identically
                             forTopRowNext,                                           // L-W: same next= rule on the degrade path
-                            nullptr, /*elideZeroMetrics=*/true );                    // lean-answers lane: the same row spelling
+                            nullptr, SigRowSpelling{ .elideZeroMetrics = true } );   // lean-answers lane: the same row spelling
         }
         if( legoPreRendered )
         {
