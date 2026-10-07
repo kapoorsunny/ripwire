@@ -402,7 +402,7 @@ MB="$( cd "$WORK/merge" && git rev-parse HEAD )"
     && sed -i.bak -e 's|^                        "x=\\"\\" "$|&\
                         "n=\\"{}\\" "|' -e 's|^                f,$|&\
                 c,|' src/legend.cpp && rm -f src/legend.cpp.bak && git commit -qam y \
-    && git checkout -q side_x && git merge -q --no-edit side_y >/dev/null 2>&1 ) \
+    && git checkout -q -b merged side_x && git merge -q --no-edit side_y >/dev/null 2>&1 ) \
     || no "merge: building the two sides and their clean merge failed"
 MF="$( grep -c '{}' "$WORK/merge/src/legend.cpp" )"
 MA="$( grep -cE '^                [a-f],$|^                d \);$' "$WORK/merge/src/legend.cpp" )"
@@ -1204,13 +1204,19 @@ if printf '%s' "$CLEG" | grep -q '<quality-delta '; then
 else
     no "$L: the --legend=compact delta run produced no <quality-delta root"
 fi
+#   --help prints each flag's first line (the kind count); --help=quality-delta prints the flag's whole text.
 HELP="$( "$BIN" --help 2>&1 )"; HRC=$?
 if [ "$HRC" = 0 ] && printf '%s' "$HELP" | grep -q -- '--quality-delta'; then
-    if printf '%s' "$HELP" | grep -q 'across 11 kinds'; then no "$L: --help still says 'across 11 kinds'"; else ok "$L: --help no longer says 'across 11 kinds'"; fi
-    if printf '%s' "$HELP" | grep -q 'defect-shape'; then ok "$L: --help names defect-shape"; else no "$L: --help does not name defect-shape"; fi
-    phrase_ok "$L --help" "$HELP"
+    if printf '%s' "$HELP" | grep -qE '(across )?11[ -]kind'; then no "$L: --help still says 11 kinds: $( printf '%s' "$HELP" | grep -E '11[ -]kind' | head -2 )"; else ok "$L: --help no longer says 11 kinds"; fi
 else
     no "$L: --help failed (rc=$HRC) or does not list --quality-delta"
+fi
+HELPQ="$( "$BIN" --help=quality-delta 2>&1 )"; HQRC=$?
+if [ "$HQRC" = 0 ] && printf '%s' "$HELPQ" | grep -q -- '--quality-delta'; then
+    if printf '%s' "$HELPQ" | grep -q 'defect-shape'; then ok "$L: --help=quality-delta names defect-shape"; else no "$L: --help=quality-delta does not name defect-shape"; fi
+    phrase_ok "$L --help=quality-delta" "$HELPQ"
+else
+    no "$L: --help=quality-delta failed (rc=$HQRC) or does not print the flag"
 fi
 if command -v python3 >/dev/null 2>&1; then
     TL="$( printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
@@ -1231,13 +1237,19 @@ print(d[0] if d else "MISSING")' )"
 else
     echo "  SKIP  $L: MCP tools/list description (python3 not installed)"
 fi
+#   docs/COMMANDS.md is generated from --help plus a DATED showcase capture: its ``` sample blocks are the recorded
+#   output of the binary that made the capture and change only when the capture is re-recorded (a train step),
+#   so the arms read the generated prose and skip the sample blocks.
 SKILL="$ROOT/skills/ripwire-quality-bar/SKILL.md"
 for doc in "$SKILL" "$ROOT/docs/COMMANDS.md" "$ROOT/README.md"; do
     rel="${doc#"$ROOT"/}"
     if [ ! -f "$doc" ]; then no "$L: $rel is missing"; continue; fi
-    if grep -qiE '(^|[^0-9])11 kinds|eleven kinds|eleven quality kinds|ELEVEN KINDS' "$doc"; then no "$L: $rel still says 11/eleven kinds: $( grep -niE '(^|[^0-9])11 kinds|eleven kinds|eleven quality kinds' "$doc" | head -2 )"
+    if [ "$rel" = docs/COMMANDS.md ]; then DTEXT="$( awk '/^```/ { f = !f; next } !f' "$doc" )"; else DTEXT="$( cat "$doc" )"; fi
+    if [ -z "$DTEXT" ]; then no "$L: $rel read empty"; continue; fi
+    if printf '%s' "$DTEXT" | grep -qiE '(^|[^0-9])11 kinds|eleven kinds|eleven quality kinds|ELEVEN KINDS'; then
+        no "$L: $rel still says 11/eleven kinds: $( printf '%s' "$DTEXT" | grep -iE '(^|[^0-9])11 kinds|eleven kinds|eleven quality kinds' | head -2 | cut -c1-160 )"
     else ok "$L: $rel has no stale 11/eleven-kinds count"; fi
-    phrase_ok "$L $rel" "$( cat "$doc" )"
+    phrase_ok "$L $rel" "$DTEXT"
 done
 if [ -f "$SKILL" ]; then
     FM="$( awk 'NR==1 && /^---$/ {f=1; next} f && /^---$/ {exit} f' "$SKILL" )"

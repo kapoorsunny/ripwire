@@ -2,8 +2,8 @@
 name: ripwire-quality-bar
 description: >
   Code QUALITY of what YOU just wrote, before you commit or say 'done', or verifying a cleanup:
-  --quality-delta lists what got WORSE in 11 kinds and exits 2 only when pre-existing code got
-  materially worse; which restructuring a measured shape (humps/deep, a tangle) calls for. Merge
+  --quality-delta lists what got WORSE in 12 kinds and exits 2 only when pre-existing code got
+  materially worse (new-symbol rows never gate, except defect-shape format-arity); which restructuring a measured shape (humps/deep, a tangle) calls for. Merge
   safety → change-check. Even a single-line leaf fix runs it.
 allowed-tools: Bash, Read
 ---
@@ -18,7 +18,7 @@ allowed-tools: Bash, Read
 >   delta) → the panel below, or **ripwire-fresh-eyes** for the full six-family breakdown.
 > • **You have the measurement and need the FIX** — for your own diff or for a subsystem **ripwire-fresh-eyes**
 >   just measured → the shape → refactor playbook, the closed fix loop and the debt fix loop are all on this page, below.
-> • **The regression is a MEMORY-layout hypothesis, not one of the 11 quality kinds** — `--lint`'s built-in
+> • **The regression is a MEMORY-layout hypothesis, not one of the 12 quality kinds** — `--lint`'s built-in
 >   cache-\* pack (8 static data-layout checks) is a normal part of a lint pass; `--field-affinity[=STRUCT]`
 >   is the deeper struct-level lens once a profile implicates a specific aggregate → **ripwire-perf-target**.
 > • Not sure which skill? → **ripwire-router**.
@@ -132,7 +132,7 @@ something always fires.)
 2. **Make your change.**
 3. **Measure the delta** — `ripwire <dir> --quality-delta --legend=compact` → only the regressions you
    introduced, across the
-   11 kinds in the table below. Each emits `<r kind="…" sym=… was=… now=…>` (`members=` for duplication).
+   12 kinds in the table below. Each emits `<r kind="…" sym=… was=… now=…>` (`members=` for duplication).
    Test-fixture dirs are exempt from `dead-code`; `short-horizon-churn` ignores your own current edit and
    exempts brand-new symbols/markdown/fixtures. Two exemptions are DISCLOSED on the report rather than
    silent, and both change how you read a zero: a symbol defined by a self-registering test/benchmark
@@ -162,7 +162,8 @@ something always fires.)
                   preexisting-worse="0" new-symbol="0" gating="0" at="f0a45e43d">
    ```
 
-   **`origin="new-symbol"` rows are PRINTED but NEVER gate.** They are the debt you are adding — read
+   **`origin="new-symbol"` rows are PRINTED; new-symbol rows never gate, except defect-shape format-arity**
+   (a format/argument mismatch is a defect, not debt, so it gates on new code too). They are the debt you are adding — read
    them; nothing else will make you. And `--help` is explicit that **exit 0 means "nothing that already
    existed got worse", NOT "clean"**: a change that is entirely new code can add unbounded new-symbol
    debt and still exit 0. Never report "quality-delta passed" as "no new debt" — open the rows.
@@ -258,13 +259,15 @@ Thresholds/definitions are the catalog in [`quality-metrics.md`](quality-metrics
 | `short-horizon-churn` | `--hotspots` · `git log -p <file>` | rewritten again inside 2 weeks (+15% AI) — is the design unsettled? consolidate |
 | `new-clone-of-reused-helper` | `--clones` · `--callers=HELPER` | call the existing well-reused helper — reuse is declining in AI code (GitClear) |
 | `placeholder` (an added stub or TODO: `todo!()`, `NotImplementedException`, a "not implemented" throw/panic, a TODO/FIXME naming no issue) | `--expand=SYM` | finish it, or name the issue that tracks it — never gates, but do not call the work done over it |
+| `defect-shape` (`defect=`: `format-arity` — a literal format whose `{}` fields do not match its arguments; `utf8-cut` — a byte cap plus an ellipsis with no UTF-8 back-off; `dedup-first` — `std::unique` keeping the first of a run over a type with a severity field; `vacuous-assert` — a test script's absence check read off a command whose failure is unchecked) | `--expand=SYM` | `format-arity` gates on any origin: match the fields to the arguments. The other three are `sev="minor"`: back off continuation bytes (or call the utf8 helper), sort worst-first before the unique, check the run's exit status before the absence |
 
-These 11 kinds aren't a generic lint list — ten target a large-N-validated agent-code degradation mode (the
-eleventh, `placeholder`, is an honesty check on your own "done")
+These 12 kinds aren't a generic lint list — ten target a large-N-validated agent-code degradation mode (the
+eleventh, `placeholder`, is an honesty check on your own "done"; the twelfth, `defect-shape`, is four defect
+shapes code review kept finding by hand)
 (verbosity, structural erosion, smell rate, contract drift; passing tests ≠ clean design). Numbers + why the
 loop must be continuous, not a one-time prompt → [`quality-metrics.md`](quality-metrics.md).
 
-**Read the Fix column as DIRECTION, not a computed answer.** None of these 11 kinds has a corpus-derivable
+**Read the Fix column as DIRECTION, not a computed answer.** None of these 12 kinds has a corpus-derivable
 correct replacement — "split the fn" names a move, not a target function shape, and you still judge it. That
 is deliberate: complexity, coupling, and colocation don't have a computable right answer the way a naming
 CONVENTION does. The one exception in this whole tool is `--naming-consistency` (→ **ripwire-fresh-eyes**),
@@ -309,8 +312,8 @@ ripwire <dir> --affected=F1,F2 --legend=compact       # 4. which tests PROVE it?
 2. **`--quality-delta`** — the only step with a meaningful exit code, and it is doing *two* jobs here, not
    one: the row you were chasing should be gone, **and** nothing new should have appeared. A "split the
    function" fix that drops `complexity` while adding `api-surface` + `duplication` is a lateral move.
-   Read `gating=`, but also read the `origin="new-symbol"` rows — extraction *always* creates new symbols and
-   those never gate, so exit 0 is not the same as "the fix was free."
+   Read `gating=`, but also read the `origin="new-symbol"` rows — extraction *always* creates new symbols, and
+   new-symbol rows never gate, except defect-shape format-arity, so exit 0 is not the same as "the fix was free."
 3. **`--edit-check=SYM`** — `unchanged` / `new-symbol` / `contract-change` for the symbol you just edited:
    param count and publicness NOW vs `git HEAD`, plus its 1-hop callers with any call site provably
    incompatible with the new arity flagged. A refactor is *supposed* to be `unchanged` here; a
@@ -369,8 +372,9 @@ module", "fix the worst of it"), run this instead — bounded, one finding at a 
 
 ## Wire it into CI / pre-commit
 
-`--quality-delta` exits 2 **only when a finding is preexisting-worse AND major AND unacked** — the
-`gating="N"` header count. Minor-tier, acked, and `origin="new-symbol"` findings all report but never gate,
+`--quality-delta` exits 2 **only when a finding is major AND unacked AND preexisting-worse** (or a defect-shape
+format-arity row, on any origin) — the `gating="N"` header count. Minor-tier and acked findings report but never
+gate, and new-symbol rows never gate, except defect-shape format-arity,
 so **a green hook does not mean the diff added no debt** — it means nothing that already existed got worse.
 Non-zero is the hook contract, no wrapper needed: `ripwire <dir> --quality-delta --legend=compact || exit 1`. If you want CI
 to also block on the debt a change ADDS, exit 2 will not do it for you — parse `new-symbol="N"` from the

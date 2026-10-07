@@ -6167,15 +6167,18 @@ regenerated file. It skips (exit 0) when no reference binary is given, self-test
 and asserts it left the tree unmodified — an assertion that is itself **controlled**: a stray file is
 created on purpose, must be detected, and must then be gone.
 
-### `--quality-delta`'s eleven kinds: ten measured failure modes and placeholder
+### `--quality-delta`'s twelve kinds: ten measured failure modes, placeholder and defect-shape
 
 These are the exact `kind=` strings the binary emits, from `src/quality.h`:
 
 `complexity` · `verbosity` · `nesting` · `params` · `duplication` · `dead-code` · `api-surface` ·
-`error-masking` · `short-horizon-churn` · `new-clone-of-reused-helper` · `placeholder`
+`error-masking` · `short-horizon-churn` · `new-clone-of-reused-helper` · `placeholder` · `defect-shape`
 
 The first ten each target a failure mode measured in the literature; `placeholder` (added 0.6.5) is an
-honesty check on "done" — a stub or TODO the change added — and never gates.
+honesty check on "done" — a stub or TODO the change added — and never gates. `defect-shape` carries four
+facets in `defect=` (`format-arity`, `utf8-cut`, `dedup-first`, `vacuous-assert`), shapes this project's own
+code review kept finding; only `format-arity` gates, and on any origin (new-symbol rows never gate, except
+defect-shape format-arity). Measured recall and false-positive counts: MEASUREMENT_PENDING.
 
 Note that some user-facing summaries abbreviate four of these (`dup`, `dead`, `churn`,
 `clone-of-reused-helper` / `reuse-decline`). **Match against the strings above** when grepping real
