@@ -97,7 +97,7 @@ inline const char* symTag( SymKind k ) noexcept
         case SymKind::Field:     return "field";  // member variable (id=path::Owner::field; use-sites via --uses=Owner.field)
         case SymKind::Other:     return "other";
         case SymKind::ModuleScope: return "modscope";   // the file's module scope: n="<file-scope>", no body to expand
-        case SymKind::NamedType: return "type";     // Go `type N string`: a defined type, NOT a struct
+        case SymKind::NamedType: return "type";     // Go `type N string`: a defined type whose WRITTEN form is not a struct/iface/func literal
         case SymKind::Alias:     return "alias";    // Go `type A = B`: another name for B
         case SymKind::FuncType:  return "functype"; // Go `type F func(...)`: a named function type
     }

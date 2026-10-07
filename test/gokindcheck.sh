@@ -22,6 +22,9 @@
 #   (D) the cache round-trips the new kind bytes: a warm run equals the --no-cache run byte for byte.
 #   (E) the legend defines the three kinds under --legend=full on a Go corpus; the graph query can select them.
 #   (F) scope floor: a C typedef keeps t="struct" and its map carries NO named-type clause (byte-identity rule).
+#   (H) the t=type legend clause is true of EVERY t=type row: `type Wrapped Pair` (a struct underneath) and
+#       `type HF http.HandlerFunc` (a func underneath) are t="type" because the kind follows the WRITTEN form, so the
+#       clause must say WRITTEN and must not claim the bare "not-a-struct" (red on the wording it replaced).
 #   (G) cross_kind= on --callers counts the new kinds (a name that is a func in one file and a defined type in another)
 #       without tripping callhierarchy.h's kind bound.
 #
@@ -82,6 +85,7 @@ type (
 	OldName   = Count
 	Wrapped   Pair
 	Qualified ext.Thing
+	HF        http.HandlerFunc
 )
 
 type Outer struct {
@@ -121,7 +125,7 @@ expectKind(){   # $1 arm label, $2 kind, $3 name
 }
 
 echo "(A) a non-struct named type says its form"
-for n in TestName List Set Count Lookup Events PairPtr Names Grid Wrapped Qualified; do expectKind "(A)" type "$n"; done
+for n in TestName List Set Count Lookup Events PairPtr Names Grid Wrapped Qualified HF; do expectKind "(A)" type "$n"; done
 for n in eventFormatterFunc Handler; do expectKind "(A)" functype "$n"; done
 for n in Alias OldName; do expectKind "(A)" alias "$n"; done
 
@@ -175,6 +179,16 @@ if [ "$rc" -eq 0 ] && [ "$qs" = "Box Inner Outer Pair " ]; then
     ok "(E) kind(all,struct) selects exactly the four structs"
 else
     no "(E) kind(all,struct) rc=$rc selected [$qs]"
+fi
+
+echo "(H) the t=type clause names the written form (a struct/func underneath still reads t=type)"
+tline="$( grep -o '<!-- t=type|alias|functype=[^>]*-->' "$TMP/full.xml" )"
+if [ -n "$tline" ] && printf '%s\n' "$tline" | grep -q 'type=a-defined-type-whose-WRITTEN-form-is-not-a-struct/iface/func-literal' \
+   && printf '%s\n' "$tline" | grep -q 'type-W-Pair-too,whatever-Pair-is-underneath' \
+   && ! printf '%s\n' "$tline" | grep -q 'type=a-defined-type-not-a-struct'; then
+    ok "(H) the clause says the form is WRITTEN, naming type W Pair; Wrapped and HF (struct/func underneath) are the t=type rows it must stay true of"
+else
+    no "(H) the t=type clause is not qualified by the written form: [$tline]"
 fi
 
 echo "(F) scope floor: only Go is split"
