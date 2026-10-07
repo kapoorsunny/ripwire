@@ -874,34 +874,8 @@ inline constexpr std::string_view kForSigsNextBudgetNote =
 inline constexpr std::string_view kForSigsNextOffsetNote =
     " [sigs next_offset=: the candidate index the cut starts at; a resume must match the root at=]";
 
-// The clauses a <sigs> cut report owes, concatenated in a fixed order ("" when it owes none). `hasNext`: the tag carries
-// the cut's continuation (SigsCutReport::next).
-inline std::string sigsCutLegendNotes( bool isCapped, std::size_t shown, std::size_t total, std::size_t docsDropped, bool hasNext = false,
-                                       bool hasNextBudget = false, bool hasNextOffset = false )
-{
-    std::string notes;
-    if( isCapped && shown == total )
-    {
-        notes += kForSigsShrunkNote;
-    }
-    if( isCapped && hasNext )
-    {
-        notes += kForSigsNextNote;
-    }
-    if( isCapped && hasNextBudget )
-    {
-        notes += kForSigsNextBudgetNote;
-    }
-    if( isCapped && hasNextOffset )
-    {
-        notes += kForSigsNextOffsetNote;
-    }
-    if( docsDropped > 0 )
-    {
-        notes += kForDocsDroppedNote;
-    }
-    return notes;
-}
+// The clauses a <sigs> cut report owes, concatenated in a fixed order ("" when it owes none) — defined below SigsCutReport
+// (sigsCutReportLegend), because the continuation's clauses read the report itself.
 
 // ── B0 round 2 (H1): GLOBAL deterministic payload budget for the ranked --for bundle ─────────────────
 // The rank tiers above cut only ~1% of the measured LocBench payload: the worst bundles are dominated by
@@ -4670,11 +4644,41 @@ inline bool sigsCutHasNextOffset( const SigsCutReport& cut ) noexcept
 {
     return cut.hasContinuation && cut.isCapped && cut.shown < cut.total && cut.lastShownRank > 0;
 }
-// the legend clauses a cut report owes, every reading included (sigsCutLegendNotes, from the report itself)
+// the legend clauses a cut report owes, in a fixed order: shrunk-not-dropped, the continuation's (knob-honesty-068), docs_dropped
 inline std::string sigsCutReportLegend( const SigsCutReport& cut )
 {
-    return sigsCutLegendNotes( cut.isCapped, cut.shown, cut.total, cut.docsDropped, !cut.next.empty(), cut.nextBudgetTokens > 0,
-                               sigsCutHasNextOffset( cut ) );
+    std::string notes;
+    if( cut.isCapped && cut.shown == cut.total )
+    {
+        notes += kForSigsShrunkNote;
+    }
+    if( cut.isCapped && !cut.next.empty() )
+    {
+        notes += kForSigsNextNote;
+    }
+    if( cut.isCapped && cut.nextBudgetTokens > 0 )
+    {
+        notes += kForSigsNextBudgetNote;
+    }
+    if( sigsCutHasNextOffset( cut ) )
+    {
+        notes += kForSigsNextOffsetNote;
+    }
+    if( cut.docsDropped > 0 )
+    {
+        notes += kForDocsDroppedNote;
+    }
+    return notes;
+}
+// the same clauses from the four numbers a caller without a continuation holds (--from-trace, --pack-task)
+inline std::string sigsCutLegendNotes( bool isCapped, std::size_t shown, std::size_t total, std::size_t docsDropped )
+{
+    SigsCutReport cut;
+    cut.isCapped    = isCapped;
+    cut.shown       = shown;
+    cut.total       = total;
+    cut.docsDropped = docsDropped;
+    return sigsCutReportLegend( cut );
 }
 // The bytes a CHARGED continuation adds, an upper bound fixed before the plan: the attribute(s) at their widest digits, and
 // every clause they may bring. `dialectAttrBytes` is the dialect's own spelling of the value-bearing attribute(s).
