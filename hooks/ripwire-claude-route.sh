@@ -12,7 +12,7 @@
 #   1. THE MOMENT. This runs before the agent has chosen a tool, not after it already reached for one.
 #   2. THE PAYLOAD. A runnable command with its arguments already filled in from the prompt, not a verb
 #      name and an ellipsis the agent has to finish.
-#   3. THE GATE. `--help-task` has a measured precision (1.000 / harmful 0.000 on its corpus,
+#   3. THE GATE. `--help-task` has a measured precision (1.000 / harmful 0.000 on its tuning corpus,
 #      test/taskroutecheck.sh), so this is silent on the prompts it cannot route rather than firing on
 #      everything. Silence is the common case and is not a failure.
 # The round cannot separate the three, and the registration says so.
