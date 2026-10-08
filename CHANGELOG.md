@@ -988,9 +988,11 @@ call-shaped references, so on such a function `--callers`, `--callees`, `--impac
   cut is disclosed, never silent: every answer that reads value references for the cut file's language — the
   callers/callees roots, `--impact`, `--safe-delete`, `--dead-code`, `--uses`, `--path` (beside `to_value_refs=`),
   `--json` and the MCP twins — carries `value_refs_depth_capped=N` (files cut) and `value_refs_depth_at=FILE:LINE`
-  (the first cut), so a missing row, a `count=` or a listed dead function there reads as a floor. The one exception,
-  named: `--quality-delta`'s dead-code kind and its `value-ref-excluded=` count (CLI and MCP) read the rows and do not
-  yet carry it. An answer over a tree with no cut is byte-identical.
+  (the first cut), so a missing row, a `count=` or a listed dead function there reads as a floor. The named
+  exceptions read the rows and do not yet carry it: `--quality-delta`'s dead-code kind and its `value-ref-excluded=`
+  count (CLI and MCP), `--verify='uses(SYM)'` / `'unused(SYM)'` (their `count=` is a floor there; the verdict is not:
+  a witness confirms, an absence is `not-established`), and the LSP references and hover handlers, which have no
+  attribute to carry it. An answer over a tree with no cut is byte-identical.
 - **Second review.** A parameter of a prototype, a function-pointer typedef or parameter, a C++ member declaration, a
   Go func type or interface method, or a TS function type, `declare function` or interface signature no longer hides a
   same-named function in the enclosing scope (`signal( SIGINT, handler )` beside `typedef void (*fn_t)( int handler )`

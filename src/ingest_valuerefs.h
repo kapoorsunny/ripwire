@@ -38,7 +38,8 @@
 //            (model.h kValueRefDepthCutScope); argCount=the subtrees kVrMaxDepth stopped the walk above (saturating);
 //            startByte/line=the first one. Not a row: valuerefindex.h counts it, and every answer that reads value
 //            references discloses it (value_refs_depth_capped= / value_refs_depth_at=), except --quality-delta's dead kind
-//            and its value-ref-excluded= count (a named deferral).
+//            and its value-ref-excluded= count, --verify uses()/unused() (count= is a floor there) and the LSP
+//            references/hover handlers (named deferrals).
 // A local/file Through survives only when the same scope fed that container a function value (the filter at
 // scope exit / file end), so an ordinary `x.m()` adds nothing; a parameter Through always survives — its
 // values arrive from callers elsewhere.
@@ -826,9 +827,9 @@ private:
         }
     }
 
-    // The file's ONE depth-cut record (RECORD SHAPE in the header comment): the cut is disclosed through it on every
-    // answer that reads value references (valuerefs.h value_refs_depth_capped=, --dead-code), and it is cached with the
-    // file's other references, so a warm run discloses it too.
+    // The file's ONE depth-cut record (RECORD SHAPE in the header comment): the cut is disclosed through it on the
+    // answers that read value references (valuerefs.h value_refs_depth_capped=, --dead-code; the named exceptions are in
+    // the header comment), and it is cached with the file's other references, so a warm run discloses it too.
     void emitDepthCut()
     {
         EXPECTS( m_depthCut.subtrees > 0, "a depth-cut record is written only when the cap stopped the walk" );

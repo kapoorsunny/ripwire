@@ -382,8 +382,9 @@ a reason a function is not dead (one made by another function or at file scope: 
 stores itself stays dead, as a recursive self-call is no caller). The capture stops at 512 levels of
 nesting; a file it cut carries one depth-cut record, and every answer that reads value references for
 that file's language says so (`value_refs_depth_capped=`, `value_refs_depth_at=`): the callers/callees roots,
-`--impact`, `--safe-delete`, `--dead-code`, `--uses`, `--path`, the JSON form and the MCP twins. The one exception is
-`--quality-delta`'s dead-code kind and its `value-ref-excluded=` count (CLI and MCP), which do not yet say so.
+`--impact`, `--safe-delete`, `--dead-code`, `--uses`, `--path`, the JSON form and the MCP twins. The exceptions, which
+do not yet say so: `--quality-delta`'s dead-code kind and its `value-ref-excluded=` count (CLI and MCP),
+`--verify='uses(SYM)'` / `'unused(SYM)'` (their `count=` is then a floor), and the LSP references and hover handlers.
 
 ### graph — the CSR
 
