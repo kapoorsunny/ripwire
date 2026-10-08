@@ -3286,11 +3286,7 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
     const ToValueRefs ptToValueRefs = toValueRefs( ing, pth.empty(), dstDefs, &valueRefIndexOf( ix ) );
     // PATH-GAP: the CLI --path's gap clause, by the same analysis and emitter (src/pathgaps.h).
     const PathSearchGaps ptGaps = pth.empty() ? pathSearchGaps( ing, g, srcDefs, valueRefIndexOf( ix ) ) : PathSearchGaps{};
-    bool ptHasVia = false;   // FE-B: exactly when a hop of this path is via="name", as on the CLI
-    for( std::size_t i = 1; i < pth.size() && !ptHasVia; ++i )
-    {
-        ptHasVia = edgeNameOnly( g, pth[ i - 1 ], pth[ i ] );
-    }
+    const bool ptHasVia = pathHasNameOnlyHop( g, pth );   // FE-B: exactly when a hop of this path is via="name", as on the CLI
     rw::emitTo( mem, "<!-- ripwire path: one DIRECTED call path from= to to= (each <s> a hop); reachable= is 0 and hops= 0 when the "
                        "graph holds none. {}{}{}{}-->{}", ( unprovenDefsVerbLegend( UnprovenDefsVerb::Path, unprovenDefs > 0 ) + viaNameLegend( ptHasVia ) ).c_str(),
                   ( std::string( toValueRefsLegend( ptToValueRefs.count > 0 ) ) + valueRefsDepthLegend( ptToValueRefs.depthCut.files > 0 ) ).c_str(),

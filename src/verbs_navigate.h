@@ -2312,11 +2312,7 @@ std::optional<int> runPath( const MainDispatch& d )
         }
         const rw::ToValueRefs pthToValueRefs = path.empty() ? rw::toValueRefs( ing, true, dstDefs, &*pthValueIdx ) : rw::ToValueRefs{};
         const rw::PathSearchGaps pthGaps = path.empty() ? rw::pathSearchGaps( ing, g, srcDefs, *pthValueIdx ) : rw::PathSearchGaps{};
-        bool pthHasVia = false;   // FE-B: exactly when a hop of THIS path is via="name"
-        for( std::size_t i = 1; i < path.size() && !pthHasVia; ++i )
-        {
-            pthHasVia = edgeNameOnly( g, path[ i - 1 ], path[ i ] );
-        }
+        const bool pthHasVia = rw::pathHasNameOnlyHop( g, path );   // FE-B: exactly when a hop of THIS path is via="name"
         rw::emitTo( stdout, "<!-- ripwire path: one DIRECTED call path from= to to= (each <s> a hop); reachable= is 0 and hops= 0 when the "
                      "graph holds none. {}{}{}{}-->{}", ( rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::Path, pthUnprovenDefs > 0 ) + rw::viaNameLegend( pthHasVia ) ).c_str(),
                      ( std::string( rw::toValueRefsLegend( pthToValueRefs.count > 0 ) ) + rw::valueRefsDepthLegend( pthToValueRefs.depthCut.files > 0 ) ).c_str(),
