@@ -845,6 +845,24 @@ round. Each takes minutes to check; each miss costs a review round.
     claim; a dedup or merge of findings keeps the most severe row, not the first; a substring match on a
     name is whole-word or bounded (probe `catalog` and `dialog` for `log`); a per-tag or per-file cap
     cannot make the result depend on file order.
+14. **A match key names the real entity.** A filter, dedup or match identifies owner + name in its binding
+    scope, never file + name; probe two owners of one name in one file, and a bare name beside a same-named
+    class member.
+15. **A gate detects what it needs and skips by name.** A gate that needs a sanitizer, a tool or a locale
+    checks for it itself and SKIPs naming it when absent; a guard on machine state exits rather than printing;
+    a new row or attribute name does not match the name patterns existing gates grep for.
+16. **After any merge, count format placeholders against arguments** at every format call either side
+    touched: two sides adding the same `{}` merge cleanly and silently drop an argument. Never edit a tree
+    while its suite runs.
+17. **Commit before you mutate.** Commit the fix before a mutation test, and undo a mutation by restoring the
+    committed file, never by checking out over uncommitted work; a build's `built_from` matches the commit it
+    claims.
+18. **A text cap cuts on a UTF-8 boundary** and adds the ellipsis only when bytes were dropped; probe a
+    multibyte character straddling the cap, a text of exactly the cap, and the same slot in every language
+    that writes it.
+19. **A derived cache dies with its parent.** A cached object that points into a rebuilt structure is dropped
+    wherever that structure is reassigned, never kept on a content stamp; probe a rebuild that keeps the
+    stamp (a chmod, a new non-source file) under the sanitizer build.
 
 **The gate count is a build product.** It is stated in `README.md`, `docs/EVALS.md` and
 `present/deck5_ripwire_build.js` — eight sites — and every one of them is written by
