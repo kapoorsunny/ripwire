@@ -1931,6 +1931,9 @@ struct MapAnnotations
     // next= that pages them. Every other map keeps the plain rank-order cut, and a map-scope map whose cut swapped
     // nothing carries neither attribute (byte-identical). Filled by assignment, like the trailing fields above.
     bool codeFirstRows = false;
+    // FE-B: the compact posture strips the map's via="name" comment (compactlegend.h, the via/x rows restate it), so the
+    // map does not write it at all — and the --max-tokens fit, which measures this render, prices the delivered bytes.
+    bool               viaLegendStripped = false;
 };
 
 // ── the code-first row pick: data_sections_cut= / next= (docs/EVALS.md "Map data Sections never crowd code out of the
@@ -2599,6 +2602,72 @@ inline std::uint32_t counterAt( const std::vector<std::uint32_t>* v, NodeId id )
     return ( v && id < v->size() ) ? ( *v )[ id ] : 0u;
 }
 
+// FE-B: one map <s>'s <c> rows over out-edges [from, to). A via="name" row (matched by name alone) that the symbol would
+// print several times byte for byte — N same-named by-name candidates, one row each, carrying only n=/prov=/via= — is
+// written ONCE, at its first edge, with x="N": the count, and --callees on the <s> lists each candidate with its file
+// (graphlegend.h kMapViaNameLegend / compactlegend.h's x row). Every other row, prov="split" arms included, is written as
+// before. `scratch` is reused across symbols.
+inline void writeMapCalleeRows( XmlWriter& w, const IngestResult& ing, std::uint32_t from, std::uint32_t to, const std::vector<NodeId>& outTargets,
+                                const std::vector<std::uint8_t>* outProv, const std::vector<std::uint8_t>* outNameOnly, std::vector<char>& esc,
+                                std::vector<std::uint32_t>& scratch )
+{
+    const auto provOf    = [ & ]( std::uint32_t e ) -> std::uint8_t { return ( outProv && e < outProv->size() ) ? ( *outProv )[ e ] : 0; };
+    const auto nameOnly  = [ & ]( std::uint32_t e ) { return outNameOnly && e < outNameOnly->size() && ( *outNameOnly )[ e ] != 0; };
+    // the row's bytes among via="name" rows: name, prov=
+    const auto rowLess = [ & ]( std::uint32_t x, std::uint32_t y )
+    {
+        const std::string& nx = ing.symbols[ outTargets[ x ] ].name;
+        const std::string& ny = ing.symbols[ outTargets[ y ] ].name;
+        return nx != ny ? nx < ny : provOf( x ) < provOf( y );
+    };
+    scratch.clear();
+    for( std::uint32_t e = from; e < to; ++e )
+    {
+        if( nameOnly( e ) )
+        {
+            scratch.push_back( e );
+        }
+    }
+    std::stable_sort( scratch.begin(), scratch.end(), rowLess );   // each group of equal rows stays in edge order
+    for( std::uint32_t e = from; e < to; ++e )
+    {
+        std::size_t repeats = 1;
+        if( nameOnly( e ) )
+        {
+            const auto group = std::equal_range( scratch.begin(), scratch.end(), e, rowLess );
+            ASSUME( group.first != group.second, "every via=\"name\" edge of [from, to) was collected into scratch" );
+            if( *group.first != e )
+            {
+                continue;   // a repeat of an earlier row: counted in that row's x=
+            }
+            repeats = std::size_t( group.second - group.first );
+        }
+        w.write( "<c n=\"" );
+        w.write( escapeXml( ing.symbols[ outTargets[ e ] ].name, esc ) );
+        // A4-R5: prov="scip" on a SCIP-pinned (precise) edge, prov="binding" on an FFI binding-table edge
+        // (pybind/extern-C/JNI), prov="import" on an ES named-import edge whose module AND export the source named. C1:
+        // prov="split" on one arm of a k-way split the resolver could not choose between. Absent = name-based AND
+        // uniquely resolved (the common case → zero token cost). outProv parallels outTargets exactly. C1, and this is the
+        // whole point of the marker: `amb="K"` on the enclosing <s> says K of this symbol's CALLS were guesses and cannot
+        // say WHICH edges; prov="split" names the arms, and the suspect set becomes the guessed edges and nothing else.
+        if( provOf( e ) != 0 )
+        {
+            w.write( "\" prov=\"" );
+            w.write( provLabel( provOf( e ) ) );
+        }
+        if( nameOnly( e ) )
+        {
+            w.write( "\" via=\"name" );   // FE-B: the same edge bit every other surface reads (viaNameLegendComment)
+        }
+        if( repeats > 1 )
+        {
+            w.write( "\" x=\"" );
+            w.write( std::to_string( repeats ) );
+        }
+        w.write( "\"/>" );
+    }
+}
+
 // FE-B: may a <c> row under one of `nodes` carry via="name"? True when any of their out-edges is name-only — an
 // over-approximation of what a section renders (a <calls> block's 16-per-symbol cap may cut that row; a merged overload
 // row prints one representative's edges), asked BEFORE the rows are written by a surface whose first-screen legend must
@@ -2915,11 +2984,14 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     const std::size_t declinedTotal   = counterTotal( declinedOut );     // calls tier 3 declined: no edge, and no guess
     legend += declinedTotal > 0 ? kDeclinedMapLegend : "";               // charged to the map that carries declined=
     legend += gateDeclinedCalls > 0 ? kDeclinedGateMapLegend : "";       // only where the builtin-method gate declined a call
-    if( outNameOnly && !stubbed && namesOnlyOutAny( outOff, *outNameOnly, std::span<const NodeId>( order.data(), std::min( keep, order.size() ) ) ) )
+    if( outNameOnly && !stubbed && !ann.viaLegendStripped
+        && namesOnlyOutAny( outOff, *outNameOnly, std::span<const NodeId>( order.data(), std::min( keep, order.size() ) ) ) )
     {
-        // FE-B: the reading every other surface carries (graphlegend.h kViaNameLegend, one wording), as its own comment — exactly
-        // when a kept row may print a via="name" <c> (over-approximated by merged overloads, which print one member's edges)
-        legend += viaNameLegendComment();
+        // FE-B: the reading every other surface carries (graphlegend.h kViaNameLegend), in the map's short spelling — exactly
+        // when a kept row may print a via="name" <c> (over-approximated by merged overloads, which print one member's edges).
+        // It also defines a merged row's x=. Not written under the compact posture, whose rewrite strips it (compactlegend.h)
+        // and whose element-qualified via/x rows restate it: the --max-tokens fit then prices what is delivered.
+        legend += kMapViaNameLegend;
     }
     // C1 DRIFT FIX (Round C lane B, found by re-reading this header's own output). `precise=` means "how many
     // out-edges a SCIP index PINNED", and the emitter's own comment below says it is "emitted ONLY under
@@ -3152,6 +3224,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     // The children, as ONE renderer both paths call. This was inline code writing through a writer bound to "the buffer,
     // or `out` when the buffer could not open". That serves a failed open, and cannot serve a buffer that opened and then
     // lost a write: by then the children were already spent into it, and the only bytes left to print had a hole in them.
+    std::vector<std::uint32_t> hedgedScratch;   // FE-B: writeMapCalleeRows' reused buffer
     const auto writeChildren = [ & ]( XmlWriter& w )
     {
         // §P8 collision: this prologue spelled its LABEL `l=`, the two characters 22 other sites use for a LINE
@@ -3418,31 +3491,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
                 }
                 w.write( ">" );
 
-                for( std::uint32_t e = outOff[id]; e < outOff[id + 1]; ++e )
-                {
-                    w.write( "<c n=\"" );
-                    w.write( escapeXml( ing.symbols[ outTargets[e] ].name, esc ) );
-                    // A4-R5: prov="scip" on a SCIP-pinned (precise) edge, prov="binding" on an FFI
-                    // binding-table edge (pybind/extern-C/JNI), prov="import" on an ES named-import edge whose
-                    // module AND export the source named. C1: prov="split" on one arm of a k-way split the
-                    // resolver could not choose between. Absent = name-based AND uniquely resolved (the common case
-                    // → zero token cost). outProv parallels outTargets exactly, so index `e` is the same edge.
-                    //
-                    // C1, and this is the whole point of the marker: `amb="K"` on the enclosing <s> says K of this
-                    // symbol's CALLS were guesses and cannot say WHICH edges, so a consumer honouring the honesty
-                    // signal had to distrust every <c> child. prov="split" names the arms, and the suspect set
-                    // becomes the guessed edges and nothing else.
-                    if( outProv && e < outProv->size() && ( *outProv )[e] )
-                    {
-                        w.write( "\" prov=\"" );
-                        w.write( provLabel( ( *outProv )[e] ) );
-                    }
-                    if( outNameOnly && e < outNameOnly->size() && ( *outNameOnly )[e] != 0 )
-                    {
-                        w.write( "\" via=\"name" );   // FE-B: the same edge bit every other surface reads (viaNameLegendComment)
-                    }
-                    w.write( "\"/>" );
-                }
+                writeMapCalleeRows( w, ing, outOff[id], outOff[id + 1], outTargets, outProv, outNameOnly, esc, hedgedScratch );
                 w.write( "</s>" );
             }
             w.write( "</f>" );

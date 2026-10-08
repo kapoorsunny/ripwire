@@ -155,9 +155,11 @@ class Subscriber:
 PYEOF
 "$BIN" "$SELFD" --no-cache >"$TMP/selfwin.xml" 2>/dev/null
 SW="$( sed 's/></>\n</g' "$TMP/selfwin.xml" | awk '/n="publish_event" sc="Facade"/{f=1;print;next} /^<s /{f=0} f' )"
-[ "$( printf '%s' "$SW" | grep -c '<c n="publish_event"' )" = 2 ] \
+# FE-B: a merged via="name" row <c … x="N"/> stands for N edges (serialize.h writeMapCalleeRows), so edges are summed
+SW_EDGES="$( printf '%s' "$SW" | grep -o '<c n="publish_event"[^>]*>' | awk '{ n = 1; if ( match( $0, / x="[0-9]+"/ ) ) n = substr( $0, RSTART + 4, RLENGTH - 5 ) + 0; s += n } END { print s + 0 }' )"
+[ "$SW_EDGES" = 2 ] \
     && ok "(I) the facade keeps BOTH real targets (2 edges) — the caller no longer wins its own tie-break" \
-    || no "(I) facade.py::Facade::publish_event has $( printf '%s' "$SW" | grep -c '<c n="publish_event"' ) publish_event edges, want 2: $SW"
+    || no "(I) facade.py::Facade::publish_event has $SW_EDGES publish_event edges, want 2: $SW"
 printf '%s' "$SW" | grep -q 'amb="1"' && ok "(I) …disclosed as an honest split (amb=\"1\")" \
     || no "(I) the facade split is not marked amb=\"1\": $( printf '%s' "$SW" | head -1 )"
 printf '%s' "$SW" | grep -q 'lpin=' && no "(I) the facade carries lpin= — a two-way tie was pinned: $( printf '%s' "$SW" | head -1 )" \

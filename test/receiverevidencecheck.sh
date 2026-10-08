@@ -730,6 +730,47 @@ map_arms(){
 }
 map_arms
 
+# (H) the map's MERGED hedged rows (fix round 1): N byte-identical via="name" rows of one symbol print ONCE with x="N"; the
+# full legend and the compact legend define x=; --callees on the caller lists every candidate (the cut is recoverable).
+# Near misses: a lone hedged candidate carries no x=, a PROVEN row is never merged into a hedged one, and two different
+# names stay two rows.
+merge_arms(){
+    local g="$TMP/mergemap"
+    mkdir -p "$g"
+    { printf 'class A { get() { return 1; } put() { return 1; } }\nclass B { get() { return 2; } }\nclass C { get() { return 3; } }\n'
+      printf 'function use(o) { return o.get() + o.put(); }\nfunction proven() { return new A().get(); }\nmodule.exports = { A, B, C, use, proven };\n'; } >"$g/u.js"
+    local full="$TMP/mergemap.full.xml" comp="$TMP/mergemap.compact.xml" cal="$TMP/mergemap.callees.xml"
+    ( cd "$g" && "$BIN" . --no-cache --top-k=500 --legend=full >"$full" 2>/dev/null ); printf '%s' "$?" >"$full.rc"
+    ( cd "$g" && "$BIN" . --no-cache --top-k=500 --legend=compact >"$comp" 2>/dev/null ); printf '%s' "$?" >"$comp.rc"
+    ( cd "$g" && "$BIN" . --no-cache --callees=u.js:use >"$cal" 2>/dev/null ); printf '%s' "$?" >"$cal.rc"
+    ran_ok "(H) merge: the full-legend map" "$full" || return
+    ran_ok "(H) merge: the compact-legend map" "$comp" || return
+    ran_ok "(H) merge: --callees=u.js:use" "$cal" || return
+    local use proven
+    use="$( sed 's/<s /\n<s /g' "$full" | grep -m1 '<s t="fn" n="use"' )"
+    proven="$( sed 's/<s /\n<s /g' "$full" | grep -m1 '<s t="fn" n="proven"' )"
+    if [ -z "$use" ] || [ -z "$proven" ]; then no "(H) merge: the map has no row for use/proven (the premise): $( head -c 400 "$full" )"; return; fi
+    [ "$( printf '%s' "$use" | grep -o '<c n="get"[^>]*>' | wc -l | tr -d ' ' )" = 1 ] && printf '%s' "$use" | grep -qE '<c n="get"( prov="split")? via="name" x="3"/>' \
+        && ok "(H) merge: use's three same-named hedged get candidates print ONE row <c n=\"get\" via=\"name\" x=\"3\"/>" \
+        || no "(H) merge: use's get rows are not one x=\"3\" row: $use"
+    printf '%s' "$use" | grep -q '<c n="put"[^>]* x="' \
+        && no "(H) merge near miss: use's lone put candidate carries x=: $use" \
+        || ok "(H) merge near miss: a lone hedged candidate (put) carries no x="
+    printf '%s' "$proven" | grep -q 'x="' \
+        && no "(H) merge near miss: proven's evidence-bound get row was merged: $proven" \
+        || ok "(H) merge near miss: a proven row is never merged (proven's get carries no x=)"
+    [ "$( grep -o '<s [^>]*n="get"' "$cal" | wc -l | tr -d ' ' )" = 3 ] \
+        && ok "(H) merge: --callees=u.js:use lists all three get candidates (the merged row is recoverable)" \
+        || no "(H) merge: --callees=u.js:use does not list three get candidates: $( head -c 600 "$cal" )"
+    grep -q 'x=N' "$full" && P legend "$full" && [ "$PARSED" = "DEFINED" ] \
+        && ok "(H) merge: the full map legend defines via=\"name\" and x=" \
+        || no "(H) merge: the full map legend does not define via=\"name\" (name alone + does NOT mean) and x="
+    grep -q '<c x=N>' "$comp" && grep -qE '<c n="get"( prov="split")? via="name" x="3"/>' "$comp" \
+        && ok "(H) merge: the compact map defines <c x=N> and keeps the merged row" \
+        || no "(H) merge: the compact map does not define <c x=N> beside the merged row"
+}
+merge_arms
+
 echo "--- (H) MCP twins (fresh TMPDIR: the MCP cache lives there)"
 mkdir -p "$TMP/mcp"
 # mcp ROOT TOOL SELECTOR OUT — one tools/call (then tools/list); the raw stream into OUT, the exit status into OUT.rc
