@@ -1157,6 +1157,13 @@ measures in the wild; a coverage collapse invalidates the readout the same way a
 drift does. (c) Route accuracy in the field is **not** measurable from this log by construction — the
 rows are hash-only — and no number resembling it will be reported from it.
 
+**Window 1 (registered 2026-09-02): VOID for the verdict.** Until issue #381 an unconfigured install resolved every session to `treatment`, so this window had no control arm, and the registered treatment − control difference cannot be computed from it. No verdict is read from it. Its four- and six-week dates (2026-09-30, 2026-10-14) are not readout dates.
+
+**Window 2: the readout clock restarts at the release that ships `arm=auto` as the default.** The rule is unchanged: one readout at four weeks, at least 40 recommended prompts per arm, and one extension to six weeks if the readout is underpowered.
+**Window start:** PENDING (the release that ships `arm=auto` writes its release date here as YYYY-MM-DD)
+
+`bench/routing_ab_report.py` reads the `Window start` line: a date gives the readout date (start + 28 days) and the one-time extension date (start + 42 days); `PENDING` gives no date.
+
 **Decision rule.** One readout, at four weeks (or six, under the extension). KEEP → the router stays as
 shipped. REWORD → one revision of the injected framing text, then a fresh registration with a new band;
 the mechanism is not re-litigated. **REMOVE → the hook is unregistered from the installer and deleted**,
@@ -1192,6 +1199,19 @@ population is biased toward the intents it already covers.
 
 **The readout is a LATER session.** This lane ships the instrument and the band. Nothing in this
 registration is a result.
+
+**Amendment, 2026-10-07 (issue #381) — the shipped default previously gave no control arm.** The control arm
+above is real only for a session that resolves to `control`. The hooks resolved an unconfigured arm (no
+`RIPWIRE_METER_ARM`, no `arm=` line in `~/.ripwire/meter.conf`) to `treatment`, and nothing in the installer
+wrote `arm=auto`, so a machine that never created `meter.conf` logged only treatment sessions: one such
+machine reported 18968 treatment prompts and 0 control prompts over four weeks, and the treatment-minus-control
+difference registered above could not be computed from them. The default is now `auto` (the stable
+session-hash split) in `hooks/ripwire-claude-route.sh`, `hooks/ripwire-claude-toolroute.sh` and
+`hooks/ripwire-nudge.sh`; an explicit `arm=treatment` or `arm=control` is still honoured. Rows written before
+the change by an unconfigured hook carry `arm="treatment"` with no control population, so they belong to the void window 1 and to no readout. **Pre-period observation, not a readout:** field data from one machine on the old treatment-only default (issue #381, 2026-09-10 to 2026-10-07) had 1,926 distinct injected recommendations. None of them was followed by the recommended verb within the same turn (0/1,926 same-turn adoptions; 3 were followed by any ripwire call). This observation enters neither window's verdict. The same issue taught the prompt hooks to skip MCP channel events (`<channel …>`) and sub-agent
+hand-backs (`<agent-message …>`) like `<task-notification>` and `<system-reminder>`: they are harness events,
+not prompts. `bench/routing_ab_report.py` now prints per-arm counts, says `NO CONTROL ARM` when an arm has no
+prompts, and marks the 2026-09-02 registration window void (it had no control arm); the readout clock restarts at the release that ships `arm=auto`, and the report prints the new window's readout date once its start date is recorded in this section.
 
 **The readout instrument.** `python3 bench/routing_ab_report.py [--routing PATH] [--meter PATH]
 [--since AT] [--until AT]` (defaults: `$RIPWIRE_HOME/routing.jsonl` and

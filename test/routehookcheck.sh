@@ -234,6 +234,71 @@ route_run "$H6" "$WITH_RIPWIRE" "$( promptjson junksession "$REPO" "$RECPROMPT" 
     && ok "A6 arm: an unrecognized arm value reads as treatment (no invented third population)" \
     || no "A6 arm: arm=banana produced arm=[$( rowget "$H6/routing.jsonl" 1 arm )]"
 
+# THE DEFAULT IS `auto` (issue #381). With no env override and no meter.conf the router used to resolve
+# `treatment` for EVERY session, so the pre-registered treatment-minus-control difference could never be
+# computed (one machine logged 18968 prompts, 0 of them control). The shipped default must now be the
+# meter's own random per-session split. Eight session ids, hashed exactly as the meter hashes them.
+# RED on a hook whose default is treatment (the control-side sessions come back treatment).
+DEFBAD=""; DEFCTL=0; DEFTRT=0
+for sid in s1 s2 s3 s4 s5 s6 s7 s8; do
+    h="$( printf '%s' "$sid" | cksum | cut -d' ' -f1 )"
+    if [ "$(( h % 100 ))" -lt 50 ]; then want=control; DEFCTL=$(( DEFCTL + 1 )); else want=treatment; DEFTRT=$(( DEFTRT + 1 )); fi
+    HD="$TMP/hd_$sid"; mkdir -p "$HD"
+    route_run "$HD" "$WITH_RIPWIRE" "$( promptjson "$sid" "$REPO" "$RECPROMPT" )" >/dev/null 2>&1
+    got="$( rowget "$HD/routing.jsonl" 1 arm )"
+    [ "$got" = "$want" ] || DEFBAD="$DEFBAD [$sid -> $got, auto says $want]"
+done
+[ -z "$DEFBAD" ] && [ "$DEFCTL" -gt 0 ] && [ "$DEFTRT" -gt 0 ] \
+    && ok "A7 arm default: no env and no meter.conf resolves to auto (both arms populated: $DEFCTL control / $DEFTRT treatment of 8)" \
+    || no "A7 arm default: unconfigured router did not follow the auto split:$DEFBAD (control=$DEFCTL treatment=$DEFTRT)"
+# An explicit `arm=treatment` in meter.conf is still honoured (the opt-out), for a session that auto
+# would have put in control; and a meter.conf that sets other keys but no arm= takes the same default.
+CTLSID=""
+for sid in s1 s2 s3 s4 s5 s6 s7 s8; do
+    h="$( printf '%s' "$sid" | cksum | cut -d' ' -f1 )"; [ "$(( h % 100 ))" -lt 50 ] && { CTLSID="$sid"; break; }
+done
+H7A="$TMP/h7a"; mkdir -p "$H7A"; printf 'arm=treatment\n' >"$H7A/meter.conf"
+route_run "$H7A" "$WITH_RIPWIRE" "$( promptjson "$CTLSID" "$REPO" "$RECPROMPT" )" >/dev/null 2>&1
+[ -n "$CTLSID" ] && [ "$( rowget "$H7A/routing.jsonl" 1 arm )" = "treatment" ] \
+    && ok "A8 arm default: an explicit meter.conf arm=treatment is honoured over the auto default" \
+    || no "A8 arm default: meter.conf arm=treatment gave arm=[$( rowget "$H7A/routing.jsonl" 1 arm )] for control-side session [$CTLSID]"
+H7B="$TMP/h7b"; mkdir -p "$H7B"; printf 'sweep=0\n' >"$H7B/meter.conf"
+route_run "$H7B" "$WITH_RIPWIRE" "$( promptjson "$CTLSID" "$REPO" "$RECPROMPT" )" >/dev/null 2>&1
+[ -n "$CTLSID" ] && [ "$( rowget "$H7B/routing.jsonl" 1 arm )" = "control" ] \
+    && ok "A9 arm default: a meter.conf with no arm= line follows the auto default too" \
+    || no "A9 arm default: arm-less meter.conf gave arm=[$( rowget "$H7B/routing.jsonl" 1 arm )] for control-side session [$CTLSID]"
+
+# meter.conf PARSING (issue #381 fix round 1; the same three arms run against resolve_arm in
+# hooks/ripwire-claude-toolroute.sh (toolcallroutecheck) and meter_init in hooks/ripwire-nudge.sh
+# (hookcheck)). Three bugs sat in the read loop of all three copies:
+#   - a FINAL LINE WITHOUT A NEWLINE is lost (`read` returns 1 on it), so `arm=control` there resolved to auto;
+#   - a CRLF value (`arm=control\r`) reads as `treatment` (the CR stays in the value);
+# Each arm pairs a session on the side the BUGGY reading would NOT give: a control-side session for the
+# forced treatment, a treatment-side session for the forced control, so none passes by coincidence.
+TRTSID=""
+for sid in s1 s2 s3 s4 s5 s6 s7 s8; do
+    h="$( printf '%s' "$sid" | cksum | cut -d' ' -f1 )"; [ "$(( h % 100 ))" -ge 50 ] && { TRTSID="$sid"; break; }
+done
+conf_arm()   # conf_arm LABEL SESSION CONFBYTES(printf format) WANT
+{
+    _ch="$TMP/ca_$1"; mkdir -p "$_ch"; printf "$3" >"$_ch/meter.conf"
+    route_run "$_ch" "$WITH_RIPWIRE" "$( promptjson "$2" "$REPO" "$RECPROMPT" )" >/dev/null 2>&1
+    _cg="$( rowget "$_ch/routing.jsonl" 1 arm )"
+    [ -n "$2" ] && [ "$_cg" = "$4" ] && ok "$1: meter.conf [$3] -> $4" \
+        || no "$1: meter.conf [$3] gave arm=[$_cg], want $4 (session [$2])"
+}
+conf_arm A10 "$CTLSID" 'arm=treatment' treatment             # no final newline: a lost line would leave auto = control
+conf_arm A11 "$TRTSID" 'arm=control' control                 # no final newline: a lost line would leave auto = treatment
+conf_arm A12 "$TRTSID" 'arm=control\r\n' control             # CRLF: a CR left in the value reads as treatment
+conf_arm A13 "$CTLSID" 'arm=auto\r\n' control                # CRLF auto: the CR in the value read as treatment
+conf_arm A14 "$TRTSID" 'sweep=0\r\narm=control\r\nenabled=1\r\n' control   # CRLF file, arm= in the middle
+conf_arm A15 "$TRTSID" 'sweep=0\narm=control' control       # last line is the arm, no newline, other keys before it
+# Near-misses the fix must NOT turn into a match: a different word, and a CR inside the value, still read as
+# treatment (any unrecognized value fails toward treatment).
+conf_arm A16 "$CTLSID" 'arm=controlx\n' treatment
+conf_arm A17 "$CTLSID" 'arm=control\rx\n' treatment
+conf_arm A18 "$CTLSID" 'arm=treatment\r\n' treatment         # explicit treatment still honoured under CRLF
+
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 # (O) ADOPTION-WITHIN-TWO — the loop the band is measured through, closed from the PreToolUse hook
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -609,6 +674,48 @@ printf '%s' "$ONOISE4" | grep -Fq -- '--expand' \
     && ok "N6 notification: a real prompt merely MENTIONING the marker mid-sentence still routes normally" \
     || no "N6 notification: the mid-sentence mention wrongly suppressed a real route: [$ONOISE4]"
 
+# ── MCP channel events and sub-agent hand-backs are harness events too (issue #381, 2026-10-07) ─────────
+# Claude Code delivers an MCP channel event (`<channel source="…">…</channel>`) and a sub-agent hand-back
+# (`<agent-message from="…">…</agent-message>`) through this same UserPromptSubmit channel. Field data on
+# one machine: roughly half of all injected recommendations were minted from `<channel` prompts. The
+# prompt below ends with a perfectly routable sentence on purpose — only the guard can make these skip, so
+# the arms are RED on a hook that lacks it. The prefix is the opening tag followed by a space or `>`;
+# near-misses (`<channelz>`, `<channels>`, `<agent-messages>`) and a mid-sentence mention still route.
+CHROUT="Help me understand the implementation of alphaNode"
+chan_skip()   # chan_skip LABEL SESSION PROMPT
+{
+    _hd="$TMP/hc_$2"; mkdir -p "$_hd"
+    _co="$( route_run "$_hd" "$WITH_RIPWIRE" "$( promptjson "$2" "$NREPO" "$3" )" RIPWIRE_METER_ARM=treatment )"; _crc=$?
+    [ "$_crc" -eq 0 ] && [ -z "$_co" ] && [ "$( rowget "$_hd/routing.jsonl" 1 status )" = "skip-system" ] \
+        && ok "$1: skipped with status=skip-system, nothing injected" \
+        || no "$1: exit=$_crc out=[$_co] status=[$( rowget "$_hd/routing.jsonl" 1 status )] (expected empty + skip-system)"
+}
+chan_route()  # chan_route LABEL SESSION PROMPT
+{
+    _hd="$TMP/hc_$2"; mkdir -p "$_hd"
+    _co="$( route_run "$_hd" "$WITH_RIPWIRE" "$( promptjson "$2" "$NREPO" "$3" )" RIPWIRE_METER_ARM=treatment )"
+    printf '%s' "$_co" | grep -Fq -- '--expand' && [ "$( rowget "$_hd/routing.jsonl" 1 status )" = "recommend" ] \
+        && ok "$1: still routes normally" \
+        || no "$1: wrongly suppressed or mis-logged: out=[$_co] status=[$( rowget "$_hd/routing.jsonl" 1 status )]"
+}
+chan_skip  "N7 channel: a <channel source=...> event skips"              chan1 "<channel source=\"x\">$CHROUT</channel>"
+chan_skip  "N7b channel: leading whitespace/blank line before <channel>" chan2 "$( printf '  \n\t<channel source="x">%s</channel>' "$CHROUT" )"
+chan_skip  "N7c channel: the bare <channel> opening tag skips"           chan3 "<channel>$CHROUT</channel>"
+chan_skip  "N8 agent-message: an <agent-message from=...> hand-back skips"         agm1 "<agent-message from=\"w\">$CHROUT</agent-message>"
+chan_skip  "N8b agent-message: leading whitespace before <agent-message>"          agm2 "$( printf '\n\n  <agent-message from="w">%s</agent-message>' "$CHROUT" )"
+chan_skip  "N8c agent-message: the bare <agent-message> opening tag skips"         agm3 "<agent-message>$CHROUT</agent-message>"
+chan_route "N9 channel near-miss: <channelz> is not the wrapper"        chn1 "<channelz> $CHROUT"
+chan_route "N9b channel near-miss: <channels> is not the wrapper"        chn2 "$( printf '<channels>\n%s' "$CHROUT" )"
+chan_route "N9c channel mention: <channel ...> mid-sentence still routes" chn3 "what does <channel source=\"x\"> mean here? $CHROUT"
+chan_route "N9d agent-message near-miss: <agent-messages> is not the wrapper" chn4 "<agent-messages> $CHROUT"
+chan_route "N9e agent-message mention: mid-sentence still routes"         chn5 "what does <agent-message from=\"w\"> mean here? $CHROUT"
+chan_route "N9f channel near-miss: a bare word 'channel' in prose routes"  chn6 "channel the energy: $CHROUT"
+# Leading VERTICAL TAB / FORM FEED: bash's [:space:] strip removes them, and src/taskroute.h's strip must remove
+# the same bytes (it used to stop at space/tab/LF/CR, so `--help-task` routed a prompt the hook skipped).
+chan_skip  "N10 channel: a leading \\v before <channel> skips"           chn7 "$( printf '\v<channel source="x">%s</channel>' "$CHROUT" )"
+chan_skip  "N10b channel: a leading \\f before <agent-message> skips"    chn8 "$( printf '\f <agent-message from="w">%s</agent-message>' "$CHROUT" )"
+chan_route "N10c channel: \\v then a near-miss <channelz> still routes" chn9 "$( printf '\v<channelz> %s' "$CHROUT" )"
+
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 # O9 — rw_is_ripwire_call: ONE block, three files, and the shapes an agent actually types (PR #215 item 6)
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -630,6 +737,49 @@ elif diff -q "$B_CLAUDE" "$B_CODEX" >/dev/null && diff -q "$B_CLAUDE" "$B_NUDGE"
     ok "O9 rw_is_ripwire_call is byte-identical in the three hooks ($( wc -l < "$B_CLAUDE" | tr -d ' ' ) lines)"
 else
     no "O9 the three copies of rw_is_ripwire_call have DRIFTED — the hooks and the meter will disagree on the same command line"
+fi
+
+# The harness-event list is a second mirrored block (issue #381): the Claude and Codex prompt hooks must
+# agree on which wrappers are not user input, or one agent's router keeps minting recommendations from
+# channel events while the other does not.
+extract_hblock(){ awk '/^# ---- BEGIN MIRRORED BLOCK rw_is_harness_event/,/^# ---- END MIRRORED BLOCK rw_is_harness_event/' "$1"; }
+HB_CLAUDE="$TMP/hb_claude.sh"; HB_CODEX="$TMP/hb_codex.sh"
+extract_hblock "$ROOT/hooks/ripwire-claude-route.sh" > "$HB_CLAUDE"
+extract_hblock "$ROOT/hooks/ripwire-codex-route.sh"  > "$HB_CODEX"
+if [ ! -s "$HB_CLAUDE" ]; then
+    no "O9b the rw_is_harness_event block is absent from hooks/ripwire-claude-route.sh (the diff below would prove nothing)"
+elif diff -q "$HB_CLAUDE" "$HB_CODEX" >/dev/null; then
+    ok "O9b rw_is_harness_event is byte-identical in the Claude and Codex prompt hooks ($( wc -l < "$HB_CLAUDE" | tr -d ' ' ) lines)"
+else
+    no "O9b the two copies of rw_is_harness_event have DRIFTED — Claude and Codex disagree on what a user prompt is"
+fi
+
+# N3: the third copy of the list is src/taskroute.h's kHarnessEventTags, and nothing but behaviour used to tie it
+# to the shell block (a tag ADDED to one copy only passed every behavioural arm). Compare them textually:
+# each side is reduced to sorted `tag|whole` lines. Shell: a `'<x>'*` pattern is a whole tag, a `'<x '*`/`'<x>'*`
+# PAIR is the attribute-carrying tag `<x` (whole=0). C++: the `{ "<x", true|false }` rows of the table.
+shell_tags(){
+    grep -o "'[^']*'\*" "$1" | sed -e "s/^'//" -e "s/'\*\$//" | awk '
+        { t[NR] = $0; seen[$0] = 1 }
+        END { for (i = 1; i <= NR; i++) {
+                x = t[i]
+                if (x ~ / $/) { sub(/ $/, "", x); print x "|0" }
+                else if (x ~ />$/ && ((substr(x, 1, length(x) - 1) " ") in seen)) { }
+                else print x "|1"
+              } }' | sort
+}
+cxx_tags(){
+    awk '/kHarnessEventTags *\{/,/^\} \};/' "$1" | grep -o '{ *"[^"]*", *\(true\|false\) *}' \
+        | sed -e 's/^{ *"//' -e 's/", *true *}$/|1/' -e 's/", *false *}$/|0/' | sort
+}
+CXX_TAGS="$( cxx_tags "$ROOT/src/taskroute.h" )"
+SH_TAGS_CLAUDE="$( shell_tags "$HB_CLAUDE" )"; SH_TAGS_CODEX="$( shell_tags "$HB_CODEX" )"
+if [ -z "$CXX_TAGS" ] || [ -z "$SH_TAGS_CLAUDE" ]; then
+    no "O9c could not extract the harness-event tag lists (C++ [$( printf '%s' "$CXX_TAGS" | wc -l | tr -d ' ' )] shell [$( printf '%s' "$SH_TAGS_CLAUDE" | wc -l | tr -d ' ' )]) — the textual comparison would prove nothing"
+elif [ "$CXX_TAGS" = "$SH_TAGS_CLAUDE" ] && [ "$CXX_TAGS" = "$SH_TAGS_CODEX" ]; then
+    ok "O9c the shell harness-event tag list equals src/taskroute.h kHarnessEventTags ($( printf '%s\n' "$CXX_TAGS" | wc -l | tr -d ' ' ) tags: $( printf '%s' "$CXX_TAGS" | tr '\n' ' ' ))"
+else
+    no "O9c the harness-event tag lists DISAGREE — C++: [$( printf '%s' "$CXX_TAGS" | tr '\n' ' ' )] claude: [$( printf '%s' "$SH_TAGS_CLAUDE" | tr '\n' ' ' )] codex: [$( printf '%s' "$SH_TAGS_CODEX" | tr '\n' ' ' )]"
 fi
 
 # The rule itself, sourced from the claude hook's copy so the arm tests what ships.

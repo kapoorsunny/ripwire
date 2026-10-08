@@ -322,6 +322,97 @@ echo "$OUT8T" | grep -q '=== router=toolcall ===' && ok "--router=toolcall: show
 echo "$OUT8T" | grep -q '=== router=prompt ===' && no "--router=toolcall: leaked the prompt section too" \
     || ok "--router=toolcall: does not print the prompt section"
 
+# ── C/D: per-arm counts, a loud NO CONTROL ARM, and the window-2 readout clock (issue #381) ──────────
+# A treatment-only log is what an unconfigured install used to produce. The report must say so in so many
+# words, however many treatment prompts there are, and must NOT say it when both arms have prompts.
+DC="$TMP/dc"; mkdir -p "$DC"
+python3 - "$DC" <<'PYEOF'
+import json, sys
+rows = [{"v": 2, "at": "2026-10-01T10:00:00Z", "agent": "claude", "event": "UserPromptSubmit", "status": "recommend",
+         "intent": "x", "recommended": "--for", "arm": "treatment", "session_hash": str(1000 + i),
+         "prompt_hash": str(2000 + i), "prompt_bytes": 10} for i in range(5)]
+open(sys.argv[1] + "/routing.jsonl", "w").write("\n".join(json.dumps(r) for r in rows) + "\n")
+open(sys.argv[1] + "/substitution.jsonl", "w").write("")
+PYEOF
+OUTC="$( run "$DC" )"
+echo "$OUTC" | grep -q 'NO CONTROL ARM' && ok "C1: a treatment-only log prints NO CONTROL ARM" \
+    || no "C1: treatment-only log did not say NO CONTROL ARM -- $OUTC"
+echo "$OUTC" | grep -q 'arm counts: treatment=5 control=0' && ok "C2: per-arm counts are printed (treatment=5 control=0)" \
+    || no "C2: per-arm count line missing or wrong -- $( echo "$OUTC" | grep 'arm counts' )"
+echo "$OUTC" | grep -q 'NO TREATMENT ARM' && no "C3: a log WITH treatment prompts claimed NO TREATMENT ARM" \
+    || ok "C3: no false NO TREATMENT ARM when treatment has prompts"
+echo "$OUT1" | grep -q 'NO CONTROL ARM' && no "C4: a log with both arms populated still printed NO CONTROL ARM" \
+    || ok "C4: both arms populated -> no NO CONTROL ARM line"
+echo "$OUT1" | grep -q 'arm counts: treatment=43 control=40' && ok "C5: per-arm counts on the both-arms fixture (43 treatment incl. 3 edge-case prompts / 40 control)" \
+    || no "C5: per-arm count line wrong on the 43/40 fixture -- $( echo "$OUT1" | grep 'arm counts' )"
+
+# The readout clock (owner decision 2026-10-07): the 2026-09-02 window had no control arm, so it is VOID and
+# never gets a readout date; window 2 starts at the release that ships arm=auto, its start recorded as
+# `**Window start:**` in the registration. Synthetic registrations pin each state; the last arms read the
+# REAL docs/EVALS.md so the registration cannot lose its VOID/PENDING text without this gate noticing.
+EV="$TMP/evals.md"
+printf '## x\n\n### Claude Code prompt router — PRE-REGISTERED 2026-09-02 (test)\n\nbody\n\n**Window start:** 2026-10-20 (the release date)\n\n### Next section\n\n**Window start:** 2020-01-01\n' >"$EV"
+ro(){ python3 "$SCRIPT" --routing "$DC/routing.jsonl" --meter "$DC/substitution.jsonl" --evals "$EV" --today "$1" 2>&1; }
+# start 2026-10-20 -> readout 2026-11-17 (start + 28 days), extension 2026-12-01 (start + 42 days)
+ro 2026-11-20 | grep -q 'window 2 readout date: 2026-11-17 -- PASSED 3 day' && ok "D1: window 2's readout date is start + 28 days, and a passed one is flagged PASSED" \
+    || no "D1: passed window-2 date not flagged -- $( ro 2026-11-20 | grep -i readout )"
+ro 2026-11-20 | grep -q 'window 2 extended readout date (one-time): 2026-12-01 -- in 11 day' && ok "D2: the extension is start + 42 days, not yet passed, printed without the flag" \
+    || no "D2: extension date line wrong -- $( ro 2026-11-20 | grep -i extended )"
+ro 2026-11-01 | grep -v 'window 1' | grep -q 'PASSED' && no "D3: nothing in window 2 has passed on 2026-11-01 but the report said PASSED" \
+    || ok "D3: before both window-2 dates nothing is flagged PASSED"
+ro 2026-11-17 | grep -q 'window 2 readout date: 2026-11-17 -- TODAY' && ok "D4: on the day itself the line says TODAY" \
+    || no "D4: same-day line wrong -- $( ro 2026-11-17 | grep -i readout )"
+ro 2026-12-05 | grep -q 'window 2 extended readout date (one-time): 2026-12-01 -- PASSED 4 day' && ok "D5: the extension flags PASSED too, once it passes" \
+    || no "D5: passed extension not flagged -- $( ro 2026-12-05 | grep -i extended )"
+ro 2026-11-20 | grep -q '2020-01-01\|2020-01-29' && no "D6: a window start from a LATER section leaked into the report" \
+    || ok "D6: only the prompt-router section's window start is read"
+printf '## nothing here\n' >"$EV"
+ro 2026-10-07 | grep -q 'readout date: UNKNOWN' && ok "D7: a file without the registration prints UNKNOWN instead of staying silent" \
+    || no "D7: missing registration not reported -- $( ro 2026-10-07 | grep -i readout )"
+python3 "$SCRIPT" --routing "$DC/routing.jsonl" --meter "$DC/substitution.jsonl" --evals "$TMP/no-such-evals.md" --today 2026-10-07 2>&1 \
+    | grep -q 'readout date: UNKNOWN.*not readable' && ok "D8: an unreadable registration file prints UNKNOWN" \
+    || no "D8: unreadable registration file not reported"
+# D9': the SHIPPED docs/EVALS.md. Window 1 is VOID, window 2 is PENDING (or carries a computed date once the
+# release writes its start), and no line says PASSED, today or in 2027. RED on a head whose report flags the
+# 2026-09-02 window's derived date 2026-09-30 as PASSED.
+for TODAY in 2026-10-07 2027-01-01; do
+    OUTS="$( python3 "$SCRIPT" --routing "$DC/routing.jsonl" --meter "$DC/substitution.jsonl" --today "$TODAY" 2>&1 )"
+    echo "$OUTS" | grep -q 'window 1 (registered 2026-09-02): VOID -- no control arm (issue #381); not a readout' \
+        && echo "$OUTS" | grep -Eq 'readout date: (PENDING -- window 2 starts at the release that ships arm=auto|20[0-9]{2}-[0-9]{2}-[0-9]{2} -- )' \
+        && ok "D9'($TODAY): shipped docs/EVALS.md prints window 1 VOID and a window-2 date or PENDING" \
+        || no "D9'($TODAY): shipped registration lines wrong -- $( echo "$OUTS" | grep -i 'window\|readout' )"
+done
+OUTS="$( python3 "$SCRIPT" --routing "$DC/routing.jsonl" --meter "$DC/substitution.jsonl" --today 2026-10-07 2>&1 )"
+if grep -q '^\*\*Window start:\*\* PENDING' "$ROOT/docs/EVALS.md"; then
+    echo "$OUTS" | grep -q 'PASSED' && no "D9'a: a PENDING window start printed PASSED -- $( echo "$OUTS" | grep PASSED )" \
+        || ok "D9'a: with the shipped window start PENDING, no line says PASSED (2026-10-07)"
+fi
+echo "$OUTS" | grep -q '2026-09-30' && no "D9'b: the void window's derived date 2026-09-30 is printed" \
+    || ok "D9'b: the void window's derived date 2026-09-30 is not printed"
+# Window 1 stays VOID even when window 2 has a start (the void line does not depend on the registration's dates).
+printf '### Claude Code prompt router — PRE-REGISTERED 2026-09-02 (test)\n\n**Window start:** 2026-10-20\n' >"$EV"
+ro 2027-06-01 | grep -q 'window 1 (registered 2026-09-02): VOID' && ! ro 2027-06-01 | grep 'window 1' | grep -q PASSED \
+    && ok "D11: window 1 is VOID with a dated window 2, and its line never says PASSED" \
+    || no "D11: window 1 line wrong with a dated window 2 -- $( ro 2027-06-01 | grep 'window 1' )"
+ro 2027-06-01 | grep -q '2026-09-30' && no "D11b: 2026-09-30 printed with a dated window 2" || ok "D11b: 2026-09-30 is never printed"
+# PENDING and a missing line both give the PENDING readout line; a start that is not a date gives UNKNOWN.
+printf '### Claude Code prompt router — PRE-REGISTERED 2026-09-02 (test)\n\n**Window start:** PENDING (the release writes it)\n' >"$EV"
+ro 2027-06-01 | grep -q 'prompt-router readout date: PENDING -- window 2 starts at the release that ships arm=auto (no Window start date in docs/EVALS.md yet)' \
+    && ok "D12: a PENDING window start prints the PENDING readout line, whatever --today says" \
+    || no "D12: PENDING start not reported -- $( ro 2027-06-01 | grep -i readout )"
+printf '### Claude Code prompt router — PRE-REGISTERED 2026-09-02 (test)\n\nno start line here\n' >"$EV"
+ro 2027-06-01 | grep -q 'readout date: PENDING' && ok "D13: a registration with no Window start line prints PENDING" \
+    || no "D13: missing Window start line not PENDING -- $( ro 2027-06-01 | grep -i readout )"
+printf '### Claude Code prompt router — PRE-REGISTERED 2026-09-02 (test)\n\n**Window start:** next Tuesday\n' >"$EV"
+ro 2027-06-01 | grep -q 'readout date: UNKNOWN' && ! ro 2027-06-01 | grep -q 'PENDING --' && ok "D14: a Window start that is neither a date nor PENDING prints UNKNOWN" \
+    || no "D14: a junk Window start was not UNKNOWN -- $( ro 2027-06-01 | grep -i readout )"
+printf '### Claude Code prompt router — PRE-REGISTERED 2026-09-02 (test)\n\n**Window start:** 2026-02-30\n' >"$EV"
+ro 2027-06-01 | grep -q 'readout date: UNKNOWN' && ok "D15: an impossible calendar date prints UNKNOWN" \
+    || no "D15: 2026-02-30 not UNKNOWN -- $( ro 2027-06-01 | grep -i readout )"
+python3 "$SCRIPT" --routing "$DC/routing.jsonl" --meter "$DC/substitution.jsonl" --today not-a-date >/dev/null 2>"$TMP/today.err"; RCT=$?
+[ "$RCT" = 2 ] && grep -q -- '--today must be YYYY-MM-DD' "$TMP/today.err" && ok "D10: a malformed --today is a usage error (exit 2), not a silent default" \
+    || no "D10: --today not-a-date gave rc=$RCT stderr=$( cat "$TMP/today.err" )"
+
 echo ""
 if [ "$fail" = 0 ]; then
     echo "ALL PASS"
