@@ -1804,7 +1804,7 @@ inline void priceForTaskRoot( std::string& doc, std::size_t budgetTokens )
 
 // knob-honesty-068 (orchestrator ruling C3, 2026-10-07): MCP `for`'s ASSEMBLY — everything from the sigs render to the
 // finished, UNPRICED document (est_tokens= / over_ceiling= are spliced once, on the chosen one, by forTaskText) — as one pass
-// forTaskText runs once or twice over a single ranking (paid, then unpaid when the paid answer still lands over). The pass
+// forTaskText runs up to twice over a single ranking (unpaid; paid only when the unpaid answer lands over — ruling C3). The pass
 // takes its own copies of what it edits (the header, the lego/compose strings, the lego scope and its pre-cap count), so a
 // second pass starts from the same state as the first. A free function, not a lambda: forTaskText is already the largest
 // function in this file, and the assembly is a step of its own.
@@ -2467,11 +2467,12 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     const McpForAssemblyInputs assemblyIn{ ing, lensRank, forTopN, fanIn, impure, redact, sigsBudget, fixedBytes, budgetTokens,
                                            noteIndex, notesPtr, flRootArg, task, mcpTopRowNext, mcpForHdrRows, routeStr,
                                            composePreCapCount, sections };
-    // C3 — pay for the handle in rows ONLY where that makes the answer fit (the CLI twin's rule, runForLens). The PAID pass runs
-    // first, so the payable case is the answer it always was; when that answer still lands past budget_tokens — and this surface
-    // overshoots on its own (the header bytes its ledger exempts), so a capped answer under a budget nearly always does — the
-    // rows it dropped bought nothing, and the UNPAID pass is served instead: the rows the cut alone leaves, the handle riding
-    // unpaid, over_ceiling="1" (priceForTaskRoot). Both passes share the one ranking above; only the assembly re-runs.
+    // C3 (completed 2026-10-08) — drop a row to pay for the handle ONLY where dropping it is what makes the answer fit (the CLI
+    // twin's rule, runForLens). The UNPAID pass runs first: every row the cut leaves + the handle; when it fits (or nothing is
+    // capped under a budget) it is served and nothing is paid. Only when it lands past budget_tokens does the PAID pass run, and
+    // it is served only when IT fits — paying is what made it fit. Otherwise (this surface overshoots on its own: the header
+    // bytes its ledger exempts) the unpaid answer is served: the cut's rows, the handle riding unpaid, over_ceiling="1"
+    // (priceForTaskRoot). Both passes share the one ranking above; only the assembly re-runs.
     const auto estOf = []( std::size_t docBytes )
     {
         std::size_t est = 0;
@@ -2479,21 +2480,30 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
         return est;
     };
     const std::optional<RedactCounts> tallyAtEntry = redact != nullptr ? std::optional<RedactCounts>( *redact ) : std::nullopt;
-    McpForAssembly chosen = assembleMcpFor( assemblyIn, /*payFromRows=*/true, headerStr, legoStr, composeStr, legoScoped, legoPreCapCount );
+    McpForAssembly chosen = assembleMcpFor( assemblyIn, /*payFromRows=*/false, headerStr, legoStr, composeStr, legoScoped, legoPreCapCount );
     if( !chosen.doc )
     {
         return std::nullopt;
     }
     if( budgetTokens > 0 && chosen.cut.hasContinuation && estOf( chosen.doc->size() ) > budgetTokens )
     {
+        const std::optional<RedactCounts> tallyUnpaid = redact != nullptr ? std::optional<RedactCounts>( *redact ) : std::nullopt;
         if( tallyAtEntry )
         {
             *redact = *tallyAtEntry;   // the summary counts the rows of the ONE answer served
         }
-        chosen = assembleMcpFor( assemblyIn, /*payFromRows=*/false, headerStr, legoStr, composeStr, legoScoped, legoPreCapCount );
-        if( !chosen.doc )
+        McpForAssembly paid = assembleMcpFor( assemblyIn, /*payFromRows=*/true, headerStr, legoStr, composeStr, legoScoped, legoPreCapCount );
+        if( !paid.doc )
         {
             return std::nullopt;
+        }
+        if( estOf( paid.doc->size() ) <= budgetTokens )
+        {
+            chosen = std::move( paid );
+        }
+        else if( tallyUnpaid )
+        {
+            *redact = *tallyUnpaid;   // the unpaid answer is served: its tally
         }
     }
     std::string out = std::move( *chosen.doc );

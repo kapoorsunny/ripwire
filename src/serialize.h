@@ -4531,9 +4531,10 @@ struct SigsCutReport
 //     one fitted (compactlegendcheck P4), and the rungs cannot shed a clause that is the cut's only disclosure. The e=
 //     ruling's shape: under a tight ceiling the extras go, the one thing that must stay (here the call) stays and is paid
 //     for. MCP keeps its clause (next_budget_tokens= has no other reading).
-//     …PAID ONLY WHERE PAYING MAKES THE ANSWER FIT (orchestrator ruling C3, 2026-10-07, CLI and MCP alike): an answer that
-//     lands past its ceiling paid or not loses rows for nothing, so its caller re-renders with payFromRows=false — the rows
-//     the cut alone leaves, the whole handle unpaid, over_ceiling="1" on the root (kForSigsUnpaidOverCeilingNote).
+//     …PAID ONLY WHERE PAYING IS WHAT MAKES THE ANSWER FIT (orchestrator ruling C3, 2026-10-07/08, CLI and MCP alike): the
+//     caller renders with payFromRows=false first (the rows the cut alone leaves, the whole handle unpaid) and serves that
+//     when it fits; it pays only when that answer lands past its ceiling and the paid one does not. Past it either way, the
+//     unpaid answer ships with over_ceiling="1" on the root (kForSigsUnpaidOverCeilingNote).
 // THE RESUME INDEX, next_offset= (present when rows were DROPPED, not only shrunk): the candidate index the cut starts at —
 // the last printed row's 1-based rank in the (score desc, id asc) candidate order, so a pseudo-symbol slot that prints no
 // row cannot skew it the way a printed-row count would. The root's at= stamps the index it was cut from; a continuation
@@ -4748,8 +4749,8 @@ inline std::size_t sigsCutPlanReserve( const SigsCutContinuation* req ) noexcept
 // up `cost` bytes, so block + continuation never exceeds the block the cut alone left — in either dialect, whatever the plan's
 // slack (reserving it in the plan let that slack absorb it and the bundle grow). Returns the bytes the rank 1..4 floor could
 // NOT give up (0 = paid in full); the continuation rides regardless (orchestrator ruling 2026-10-07) and the caller labels it.
-// Called only where the caller lets rows pay (sigsCutPaysFromRows): a caller whose answer lands past its ceiling paid or not
-// re-renders with payFromRows=false (ruling C3), so no row is dropped for a handle that cannot make the answer fit.
+// Called only where the caller lets rows pay (sigsCutPaysFromRows): its callers render that way only after the unpaid answer
+// landed past its ceiling, and serve the result only when it fits (ruling C3), so no row is dropped unless that buys the fit.
 template<class EntryT, class FileT, class CostFn>
 inline std::size_t paySigsContinuationFromRows( std::vector<EntryT>& entries, std::vector<FileT>& files, std::size_t& total,
                                                 std::size_t cost, CostFn entryCost )
