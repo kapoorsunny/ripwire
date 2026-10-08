@@ -188,7 +188,10 @@ class Server:
         env.update(extra_env)
         self.err = open(errpath, "w+")
         self.errpath = errpath
-        self.p = subprocess.Popen([binp, "--mcp"] + args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.err,
+        # --mcp-legend=inline: every answer carries its root facts on its own root, the spelling the one-shot CLI oracle
+        # writes. The default session posture moves them to a closing <about legend="ref"/> after the first answer; its
+        # equality with the CLI is held by mcpincrementalcheck's and pathgapcheck's posture twins and by legendrefcheck.
+        self.p = subprocess.Popen([binp, "--mcp", "--mcp-legend=inline"] + args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.err,
                                   text=True, env=env)
         self.id = 0
         self.timing_seen = 0
