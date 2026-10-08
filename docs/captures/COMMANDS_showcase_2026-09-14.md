@@ -5351,7 +5351,7 @@ ripwire: --run-timeout=SECONDS modifies --run-trace — pass it too (e.g. ripwir
 *The session legend dictionary the MCP server serves as ripwire://legend-dict/full — one definition per line, headed by its dictv= version; no corpus needed. =roster lists the completeness attributes it defines.*
 
 `````
-ripwire legend dictionary ripwire.dict/v1 dictv=04d7833c60d2d5bd entries=784
+ripwire legend dictionary ripwire.dict/v1 dictv=0726f4f1f414afd5 entries=785
 <about legend="ref" dict= dictv=>: the answer's rows come first; its root keeps only task= changed= from= to=, and this LAST child carries every other root attribute unchanged (schema= included); legend="ref": a definition is sent once per session (this dictionary's core, or the first answer that ne … [line truncated: 83 more bytes on this line]
 schema=ripwire.KEY/v1: the line ripwire.KEY/v1 below reads the answer's rows
 window: shown= total= capped= has_more= next_offset= offset= limit= page a list (capped=1 cut; next_offset= pastes as offset=)
@@ -5381,7 +5381,7 @@ ripwire.impact/v1 <impact>: transitive blast radius of of=: <s t= n= p=> reach s
 ripwire.path/v1 <path>: one DIRECTED call path from= to to=, each <s t= n= p=> a hop; reachable=0 hops=0 when none
 ripwire.connect/v1 <connect>: minimal joining subgraph: <g> groups, <t> terminals, <s connects=> joins, <e f= t=> edges, <unconnected>
 ripwire.at/v1 <at>: enclosing-definition chain at p=:l=: sym= innermost, chain= outermost-first, <s n= t= l= el=> spans
-… [755 more display lines; full output is 77894 bytes on 785 raw line(s)]
+… [756 more display lines; full output is 78001 bytes on 786 raw line(s)]
 `````
 
 ## `./build/ripwire . --lint --lint-select=cache-`
@@ -5458,6 +5458,47 @@ ripwire.at/v1 <at>: enclosing-definition chain at p=:l=: sym= innermost, chain= 
 <f rule="atom-implicit-predicate" p="bench/bench_chase_ab.cpp:234" in="main">delta &lt; 0.02 &amp;&amp; delta &gt; -0.02</f>
 <f rule="magic-number" p="bench/bench_chase_ab.cpp:234" in="main">0.02</f>
 … [724 more display lines; full output is 67006 bytes on 1 raw line(s)]
+`````
+
+## `./build/ripwire . --lint --lint-select=goto --lint-max-per-rule=4`
+
+*A rule that spends its own match budget (here 4, set BELOW the default 5000 so the floor shows on this repo): goto carries count_capped="1", its count= is a FLOOR, and the root names the call that counts the rest — findings_next= re-runs only the floored rules under a 10x budget.*
+
+`````
+<!-- ripwire lint schema=ripwire.lint/v1: AST-only checks, facts not gates: <rule name= count= shown_rows= rows_capped= count_capped=> of <f rule= p= in=>. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). findings_capped=/rows_capped=/count_capped=: 1 = cut. counts_floor=1: every count is a FLOOR, never a total. root=: p= relative to it. findings=N: findings over the printed rules; a floor when findings_capped=1. findings_next=: the call counting the floored rules' rest (count_capped=1 rules only, 10x per-rule budget). -->
+<lint schema="ripwire.lint/v1" findings="4" shown="4" capped="1" total="4" has_more="0" next_offset="4" offset="0" limit="0" counts_floor="1" findings_capped="1" findings_next="--lint --lint-select=goto --lint-max-per-rule=40" selected="1 of 39" select="goto" root=".">
+<rule name="goto" count="4" shown_rows="4" rows_capped="0" count_capped="1"/>
+<f rule="goto" p="src/clones.h:909" in="findClonesType3">goto done;</f>
+<f rule="goto" p="src/infra/timsort.hpp:508" in="mergeLo">goto epilogue;</f>
+<f rule="goto" p="src/infra/timsort.hpp:517" in="mergeLo">goto epilogue;</f>
+<f rule="goto" p="src/infra/timsort.hpp:534" in="mergeLo">goto epilogue;</f>
+</lint>
+`````
+
+## `./build/ripwire . --lint --lint-select=goto --lint-max-per-rule=40`
+
+*Pasting that findings_next=: the same rule under a 10x budget counts its true total — no count_capped=, no findings_next=.*
+
+`````
+<!-- ripwire lint schema=ripwire.lint/v1: AST-only checks, facts not gates: <rule name= count= shown_rows= rows_capped= count_capped=> of <f rule= p= in=>. window: shown= capped= (capped=1 cut). rows_capped=: 1 = cut. root=: p= relative to it. findings=N: findings over the printed rules; a floor when findings_capped=1. -->
+<lint schema="ripwire.lint/v1" findings="15" shown="15" capped="0" selected="1 of 39" select="goto" root=".">
+<rule name="goto" count="15" shown_rows="15" rows_capped="0"/>
+<f rule="goto" p="src/clones.h:909" in="findClonesType3">goto done;</f>
+<f rule="goto" p="src/infra/timsort.hpp:508" in="mergeLo">goto epilogue;</f>
+<f rule="goto" p="src/infra/timsort.hpp:517" in="mergeLo">goto epilogue;</f>
+<f rule="goto" p="src/infra/timsort.hpp:534" in="mergeLo">goto epilogue;</f>
+<f rule="goto" p="src/infra/timsort.hpp:541" in="mergeLo">goto epilogue;</f>
+<f rule="goto" p="src/infra/timsort.hpp:551" in="mergeLo">goto epilogue;</f>
+<f rule="goto" p="src/infra/timsort.hpp:558" in="mergeLo">goto epilogue;</f>
+<f rule="goto" p="src/infra/timsort.hpp:633" in="mergeHi">goto epilogue;</f>
+<f rule="goto" p="src/infra/timsort.hpp:644" in="mergeHi">goto epilogue;</f>
+<f rule="goto" p="src/infra/timsort.hpp:663" in="mergeHi">goto epilogue;</f>
+<f rule="goto" p="src/infra/timsort.hpp:670" in="mergeHi">goto epilogue;</f>
+<f rule="goto" p="src/infra/timsort.hpp:683" in="mergeHi">goto epilogue;</f>
+<f rule="goto" p="src/infra/timsort.hpp:689" in="mergeHi">goto epilogue;</f>
+<f rule="goto" p="test/sliceflowsensfix/disclosed.cpp:22" in="cd03">goto done;</f>
+<f rule="goto" p="test/unreachablefix/dead.cpp:48" in="withGoto">goto done;</f>
+</lint>
 `````
 
 ## `./build/ripwire . --lint --lint-select=cach-`

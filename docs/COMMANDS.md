@@ -2504,14 +2504,30 @@ $ ./build/ripwire . --lint --lint-ignore=naming-,cache-
 
 ### `--lint-max-per-rule=N`
 
-**Answers:** (with --lint) raise each rule's match budget above the default 5000 (with --lint / --lint-rules) each rule's raw-capture budget;
+**Answers:** (with --lint / --lint-rules) set each rule's match budget, below or above the default 5000.
 
-the default (5000) is a runaway guard, not a target. A rule that spends it carries count_capped="1" (its count= is a FLOOR) and the root names the call that counts the rest: findings_next= (SARIF: run properties findingsNext) re-runs only the floored rules under a 10x budget; a re-run still floored names its own. Raising it costs time and memory in proportion to the matches kept
+The default is a runaway guard, not a target. A rule that spends its budget carries count_capped="1" (its count= is a FLOOR) and the root names the call that counts the rest: findings_next= (SARIF: run properties findingsNext, --sarif kept) re-runs only the floored rules under a 10x budget; a re-run still floored names its own. Raising it costs time and memory in proportion to the matches kept
+
+**Try it**
+
+_A rule that spends its own match budget (here 4, set BELOW the default 5000 so the floor shows on this repo): goto carries count_capped="1", its count= is a FLOOR, and the root names the call that counts the rest — findings_next= re-runs only the floored rules under a 10x budget._
+
+```
+$ ./build/ripwire . --lint --lint-select=goto --lint-max-per-rule=4
+<!-- ripwire lint schema=ripwire.lint/v1: AST-only checks, facts not gates: <rule name= count= shown_rows= rows_capped= count_capped=> of <f rule= p= in=>. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). findings_capped=/rows_capped=/count_capped=: 1 = cut. counts_floor=1: every count is a FLOOR, never a total. root=: p= relative to it. findings=N: findings over the printed rules; a floor when findings_capped=1. findings_next=: the call counting the floored rules' rest (count_capped=1 rules only, 10x per-rule budget). -->
+<lint schema="ripwire.lint/v1" findings="4" shown="4" capped="1" total="4" has_more="0" next_offset="4" offset="0" limit="0" counts_floor="1" findings_capped="1" findings_next="--lint --lint-select=goto --lint-max-per-rule=40" selected="1 of 39" select="goto" root=".">
+<rule name="goto" count="4" shown_rows="4" rows_capped="0" count_capped="1"/>
+<f rule="goto" p="src/clones.h:909" in="findClonesType3">goto done;</f>
+<f rule="goto" p="src/infra/timsort.hpp:508" in="mergeLo">goto epilogue;</f>
+<f rule="goto" p="src/infra/timsort.hpp:517" in="mergeLo">goto epilogue;</f>
+<f rule="goto" p="src/infra/timsort.hpp:534" in="mergeLo">goto epilogue;</f>
+</lint>
+```
 
 **Caveats (stated by the binary):**
 
-- the default (5000) is a runaway guard, not a target.
-- A rule that spends it carries count_capped="1" (its count= is a FLOOR) and the root names the call that counts the rest: findings_next= (SARIF: run properties findingsNext) re-runs only the floored rules under a 10x budget;
+- The default is a runaway guard, not a target.
+- A rule that spends its budget carries count_capped="1" (its count= is a FLOOR) and the root names the call that counts the rest: findings_next= (SARIF: run properties findingsNext, --sarif kept) re-runs only the floored rules under a 10x budget;
 - a re-run still floored names its own.
 
 ### `--sarif`
@@ -2539,7 +2555,7 @@ $ ./build/ripwire . --lint --sarif
 ... [21 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--legend`
+**Shaped by:** `--lint-max-per-rule`, `--legend`
 
 **Caveats (stated by the binary):**
 
@@ -4410,7 +4426,7 @@ _The session legend dictionary the MCP server serves as ripwire://legend-dict/fu
 
 ```
 $ ./build/ripwire . --legend-dict
-ripwire legend dictionary ripwire.dict/v1 dictv=04d7833c60d2d5bd entries=784
+ripwire legend dictionary ripwire.dict/v1 dictv=0726f4f1f414afd5 entries=785
 <about legend="ref" dict= dictv=>: the answer's rows come first; its root keeps only task= changed= from= to=, and this LAST child carries every other root attribute unchanged (schema= included); legend="ref": a definition is sent once per session (this dictionary's core, or the first answer that ne … [line truncated: 83 more bytes on this line]
 schema=ripwire.KEY/v1: the line ripwire.KEY/v1 below reads the answer's rows
 window: shown= total= capped= has_more= next_offset= offset= limit= page a list (capped=1 cut; next_offset= pastes as offset=)
