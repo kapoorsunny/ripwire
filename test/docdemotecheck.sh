@@ -248,6 +248,19 @@ grep -q 'doc_tier="' "$TMP/conceptc.xml" \
 diff -q "$TMP/concept.xml" "$ROOT/test/docdemotegolden_for.xml" >/dev/null \
     && ok "(f) conceptual --for byte-identical to the pre-change golden" \
     || no "(f) conceptual --for drifted from test/docdemotegolden_for.xml"
+# (f) present-only via clause: the header's via="name" reading rides only when a row carries via="name". On this
+# fixture the one hop whose only callee is name-only (request_page -> evict_one) takes no <h> slot (the hop-slot rule,
+# test/forsigspancheck.sh (H)), so no row is left to carry the attribute and the clause must not ride either.
+if [ -s "$TMP/concept.xml" ] && grep -q '<ctx ' "$TMP/concept.xml"; then
+    # a ROW's attribute (an element's), not the legend's own spelling of it (`via="name" on a <c> row`)
+    if grep -q 'matched by name alone' "$TMP/concept.xml" && ! grep -Eq '<[a-z]+ [^<>]*via="name"' "$TMP/concept.xml"; then
+        no "(f) the via=\"name\" legend clause rides with no via=\"name\" row in the answer (a hop dropped by the hop-slot rule still counted)"
+    else
+        ok "(f) the via=\"name\" legend clause rides only beside a via=\"name\" row"
+    fi
+else
+    no "(f) conceptual --for produced no <ctx> root, so the present-only via arm proves nothing"
+fi
 
 # ── (g) --recall untouched ──────────────────────────────────────────────────────────────────────────────
 diff -q "$TMP/recall.xml" "$ROOT/test/docdemotegolden_recall.golden" >/dev/null \

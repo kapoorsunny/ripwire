@@ -2707,6 +2707,9 @@ std::optional<int> runForLens( const MainDispatch& d )
             if( autoBundleMode && plan.compact )
             {
                 viaIds = forCompactHopIds( lensSurfaceIds, lensRank );
+                // only the hops packHops gives a slot can carry a row (the hop-slot rule drops a hop whose every callee
+                // edge is name-only, so its via="name" rows never print)
+                std::erase_if( viaIds, [ & ]( rw::NodeId id ) { return !rw::hopSlotHasProvenEdge( g.outOff, g.outNameOnly, id ); } );
             }
             else if( autoBundleMode && plan.autoBodies )
             {

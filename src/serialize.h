@@ -2711,6 +2711,27 @@ inline bool namesOnlyOutAny( const std::vector<std::uint32_t>& outOff, const std
     return false;
 }
 
+// THE HOP-SLOT RULE as one predicate (gate test/forsigspancheck.sh (H)): a candidate earns a packHops <h> slot only with
+// at least one callee edge that is NOT name-only (empty bits: a graph with no name-only edge, so every edge is proven).
+// packHops' slot test and --for's header question "may a hop row carry via=name?" (verbs_for.h) both read it, so a hop
+// the rule drops can no longer make the header define an attribute no row carries (test/docdemotecheck.sh (f)).
+inline bool hopSlotHasProvenEdge( const std::vector<std::uint32_t>& outOff, const std::vector<std::uint8_t>& outNameOnly,
+                                  NodeId id ) noexcept
+{
+    const std::uint32_t outDeg = ( std::size_t( id ) + 1 < outOff.size() ) ? outOff[ id + 1 ] - outOff[ id ] : 0u;
+    if( outDeg == 0 )
+    {
+        return false;
+    }
+    if( outNameOnly.empty() )
+    {
+        return true;
+    }
+    ASSUME( outOff[ id + 1 ] <= outNameOnly.size(), "the hedge bits are one per flattened edge (graph.h buildGraph)" );
+    return !std::all_of( outNameOnly.begin() + outOff[ id ], outNameOnly.begin() + outOff[ id + 1 ],
+                         []( std::uint8_t bit ) { return bit != 0; } );
+}
+
 inline void serialize( std::FILE* out, const IngestResult& ing, const std::vector<float>& rank,
                        const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
                        int topK, bool mostImportantLast = false,
@@ -7110,15 +7131,12 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
         // stays, and that is the HONEST trade rather than the cheap one: `capped="1"` alone cannot say
         // WHY a candidate has no row, and folding "has no edges" into "the budget stopped" would make
         // a fact about the graph look like a fact about the budget.
-        const std::uint32_t outDeg = ( id + 1 < outOff.size() ) ? outOff[ id + 1 ] - outOff[ id ] : 0u;
         // THE HOP-SLOT RULE (gate test/forsigspancheck.sh (H)): a slot needs at least one PROVEN callee edge. A candidate
         // whose every out-edge was bound by name alone (an off-topic getter whose one callee row was `bag.lookup()` on an
         // untyped local, measured on a graded answer) spent the slot on a hedged edge; it now counts with noedge=, whose
-        // reading is "no RESOLVED callee found" — a name-only binding is a hedge, not a resolution.
-        const bool noProvenEdge = outDeg > 0 && !outNameOnly.empty()
-                               && std::all_of( outNameOnly.begin() + outOff[ id ], outNameOnly.begin() + outOff[ id + 1 ],
-                                               []( std::uint8_t bit ) { return bit != 0; } );
-        if( outDeg == 0 || noProvenEdge )
+        // reading is "no RESOLVED callee found" — a name-only binding is a hedge, not a resolution. No out-edge at all
+        // counts the same way (hopSlotHasProvenEdge).
+        if( !hopSlotHasProvenEdge( outOff, outNameOnly, id ) )
         {
             ++noEdgeCount;
             continue;
