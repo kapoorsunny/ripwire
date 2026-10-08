@@ -722,7 +722,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // PATH-GAP (src/pathgaps.h kPathGapsLegend), present only on a reachable=0 answer whose search met a gap. Each says what it does NOT
     // mean in the same breath (checklist 3): not proof of no path, a row is never a hop, and which calls are not counted.
     { "searched", "searched=N: reachable=0, but the search from from= (N symbols over resolved call edges) is INCOMPLETE: not proof of no path", false, "path", MapHeaderRead::No, {}, "path" },
-    { "gaps", "gaps=kind:N,...: calls there with no edge (declined: nothing chose a candidate; unresolved), a function handed off as a value, a call through a slot; ambiguous and undefined-name calls not counted", true, {}, MapHeaderRead::No, {}, "path" },
+    { "gaps", "gaps=kind:N,...: calls there with no edge (declined: nothing chose a candidate; unresolved), a function handed off as a value, a call through a slot; ambiguous, via=name (only listed candidates followed) and undefined-name calls not counted", true, {}, MapHeaderRead::No, {}, "path" },
     { "gap_syms", "gap_syms=N: searched symbols carrying gaps; <gap t= n= p= gaps=> rows, nearest from= first, are where the search could not see, never a hop; gap_syms_capped=1 more than shown", false, "path", MapHeaderRead::No, {}, "path" },
     // quality-delta: src/verbs_quality.h (root emit) + src/quality.h identityDisclosure
     { "stale", "stale=N: ack ledger rows whose target no longer applies (sa rows); never gating", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
