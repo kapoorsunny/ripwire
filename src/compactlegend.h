@@ -838,6 +838,17 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "unindexed_hits", "unindexed_hits=N: hits in off-index files, NOT in hits=/total=; listed in the trailing unindexed element", false, "grep", MapHeaderRead::No, {}, "grep" },
     { "callers", "callers=N: 1-hop distinct callers of this name, all same-named defs (a FLOOR)", true, "enc", MapHeaderRead::No, {}, "grep" },
     { "cx", "cx=N: cyclomatic complexity, max over same-named defs; absent when 0", true, "enc", MapHeaderRead::No, {}, "grep" },
+    // count-floor (src/countfloor.h): the row's own floor marker, emitted only beside evidence of a miss for THAT row.
+    { "callers_floor", "callers_floor=1: callers= may be short for this row: a declined or unbound call spelled like it, a value use, or a kind used by reading/naming it (var, class, struct, interface); not proof more callers exist; absent = no such evidence", true, "enc", MapHeaderRead::No, {}, "grep" },
+    { "floor_next", "floor_next=: the call that lists what that count could not see (the uses verb; the literal scan where reads are not indexed)", true, "enc", MapHeaderRead::No, {}, "grep" },
+    // count-floor + CALLSITE-LINE on safe-delete (src/verbs_navigate.h runSafeDelete): root markers beside the counts they qualify.
+    { "callers_floor", "callers_floor=1: callers= and impact_reaches= may be short (a declined, unbound or value use, or a kind read not called); not proof of more", false, {}, MapHeaderRead::No, {}, "safe-delete" },
+    { "uses_floor", "uses_floor=1: this kind's reads and type mentions are not indexed in this run; uses= does not count them", false, {}, MapHeaderRead::No, {}, "safe-delete" },
+    { "risk", "risk=unmodelled: nothing found, but the counts cannot see this kind's uses; next= lists them", false, "safe-delete", MapHeaderRead::No, "unmodelled", "safe-delete" },
+    { "sites_l", "c sites_l=: its call-site lines (p= is the caller's def line); not proof each binds here", true, "c", MapHeaderRead::No, {}, "safe-delete" },
+    // count-floor on the targeted lego verb (serialize.h packLego, countfloor.h implementorFloors): present-only.
+    { "implementors_floor", "implementors_floor=1: an extends clause spelled like this interface bound nowhere; implementors= may be short (not proof of another)", true, "iface", MapHeaderRead::No, {}, "lego" },
+    { "floor_next", "floor_next=: lists every extends site of the name, bound or not", true, "iface", MapHeaderRead::No, {}, "lego" },
     // layout: src/layout.h writeLayout / writeLayoutDef
     { "sym", "sym=: the aggregate name asked for", false, "layout", MapHeaderRead::No, {}, "layout" },
     { "found", "found=1: a C-family struct/class/union body was located for sym=", false, "layout", MapHeaderRead::No, {}, "layout" },

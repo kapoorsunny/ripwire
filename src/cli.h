@@ -335,7 +335,7 @@ struct Config
                                                             // computes — 1-hop callers, the transitive --impact blast radius, every --uses
                                                             // read/write/import/call/extends site, how much of the radius the tested= lens
                                                             // covers, and --dead-code's own zero-caller/internal-linkage shape at defs=1. FACTS only:
-                                                            // risk= names what was found (none-found/uses-exist/untested-radius), never a
+                                                            // risk= names what was found (none-found/uses-exist/untested-radius/unmodelled), never a
                                                             // go/no-go verdict. file:name disambiguates like --around/--lego.
     std::string_view sliceSpec;                            // --slice=SYM[:VAR] (lane/paper-slice): NAME-BASED intra-procedural def-use
                                                             // slice of VAR inside the ONE uniquely-resolved definition SYM (multiple defs
@@ -1889,7 +1889,11 @@ inline constexpr char kHelpHead[] =
         "                               whose own calls include an ambiguously-resolved one (g.ambOut) — a caveat, not a count of\n"
         "                               proven-wrong edges. FACTS only: risk= names what was found — none-found (zero callers AND\n"
         "                               zero uses), untested-radius (a radius exists and none of it is test-covered), or\n"
-        "                               uses-exist (a radius exists and some of it is tested) — never a go/no-go verdict.\n"
+        "                               uses-exist (a radius exists and some of it is tested) — never a go/no-go verdict; unmodelled\n"
+        "                               when nothing was found for a kind used by reading or naming it (a variable, class, struct)\n"
+        "                               whose uses those counts cannot see. callers_floor=/uses_floor= mark a count the index holds\n"
+        "                               evidence of a miss for, and next= is the call that lists the rest. A caller row's sites_l= is\n"
+        "                               its call-site LINES (p= stays the line where the caller is defined).\n"
         "    --slice=SYM[:VAR]          trace one variable's definitions and uses inside one function\n"
         "                               NAME-BASED intra-procedural def-use slice of variable VAR inside the ONE uniquely-resolved\n"
         "                               definition SYM (statement-level def-use edges as a queryable primitive — the ARISE result,\n"

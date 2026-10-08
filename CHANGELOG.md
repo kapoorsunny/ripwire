@@ -781,6 +781,34 @@ conversion `TestName( s )` keeps its caller edge), `--graph-query`'s `kind()` ac
 gains a clause for them only on a tree that has one. Only Go is split: other languages' typedefs, aliases and enums still
 read `t="struct"`. `kParserVer` 143 → 145, so every ingest cache is re-indexed once. Gate: `test/gokindcheck.sh`.
 
+### Fixed — a count the index cannot vouch for is marked a floor beside the number; safe-delete rows carry the call line
+
+A zero printed as a total read as "nothing uses this" where the index itself held evidence of a miss:
+`--grep`'s `<enc callers="0">` on a method whose only call the resolver declined to bind, or on a module variable that
+other files read (a call count cannot see a read); `--safe-delete` answering `callers="0" uses="0" risk="none-found"`
+on a C struct whose type mentions are not indexed; and the `--for` bundle's `<iface implementors=>`, which counted the
+implementor rows it LISTED after narrowing to its own files (`implementors="1"` on a tree with six).
+
+- **Row floors.** `callers_floor="1"` (grep `<enc>` and the MCP `grep` `enclosing` rows, `--safe-delete`) and
+  `implementors_floor="1"` (`<lego>` rows, bundle and `--lego`) ride beside the count exactly when the index holds
+  evidence of a miss for that definition: a declined call that named it, a call or extends clause spelled like it that
+  bound to no definition, a use as a value, or a kind used by reading or naming it (a variable, class, struct,
+  interface). `floor_next=` (rows) / `next=` (`--safe-delete`) is the call that lists the rest — the uses verb, or the
+  literal grep where the language's reads are never indexed. A count with no such evidence stays a plain total: a
+  static function nobody calls still reads `callers="0" risk="none-found" dead_code_candidate="1"`, and a recursive
+  function's call to itself counts as bound (the graph records no self-edge).
+- **`--safe-delete`.** `uses_floor="1"` when the definition's uses are reads or type mentions this run did not index,
+  and `risk="unmodelled"` (new value) when nothing was found for such a kind — never `none-found`. Each caller row
+  carries `sites_l=`, the ascending call-site lines spelled like the symbol (the edit-check verb's own pass), beside
+  `p=`, which stays the line where the caller is defined.
+- **`--for` `<lego>`.** `implementors=` is now the lego verb's own count; a shorter list adds `implementors_shown=` and
+  `implementors_next="--lego=FILE:NAME"`. The MCP `for` twin now narrows its `<lego>` block with the root prefix the
+  CLI passes; before, it compared root-relative rows against absolute paths and served no `<lego>` at all, so MCP
+  `for` answers on a tree with interfaces now carry that block (up to 12 rows), as the CLI's always did.
+- Every new attribute is defined present-only in the answer that carries it (compact and full dialects). Answers
+  without one are byte-identical (34 argv across three corpora). Gate: `countfloorcheck`.
+
+
 ### Added — MCP `grep` rows carry the matched text and a `fetch_body` handle (CLI parity)
 
 The MCP `grep` hit row was `{file, line, in}`: no matched text, so an agent re-read every file it had just searched, and

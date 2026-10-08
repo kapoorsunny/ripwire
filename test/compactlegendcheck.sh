@@ -500,6 +500,12 @@ probeFor()
 # --impact=distance probe; 797 on the base binary b343b988). The answer now carries by_depth= on the root and d= on its
 # first <s> row (the listing runs nearest first, graph.h orderByDepthThenRank), and the compact legend reads both: the
 # present-only <s d=N> row (+64 B with its separator) and by_depth= (+63 B). Both are absent at reaches="0". No other schema moved.
+# RE-PINNED 2026-10-04 (lane count-floor-068, CALLSITE-LINE): ripwire.safe-delete/v1 720 -> 820 (measured 805, the
+# --safe-delete=distance probe; 715 on the base binary 255dc199). Each caller row now carries sites_l=, its call-site LINES
+# beside p= (the caller's definition line): an edit decision needs the lines to open, and graded answers that named every
+# caller were scored wrong for printing only definition lines. The compact legend reads it (+90 B with its separator: what
+# it is, and that it is not proof each line binds to this definition). callers_floor=/uses_floor=/risk=unmodelled are
+# present-only and ride neither this probe nor any other pinned one. No other schema moved.
 # RE-PINNED BACK 2026-09-30 (train22 fixups, review M2): ripwire.scan-skills/v1 520 -> 380 (measured 369). An earlier commit on
 # this branch pinned 520 from the developer's own HOME (a Codex install's .py helpers made the answer carry
 # code_not_flow_scanned=); the gate now runs under an empty HOME of its own, so the probe measures the same bytes everywhere.
@@ -566,7 +572,7 @@ ripwire.callers/v1               330   317
 ripwire.callees/v1                500   484
 ripwire.uses/v1                   510   500
 ripwire.batch/v1                  250   238
-ripwire.safe-delete/v1           720   708
+ripwire.safe-delete/v1           820   805
 ripwire.at/v1                    180   161
 ripwire.from-trace/v1            1300  1281
 ripwire.plan-lint/v1              570   551
@@ -584,6 +590,39 @@ pinFor()
 {
     printf '%s\n' "$PIN_TABLE" | awk -v schema="$1" '$1 == schema { printf "%s", $2; exit }'
 }
+# (U-twin) the pre-2026-10-04 ripwire.safe-delete/v1 pin, kept (PROCESS rule 4: a re-pin keeps a twin for the old path).
+# The 720 -> 820 re-pin above paid for ONE reading, the caller row's sites_l= (+90 B with its separator). Everything else
+# in that prose legend still fits the OLD 720 B: the same --safe-delete=distance probe, with exactly that reading cut out
+# of a copy of the compact answer, is measured by the same `leg prose` operand the (U) arm uses. The cut is taken only when
+# a caller row carries sites_l= AND the reading occurs once; any other premise FAILs (a cut that removes nothing proves nothing).
+( cd "$REPO" && "$BIN" . --safe-delete=distance --legend=compact >"$TMP/sdt.c" 2>/dev/null </dev/null \
+  && "$BIN" . --safe-delete=distance --legend=full >"$TMP/sdt.full" 2>/dev/null </dev/null ); rcSdt=$?
+sdtCut="$( python3 - "$TMP/sdt.c" "$TMP/sdt.cut" <<'PY'
+import re, sys
+doc = open( sys.argv[1], encoding = "utf-8", errors = "replace" ).read()
+reading = " c sites_l=: its call-site lines (p= is the caller's def line); not proof each binds here."
+body = re.sub( r"<!--.*?-->", "", doc, flags = re.S )
+if not re.search( r'<c [^>]*sites_l="[0-9]', body ):
+    print( "NOPREMISE no caller row carries sites_l=" ); sys.exit( 0 )
+if doc.count( reading ) != 1:
+    print( "NOPREMISE the sites_l= reading occurs %d times, not once" % doc.count( reading ) ); sys.exit( 0 )
+open( sys.argv[2], "w", encoding = "utf-8" ).write( doc.replace( reading, "", 1 ) )
+print( len( reading.encode() ) )
+PY
+)"
+if [ "$rcSdt" -ne 0 ]; then
+    no "(U-twin) --safe-delete=distance exited $rcSdt — the twin cannot measure"
+else
+    case "$sdtCut" in
+        NOPREMISE*) no "(U-twin) safe-delete twin cannot measure: ${sdtCut#NOPREMISE }" ;;
+        *)  sdtRest="$( leg prose "$TMP/sdt.cut" "$TMP/sdt.full" )"
+            if [ -n "$sdtRest" ] && [ "$sdtRest" -eq "$sdtRest" ] 2>/dev/null && [ "$sdtRest" -le 720 ]; then
+                ok "(U-twin) safe-delete compact prose minus the sites_l= reading ($sdtCut B) is $sdtRest B <= 720 B (the pre-CALLSITE-LINE pin)"
+            else
+                no "(U-twin) safe-delete compact prose minus the sites_l= reading ($sdtCut B) is ${sdtRest:-?} B > 720 B — the rest re-inflated"
+            fi ;;
+    esac
+fi
 nXml=0; nXmlBad=0; nRefuse=0; nSkip=0; loopBytes=0; xmlVerbs=""; nDefBad=0
 # (UG) rv-r1-L1-2: EVERY XML verb the flag universe reaches, EVERY instance of every attribute its DEFAULT answer carries,
 # defined `name=` in that answer's own legend (legendcoveragecheck (G)'s predicate, on this gate's fixture). No floor.

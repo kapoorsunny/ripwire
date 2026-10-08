@@ -10,6 +10,7 @@
 #include "memguard.h"   // #350: memguard::limitSpelling — memory_limit= is spelled as the --max-memory value that raises it
 #include "extentsuspect.h"   // extent honesty: extent_suspect= reason spellings (extent::extentSuspectReasons)
 #include "nextverb.h"   // P3 (L7): next= on the top-ranked <d> row
+#include "countfloor.h"   // count-floor: implementorFloors — the <iface> implementors_floor= evidence
 #include "arch.h"        // P3: builtinLayer() — the file-node layer= tag
 #include "graph.h"     // H6/F2: definitionCountOfName — the ONE resolver behind --lego's defs= single-pick disclosure
 #include "graphlegend.h"   // R-E fix (2026-08-19): rw::rootRelPathsLegend — the ONE root= definition
@@ -7266,6 +7267,17 @@ inline constexpr std::string_view kForSectionStubLegend =
     "pre-cap row count, shown=\"0\" capped=\"1\" (nothing rendered here), next= names the sections=lego,compose flag "
     "that restores both sections byte-identically in one call";
 
+// count-floor: the ranked <lego> block's count attributes (packLego's graphImplementors mode), defined present-only by the
+// same post-render splice as the stub clause above, in both --for dialects and the MCP twin. No "--" (G4).
+inline constexpr std::string_view kForLegoCountLegend =
+    "; iface implementors=N counts every type an extends/implements clause binds to it (the lego verb's count), never the rows "
+    "listed: implementors_shown=K only K impl rows here, implementors_next= lists all; implementors_floor=1 an extends clause "
+    "spelled like it bound nowhere, so N may be short (not proof of another), floor_next= lists every extends site";
+
+// The prefix every attribute kForLegoCountLegend defines starts with (implementors_shown=/_next=/_floor=): a rendered
+// ranked <lego> block holding it needs the clause. Attribute values are escaped, so ` implementors_` can only open one.
+inline constexpr std::string_view kLegoCountAttrPrefix = " implementors_";
+
 // L2 fault-injection fix (independent review, 2026-09-19): packLego/packCompose's out-params give the stub
 // its total= on the buffered (memstream) path, but the ranked --for lens's OPEN_MEMSTREAM DEGRADE PATH
 // (verbs_for.h, legoPreRendered/composePreRendered==false — RIPWIRE_FAULT_CHARGE_BUFFER=1 forces it) never
@@ -7695,14 +7707,23 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
                       std::string_view graphCountFloorAttr = {},   // M15: the TARGETED root's gauge + marker
                                                         // (graphCountFloorAttrXml( g ) — the caller owns the graph);
                                                         // the ranked --for section passes nothing and keeps its shape
-                      std::size_t* outPreCapCount = nullptr )   // L2 (round-1 lever B1): the STUB's total= — this
+                      std::size_t* outPreCapCount = nullptr,    // L2 (round-1 lever B1): the STUB's total= — this
                                                         // function's OWN post-dedup ifaces.size(), before the topN
                                                         // cut below. Written whenever non-null (both modes), so the
                                                         // stub can never assert a count this function did not itself
                                                         // compute (no second, drifting tally — the notes_total
                                                         // precedent this repo already avoids: legoTotal at the JSON
                                                         // call site is a DIFFERENT, pre-dedup count, on purpose).
+                      const std::vector<std::vector<NodeId>>* graphImplementors = nullptr )
+                                                        // count-floor: RANKED mode only — the UNSCOPED graph map. The bundle's
+                                                        // `implementors` is scoped and then narrowed to the rendered sigs' files
+                                                        // (legoImplementorsOnSurface, narrowLegoToRenderedSigs), so its row count
+                                                        // is what is LISTED, not how many there are: `<iface n="Router"
+                                                        // implementors="1">` answered a tree with six. With this map the count is
+                                                        // the targeted --lego=TYPE's own and a short list says so
+                                                        // (implementors_shown= + implementors_next=). Null keeps the old shape.
 {
+    EXPECTS( graphImplementors == nullptr || focusId == kNoNode );   // the targeted verb's map IS the graph's
     const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
     const auto         pathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
     {
@@ -7751,6 +7772,10 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
     if( outPreCapCount != nullptr ) { *outPreCapCount = ifaces.size(); }   // L2: post-dedup, PRE-topN — the stub's total=
 
     const std::size_t keep = std::min<std::size_t>( topN > 0 ? std::size_t( topN ) : ifaces.size(), ifaces.size() );
+    // count-floor (countfloor.h implementorFloors): an extends/implements clause spelled like a kept interface that the graph
+    // bound to no definition of that name — implementors= cannot count it. Both modes: absent unless such a clause exists.
+    const std::vector<std::vector<NodeId>>& countMap = graphImplementors != nullptr ? *graphImplementors : implementors;
+    const std::vector<char> implFloor = implementorFloors( ing, countMap, std::span<const NodeId>( ifaces.data(), keep ) );
 
     XmlWriter         w( out );
     std::vector<char> esc;
@@ -7776,16 +7801,32 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
         // defs= is that fact on the row — the same disclosure --owners and --layout already carry for the
         // same resolver, and the branch the family gate (singledefcheck.sh) accepts in place of a refusal.
         // Ranked mode (--for) has no selector to be ambiguous ABOUT, so it stays byte-identical.
-        char hdr[ 64 ];
+        const std::vector<NodeId>& impls = implementors[id];
+        const std::size_t          cap   = ( focusId != kNoNode ) ? impls.size()               // targeted: uncapped
+                                                                  : ( impls.size() < 16 ? impls.size() : 16 );
+        const std::size_t          implementorTotal = id < countMap.size() ? std::max( countMap[id].size(), impls.size() ) : impls.size();
+        std::string hdr;
         if( focusId != kNoNode )
         {
-            rw::formatTo( hdr, sizeof( hdr ), "\" defs=\"{}\" implementors=\"{}\">",
-                           definitionCountOfName( ing, id ), implementors[id].size() );
+            hdr = "\" defs=\"" + std::to_string( definitionCountOfName( ing, id ) ) + "\" implementors=\"" + std::to_string( impls.size() ) + "\"";
         }
         else
         {
-            rw::formatTo( hdr, sizeof( hdr ), "\" implementors=\"{}\">", implementors[id].size() );
+            hdr = "\" implementors=\"" + std::to_string( implementorTotal ) + "\"";
+            if( cap < implementorTotal )
+            {
+                // a cut, not a floor: the rest exist and the named verb lists every one of them
+                const std::string selector = std::string( pathRel( isym.fileId ) ) + ":" + isym.name;
+                hdr += " implementors_shown=\"" + std::to_string( cap ) + "\"";
+                hdr += rw::nextAttrXml( nextFlag( "--lego=", selector ), "implementors_next" );
+            }
         }
+        if( implFloor[k] )
+        {
+            hdr += " implementors_floor=\"1\"";
+            hdr += rw::nextAttrXml( nextFlag( "--uses=", isym.name ), "floor_next" );
+        }
+        hdr += ">";
         w.write( "<iface n=\"" );  w.write( escapeXml( isym.name, esc ) );
         if( withPaths ) { w.write( "\" p=\"" );  w.write( escapeXml( pathRel( isym.fileId ), esc ) ); }
         w.write( caveatAttr );
@@ -7846,9 +7887,6 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
             }
         }
 
-        const std::vector<NodeId>& impls = implementors[id];
-        const std::size_t          cap   = ( focusId != kNoNode ) ? impls.size()               // targeted: uncapped
-                                                                  : ( impls.size() < 16 ? impls.size() : 16 );
         for( std::size_t j = 0; j < cap; ++j )
         {
             const Symbol& im = ing.symbols[ impls[j] ];

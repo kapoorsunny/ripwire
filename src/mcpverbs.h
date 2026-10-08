@@ -23,6 +23,7 @@
 #include "packtask.h"      // L4: the shared --pack-task / MCP explore+pack_task bundle assembler (packTaskBundleText)
 #include "partition.h"     // the explore verb's `partition` argument (packTaskPartitionText)
 #include "tracelocus.h"    // L4: the shared --from-trace / MCP from_trace bundle assembler (fromTraceBundleText)
+#include "countfloor.h"     // count-floor: a row's callers=/implementors= floor marker and its follow-up (CLI and MCP share it)
 #include "editcheck.h"     // L4: the shared --edit-check / MCP edit_check contract-comparison core (editCheckBundleText)
 #include "callhierarchy.h"  // H14/M13: the shared 1-hop call-hierarchy computation — find_symbol / find_referencing_symbols
 #include "graphlegend.h"   // §H4 §3.4: the ONE counts_floor= marker + shared graph-count legend wording (CLI ≡ MCP)
@@ -865,16 +866,28 @@ inline std::string grepEnclosingJson( const McpIndex& ix, std::span<const GrepHi
     {
         return {};
     }
-    std::string out = ",\"enclosing\":[";
-    bool        first = true;
+    // count-floor: the CLI <enc> row's callers_floor=/floor_next=, by the same function over the same rows (countfloor.h).
+    std::vector<std::vector<NodeId>> rowIds;
+    rowIds.reserve( encRows.size() );
     for( const GrepEncRow& row : encRows )
     {
-        if( !first )
+        rowIds.push_back( row.ids );
+    }
+    const std::vector<CallerFloor> floors = callerFloors( ing, g, rowIds, &valueRefIndexOf( ix ) );
+    ENSURES( floors.size() == encRows.size() );
+    std::string out = ",\"enclosing\":[";
+    for( std::size_t r = 0; r < encRows.size(); ++r )
+    {
+        const GrepEncRow& row = encRows[r];
+        if( r > 0 )
         {
             out += ",";
         }
-        first = false;
         out += "{\"n\":\"" + mcpdetail::jsonEscape( row.chain ) + "\",\"callers\":" + std::to_string( row.callerCount );
+        if( floors[r].isFloor )
+        {
+            out += ",\"callers_floor\":1,\"floor_next\":\"" + mcpdetail::jsonEscape( floors[r].next ) + "\"";
+        }
         if( row.defCount > 1 )
         {
             out += ",\"defs\":" + std::to_string( row.defCount );
@@ -1782,6 +1795,22 @@ inline void spliceForSectionStubLegend( std::string& doc, bool stubbed )
              "spliceForSectionStubLegend: a section stubbed but the legend clause was not spliced into the returned document" );
 }
 
+// count-floor: the MCP twin of the CLI's lego COUNT clause (verbs_for.h, appended to sectionsStubNote) — inserted at the
+// same header boundary, AFTER spliceForSectionStubLegend so the two clauses land in the CLI's order, and before the price.
+inline void spliceForLegoCountLegend( std::string& doc, bool carries )
+{
+    if( !carries )
+    {
+        return;
+    }
+    const std::size_t legendAt = doc.find( " -->" );
+    ASSUME( legendAt != std::string::npos, "spliceForLegoCountLegend: a lego count attribute rode but the header's closing \"-->\" was not found" );
+    if( legendAt != std::string::npos )
+    {
+        doc.insert( legendAt, rw::kForLegoCountLegend );
+    }
+}
+
 inline void priceForTaskRoot( std::string& doc, std::size_t budgetTokens )
 {
     if( doc.empty() )
@@ -2154,7 +2183,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     // L2 (round-1 lever B1): each renderer's OWN pre-cap row count, captured by the SAME call that renders
     // the real body — see verbs_for.h's identical CLI-twin comment for the full rationale.
     std::size_t legoPreCapCount = 0, composePreCapCount = 0;
-    std::string legoStr = renderToString( [ & ]( std::FILE* m2 ) { packLego( m2, ing, legoScoped, lensRank, 12, redact, &impure, kNoNode, /*withPaths=*/true, flRootArg, {}, &legoPreCapCount ); } );
+    std::string legoStr = renderToString( [ & ]( std::FILE* m2 ) { packLego( m2, ing, legoScoped, lensRank, 12, redact, &impure, kNoNode, /*withPaths=*/true, flRootArg, {}, &legoPreCapCount, &ix.g.implementors ); } );
     std::string composeStr, routeStr;
     if( !ix.g.composeEdges.empty() )
     {
@@ -2308,9 +2337,14 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     // §P3 × §P4 (parity with the CLI --for): narrow the lego block to the files the budget-trimmed sigs
     // actually kept and re-render (a byte-subset of what the budget already charged for) — reads sigsStr
     // directly now rather than re-slicing it back out of the flushed memstream buffer.
-    if( !legoStr.empty() && narrowLegoToRenderedSigs( ing, legoScoped, sigsStr ) )
+    // count-floor (CLI/MCP parity): the root prefix the CLI twin passes. sigsStr's rows are root-relative (flRootArg) and
+    // without the prefix this scan compared them against ABSOLUTE ing.files spellings, matched nothing and narrowed the
+    // whole block away (serialize.h narrowLegoToRenderedSigs' own R-E note): MCP `for` served no <lego> at all where the
+    // CLI served six rows.
+    const std::string mcpLegoRootPrefix = flRootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( flRootArg );
+    if( !legoStr.empty() && narrowLegoToRenderedSigs( ing, legoScoped, sigsStr, mcpLegoRootPrefix ) )
     {
-        legoStr = renderToString( [ & ]( std::FILE* m2 ) { packLego( m2, ing, legoScoped, lensRank, 12, redact, &impure, kNoNode, /*withPaths=*/true, flRootArg, {}, &legoPreCapCount ); } );   // R-R: the re-render dropped the root its first render (above) passed
+        legoStr = renderToString( [ & ]( std::FILE* m2 ) { packLego( m2, ing, legoScoped, lensRank, 12, redact, &impure, kNoNode, /*withPaths=*/true, flRootArg, {}, &legoPreCapCount, &ix.g.implementors ); } );   // R-R: the re-render dropped the root its first render (above) passed
     }
     // R2-L2' (round-2, priced re-registration of L2/B1): the CLI twin's exact stub substitution
     // (verbs_for.h) — same rule, same restoring spelling (kept as the CLI flag form: this dialect's next=
@@ -2363,6 +2397,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
             mcpSectionsWillStub = mcpLegoWillStub || mcpComposeWillStub;
         }
     }
+    const bool mcpLegoCountAttrs = legoStr.find( rw::kLegoCountAttrPrefix ) != std::string::npos;   // false on a stub (its own attributes only)
     std::fwrite( sigsStr.data(), 1, sigsStr.size(), mem );
     std::fwrite( legoStr.data(), 1, legoStr.size(), mem );
     std::fwrite( composeStr.data(), 1, composeStr.size(), mem );
@@ -2388,6 +2423,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     // path) returns immediately and costs this function nothing but the call. Done BEFORE priceForTaskRoot
     // so the clause's bytes are part of the est_tokens price exactly as the CLI's own version is.
     spliceForSectionStubLegend( out, mcpSectionsWillStub );
+    spliceForLegoCountLegend( out, mcpLegoCountAttrs );   // count-floor: present-only, the CLI twin's clause
     // F5 (terminality round A 2026-09-05): PRICE the bundle instead of declaring it unpriced. The document is
     // complete here, so this is the same measurement the CLI twin makes over its own (deliberately different)
     // bytes: pricedRootAttr's ≤4-pass fixpoint at kBytesPerTokenDefault, spliced onto the <ctx> root by the
@@ -2433,8 +2469,9 @@ inline std::string legoText( const std::string& root, const std::string& type, R
         // H5: the same legend the CLI --lego prints, and (issue #66) the same adjacent clause defining the
         // graph_unindexed= the root below carries — CLI and MCP are one wording by construction. H1: the unproven_defs=
         // clause rides as its own comment beside the closed literal, exactly as on the CLI.
-        rw::emitTo( mem, "<ctx>{}{}{}", kLegoLegend, graphUnindexedLegendComment( rw::graphGaugeClauses( ix.g ) ).c_str(),
-                    unprovenDefsVerbComment( UnprovenDefsVerb::Lego, unprovenDefs > 0, "<!-- ripwire lego: " ).c_str() );
+        rw::emitTo( mem, "<ctx>{}{}{}{}", kLegoLegend, graphUnindexedLegendComment( rw::graphGaugeClauses( ix.g ) ).c_str(),
+                    unprovenDefsVerbComment( UnprovenDefsVerb::Lego, unprovenDefs > 0, "<!-- ripwire lego: " ).c_str(),
+                    implementorsFloorLegendComment( ing, ix.g.implementors, focus ) );   // count-floor: the CLI twin's clause
         packLego( mem, ing, ix.g.implementors, flat, 1, redact, &impure, focus, /*withPaths=*/true,
                   ing.realPaths.empty() ? std::string_view( root ) : std::string_view(),    // R-R: root-relative <iface p=>
                   unprovenDefsAttrXml( unprovenDefs ) + graphCountFloorAttrXml( ix.g ) );    // H1 + M15: residue, gauge, marker

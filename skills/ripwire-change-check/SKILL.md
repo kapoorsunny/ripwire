@@ -189,7 +189,7 @@ emits a flat `<cand r= s= n= id= k= p= l=>` top-K — identity + score + signatu
     1-hop `callers=`, the transitive `--impact` blast radius (`impact_reaches=`), every `--uses`
     read/write/import/call/extends site (`uses=`), how much of that radius the `tested=` lens covers
     (`radius_tested=`/`radius_untested=`), and `--dead-code`'s own zero-caller/internal-linkage shape at
-    `defs=1` (`dead_code_candidate=`), into ONE call. `risk=` NAMES what was found — `none-found` / `uses-exist` /
+    `defs=1` (`dead_code_candidate=`), into ONE call. `risk=` NAMES what was found — `none-found` / `uses-exist` / `unmodelled` /
     `untested-radius` — never a go/no-go verdict; `radius_untested=` equal to `impact_reaches=` is the
     strongest signal ("nothing downstream is test-covered"). `ambiguous_callers=`/per-row `amb="1"` disclose
     the same call-graph resolution limit `--edit-check`'s `incompatible=` and `--for`'s `amb=` already carry.
