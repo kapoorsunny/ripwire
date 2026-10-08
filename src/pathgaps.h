@@ -13,7 +13,7 @@
 // A.process, and other/B.process, which calls the target, was invisible behind a plain "no directed call path".
 //
 // THE CONTRACT. pathSearchGaps walks the same directed cone the BFS walked (every symbol reachable from the from=
-// definitions over resolved call edges) and counts those four populations inside it. When the count is non-zero the
+// definitions over resolved call edges) and counts those five populations inside it. When the count is non-zero the
 // answer never says "no directed call path": it says the search was incomplete, gives the counts (searched=, gaps=),
 // and names the cone symbols that carry them (<gap> rows, nearest to from= first, capped at kPathGapRows and
 // disclosed) with a next= that reads their bodies. When the count is zero the old wording stands, byte for byte.
@@ -52,7 +52,7 @@ namespace rw
 
 inline constexpr std::size_t kPathGapRows = 3;   // <gap> rows printed; gap_syms= counts them all, gap_syms_capped="1" says so
 
-// The four gap populations, in the order gaps= lists them. A declarative table (CONTRIBUTING §3): the spelling lives once.
+// The five gap populations, in the order gaps= lists them. A declarative table (CONTRIBUTING §3): the spelling lives once.
 enum class PathGapKind : std::uint8_t { Declined, Unresolved, Value, Through, Name };
 inline constexpr std::size_t                                    kPathGapKindCount = 5;
 inline constexpr std::array<std::string_view, kPathGapKindCount> kPathGapKindNames = { "declined", "unresolved", "value", "through", "name" };
