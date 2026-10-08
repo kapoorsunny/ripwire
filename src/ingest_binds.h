@@ -4088,6 +4088,8 @@ struct TypeParamScope
     std::string_view name;
     std::uint32_t    start = 0;
     std::uint32_t    end   = 0;
+
+    bool declares( std::string_view spelled, std::uint32_t at ) const noexcept { return name == spelled && start <= at && at < end; }
 };
 
 struct BindCtx
@@ -4109,15 +4111,11 @@ struct BindCtx
 };
 
 // ── FE-B receiver-evidence capture (model.h LocalBindKind::RecvType / MemberType / MethodAlias) ──────────────────────────
-// is node kind `t` one of `kinds`
-inline bool kindIn( const char* t, std::initializer_list<std::string_view> kinds ) noexcept
-{
-    return std::find( kinds.begin(), kinds.end(), std::string_view( t ) ) != kinds.end();
-}
 // an identifier in any grammar's spelling
+inline constexpr std::array<std::string_view, 3> kIdentifierKinds = { "identifier", "type_identifier", "simple_identifier" };
 inline bool identifierKind( const char* t ) noexcept
 {
-    return kindIn( t, { "identifier", "type_identifier", "simple_identifier" } );
+    return std::ranges::find( kIdentifierKinds, std::string_view( t ) ) != kIdentifierKinds.end();
 }
 
 // The class a written TYPE names, final segment — "" for anything that names no single class (an array, a union, a
@@ -4323,14 +4321,7 @@ inline void noteGoReceiverTypeParameters( BindCtx& cx, TSNode method )
 // is `name`, written at byte `at`, a type parameter of a generic that encloses it
 inline bool namesTypeParameter( const BindCtx& cx, std::string_view name, std::uint32_t at ) noexcept
 {
-    for( const TypeParamScope& p : cx.typeParams )
-    {
-        if( at >= p.start && at < p.end && p.name == name )
-        {
-            return true;
-        }
-    }
-    return false;
+    return std::ranges::any_of( cx.typeParams, [ & ]( const TypeParamScope& p ) { return p.declares( name, at ); } );
 }
 
 // the class a written type names at byte `at` — "" when it names none, or names a type parameter (`<Tank> … Tank t`)
@@ -4363,7 +4354,7 @@ inline TSNode ancestorOfKind( TSNode n, std::initializer_list<std::string_view> 
     TSNode p = ts_node_is_null( n ) ? TSNode{} : ts_node_parent( n );
     for( int guard = 0; guard < 64 && !ts_node_is_null( p ); ++guard )
     {
-        if( kindIn( ts_node_type( p ), kinds ) )
+        if( std::ranges::find( kinds, std::string_view( ts_node_type( p ) ) ) != kinds.end() )
         {
             return p;
         }
@@ -4487,7 +4478,7 @@ inline TSNode namedChildOfKind( TSNode node, std::initializer_list<std::string_v
     for( std::uint32_t i = 0, k = ts_node_named_child_count( node ); i < k; ++i )
     {
         const TSNode c = ts_node_named_child( node, i );
-        if( kindIn( ts_node_type( c ), kinds ) )
+        if( std::ranges::find( kinds, std::string_view( ts_node_type( c ) ) ) != kinds.end() )
         {
             hit = c;
             if( !last )
