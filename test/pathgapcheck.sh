@@ -28,6 +28,8 @@
 #   (N4) a found path (reachable="1") through a cone with gaps carries no gap clause.
 #   (N5) a function passed as a value that the search ALSO reaches by a call is not a gap.
 #   (N6) a via="name" call whose namesakes are a DIFFERENT language (Ruby) or a different KIND (a Python variable) is not a gap.
+#   (N7) a via="name" call whose unlisted namesake the search REACHED anyway (another cone symbol calls it) is not a gap:
+#        helper's B().process() lists only other/B.process, but pkg/x/A.process is in the cone through run, so it was searched.
 #   (N3) above doubles as the name-gap near miss: run's obj.process() is via="name" too, but it has an edge to EVERY
 #        same-language definition of process, so nothing was left unsearched.
 #   (M)  MCP path_between carries the same searched/gaps/gap_syms/rows/next as the CLI (P1-P3, P7), and the same no-gap hint shape.
@@ -48,7 +50,8 @@ command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 2; }
 # ── fixtures ────────────────────────────────────────────────────────────────────────────────────────────────────────
 mkdir -p "$TMP/decl/core" "$TMP/decl/linux" "$TMP/decl/darwin" "$TMP/val" "$TMP/thr" "$TMP/unr" "$TMP/clean" \
          "$TMP/out/core" "$TMP/out/linux" "$TMP/out/darwin" "$TMP/amb" "$TMP/many/core" "$TMP/many/linux" "$TMP/many/darwin" \
-         "$TMP/found" "$TMP/valin" "$TMP/lpy/pkg/x" "$TMP/lpy/other" "$TMP/lpyx/pkg/x" "$TMP/lpyx/other"
+         "$TMP/found" "$TMP/valin" "$TMP/lpy/pkg/x" "$TMP/lpy/other" "$TMP/lpyx/pkg/x" "$TMP/lpyx/other" \
+         "$TMP/lpyin/pkg/x" "$TMP/lpyin/other"
 cat > "$TMP/decl/core/machine.c" <<'EOF'
 void Machine_scan( void );
 void Machine_run( void ) { Machine_scan(); }
@@ -205,6 +208,24 @@ EOF
 cat > "$TMP/lpyx/other/v.py" <<'EOF'
 process = 3
 EOF
+# N7: every namesake is in the cone. run reaches A.process (by name) and helper; helper's B().process() lists B.process
+# only, and its unlisted namesake A.process is searched through run. Nothing reaches target.
+cp "$TMP/lpy/pkg/x/a.py" "$TMP/lpyin/pkg/x/"
+cat > "$TMP/lpyin/pkg/x/c.py" <<'EOF'
+from other.b import helper
+def run(obj):
+    obj.process()
+    helper()
+EOF
+cat > "$TMP/lpyin/other/b.py" <<'EOF'
+class B:
+    def process(self):
+        return 2
+def helper():
+    B().process()
+def target():
+    return 3
+EOF
 
 # One --path answer, run unpiped so rc is ripwire's; the <path ...> head and the rest are read off the saved file.
 path(){   # $1 dir, $2 FROM,TO, $3 out file
@@ -316,6 +337,15 @@ if grep -q '<s [^>]*n="process" p="pkg/x/a.py:2" via="name"' "$f"; then
     cleanArm "(N6) via=name, namesakes of another language/kind" "$TMP/lpyx" "run,target"
 else
     no "(N6) premise: run's obj.process() is not via=name to A.process here: $( grep -o '<callees .*' "$f" | head -c 500 )"
+fi
+f="$TMP/lpyinhelper.xml"; "$BIN" "$TMP/lpyin" --no-cache --callees=helper > "$f" 2>&1; fh_rc=$?
+f2="$TMP/lpyinrun.xml"; "$BIN" "$TMP/lpyin" --no-cache --callees=run > "$f2" 2>&1; fr_rc=$?
+if [ "$fh_rc" -eq 0 ] && [ "$fr_rc" -eq 0 ] \
+   && grep -q '<s [^>]*n="process" p="other/b.py:2" via="name"' "$f" && ! grep -q 'p="pkg/x/a.py:2"' "$f" \
+   && grep -q '<s [^>]*n="process" p="pkg/x/a.py:2"' "$f2"; then
+    cleanArm "(N7) via=name, the unlisted namesake is in the searched cone" "$TMP/lpyin" "run,target"
+else
+    no "(N7) premise: helper lists only other/B.process by name and run reaches pkg/x/A.process (rc=$fh_rc/$fr_rc): $( grep -o '<callees .*' "$f" | head -c 300 ) | $( grep -o '<callees .*' "$f2" | head -c 300 )"
 fi
 
 echo "(M) MCP path_between carries the same clause"
