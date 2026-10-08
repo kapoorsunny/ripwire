@@ -4762,8 +4762,7 @@ struct FalseEdgeRules
     std::vector<char>                           goDotImport;  // fileId → the file has `import . "…"`
     std::vector<std::string>                    goModules;    // every in-tree go.mod's module path
     std::vector<char>                           goUnderModule;   // fileId → a go.mod sits at or above the file, inside the root
-    std::vector<std::string>                    goPackagePath;   // fileId → its package's import path: the nearest go.mod's module
-                                                                 //   path + the directory below it ("" when no module line is found)
+    GoPackagePaths                              goPackages;      // fileId → its package's import paths (receiverevidence.h)
     HashMap<std::string, char>                  jsVocabulary;    // jsModuleVocabulary, built only when a JS alias exists
     HashMap<std::string, char>                  rustOutsideUse;  // "<fileId>#name": a Rust `use` of a path outside the crate names it
     std::vector<std::vector<NodeId>>            functionsByFile; // fileId → its functions/methods sorted by sigStartByte (enclosingFunction)
@@ -5149,15 +5148,12 @@ inline std::string goModulePathOf( std::string_view text )
     return {};
 }
 
-// The module paths a go.mod puts in the tree: its `module` line, and every `replace X => ./local` (or ../, /) left side —
-// a module replaced by a LOCAL directory is this tree's code under another path (a multi-root workspace's sibling root).
-inline std::vector<std::string> goModuleTreePaths( std::string_view text )
+// A go.mod's LOCAL replaces, as ( module path, directory as written ): every `replace X => ./local` (or ../, /) — a
+// module replaced by a local directory is this tree's code under another path (a multi-root workspace's sibling root).
+// Both the one-line form and the lines of a `replace ( … )` block; a version on either side is dropped.
+inline std::vector<std::pair<std::string, std::string>> goLocalReplaces( std::string_view text )
 {
-    std::vector<std::string> paths;
-    if( std::string m = goModulePathOf( text ); !m.empty() )
-    {
-        paths.push_back( std::move( m ) );
-    }
+    std::vector<std::pair<std::string, std::string>> out;
     for( std::size_t at = 0; at < text.size(); )
     {
         std::size_t end = text.find( '\n', at );
@@ -5178,10 +5174,64 @@ inline std::vector<std::string> goModuleTreePaths( std::string_view text )
         const std::string_view target = trimWs( line.substr( arrow + 2 ) );
         if( !left.empty() && !target.empty() && ( target.front() == '.' || target.front() == '/' ) )
         {
-            paths.emplace_back( left.substr( 0, left.find_first_of( " \t" ) ) );   // drop a version: `X v1.2.3 => ./x`
+            out.emplace_back( left.substr( 0, left.find_first_of( " \t" ) ),   // drop a version: `X v1.2.3 => ./x`
+                              target.substr( 0, target.find_first_of( " \t" ) ) );
         }
     }
+    return out;
+}
+
+// The module paths a go.mod puts in the tree: its `module` line, and the left side of every local replace.
+inline std::vector<std::string> goModuleTreePaths( std::string_view text )
+{
+    std::vector<std::string> paths;
+    if( std::string m = goModulePathOf( text ); !m.empty() )
+    {
+        paths.push_back( std::move( m ) );
+    }
+    for( auto& [ module, dir ] : goLocalReplaces( text ) )
+    {
+        paths.push_back( std::move( module ) );
+    }
     return paths;
+}
+
+// FE-B: root-relative directory `base` joined with a go.mod replace target `rel` (`./third/lib`, `../svc`); nullopt
+// when the target is absolute or climbs above the root (no root-relative file can sit under it).
+inline std::optional<std::string> goJoinRelDir( std::string_view base, std::string_view rel )
+{
+    if( rel.starts_with( '/' ) )
+    {
+        return std::nullopt;
+    }
+    std::vector<std::string_view> parts;
+    for( std::string_view p : { base, rel } )
+    {
+        while( !p.empty() )
+        {
+            const std::size_t slash = p.find( '/' );
+            const std::string_view seg = p.substr( 0, slash );
+            p = slash == std::string_view::npos ? std::string_view{} : p.substr( slash + 1 );
+            if( seg == ".." )
+            {
+                if( parts.empty() )
+                {
+                    return std::nullopt;
+                }
+                parts.pop_back();
+            }
+            else if( !seg.empty() && seg != "." )
+            {
+                parts.push_back( seg );
+            }
+        }
+    }
+    std::string joined;
+    for( std::string_view p : parts )
+    {
+        joined.append( joined.empty() ? 0 : 1, '/' ).append( p );
+    }
+    return joined;
 }
 
 // FE-B: a Go package's import path — its go.mod's module path, then the package directory below the go.mod's directory
@@ -5203,14 +5253,53 @@ inline std::string goPackageImportPath( std::string_view modulePath, std::string
 }
 
 // FE-B: record `fileId`'s package import path, its go.mod found in disk directory `disk` — root-relative, the walk's
-// `walkRel` cut at `walkCut` (npos: the root itself)
+// `walkRel` cut at `walkCut` (npos: the root itself) — and that go.mod's local replaces as ( root-relative dir, path )
 inline void noteGoPackagePath( const IngestResult& ing, FalseEdgeRules& rules, const HashMap<std::string, std::string>& modLineOfDir,
                                const std::string& disk, std::uint32_t fileId, std::string_view walkRel, std::size_t walkCut )
 {
     if( const auto ml = modLineOfDir.find( disk ); ml != modLineOfDir.end() )
     {
         const std::string_view modDir = walkCut == std::string_view::npos ? std::string_view{} : walkRel.substr( 0, walkCut );
-        rules.goPackagePath[ fileId ] = goPackageImportPath( ml->second, modDir, includerDir( rootRelPath( ing, fileId ) ) );
+        rules.goPackages.note( rules.goPackages.nearest, fileId, goPackageImportPath( ml->second, modDir, includerDir( rootRelPath( ing, fileId ) ) ) );
+    }
+}
+
+// FE-B: a go.mod in root-relative directory `modDir` maps each local replace's directory to its module path
+inline void noteGoLocalReplaces( std::string_view text, std::string_view modDir, std::vector<std::pair<std::string, std::string>>& replacedDirs )
+{
+    for( auto& [ module, dir ] : goLocalReplaces( text ) )
+    {
+        if( std::optional<std::string> at = goJoinRelDir( modDir, dir ) )
+        {
+            replacedDirs.emplace_back( std::move( *at ), std::move( module ) );
+        }
+    }
+}
+
+// FE-B: every Go file under a locally replaced directory (the deepest one when replaces nest) gets the replaced module's
+// path plus the directory below it — `replace github.com/up/lib => ./third/lib` makes third/lib/x.go `github.com/up/lib`
+inline void noteGoReplacedPaths( const IngestResult& ing, FalseEdgeRules& rules, const std::vector<char>& isGoFile,
+                                 const std::vector<std::pair<std::string, std::string>>& replacedDirs )
+{
+    for( std::uint32_t f = 0; f < isGoFile.size() && !replacedDirs.empty(); ++f )
+    {
+        if( isGoFile[ f ] == 0 )
+        {
+            continue;
+        }
+        const std::string_view pkgDir = includerDir( rootRelPath( ing, f ) );
+        const std::pair<std::string, std::string>* best = nullptr;
+        for( const auto& rd : replacedDirs )
+        {
+            if( ( rd.first.empty() || pathIsUnder( pkgDir, rd.first ) ) && ( best == nullptr || rd.first.size() > best->first.size() ) )
+            {
+                best = &rd;
+            }
+        }
+        if( best != nullptr )
+        {
+            rules.goPackages.note( rules.goPackages.replaced, f, goPackageImportPath( best->second, best->first, pkgDir ) );
+        }
     }
 }
 
@@ -5219,16 +5308,20 @@ inline void noteGoPackagePath( const IngestResult& ing, FalseEdgeRules& rules, c
 inline void collectGoModules( const IngestResult& ing, FalseEdgeRules& rules )
 {
     rules.goUnderModule.assign( ing.files.size(), 0 );
-    rules.goPackagePath.assign( ing.files.size(), std::string{} );
+    rules.goPackages.nearest.assign( ing.files.size(), std::string{} );
+    rules.goPackages.replaced.assign( ing.files.size(), std::string{} );
     HashMap<std::string, std::vector<std::string>> modOfDir;   // disk directory → its go.mod's tree paths (empty: no go.mod)
     HashMap<std::string, std::string>              modLineOfDir;   // disk directory → its go.mod's own `module` path
     HashMap<std::string, char>        seenModule;
+    std::vector<char>                              isGoFile( ing.files.size(), 0 );
+    std::vector<std::pair<std::string, std::string>> replacedDirs;   // ( root-relative replaced directory, module path )
     for( const Symbol& s : ing.symbols )
     {
         if( s.lang != Lang::Go || s.fileId >= ing.files.size() || rules.goUnderModule[ s.fileId ] != 0 )
         {
             continue;
         }
+        isGoFile[ s.fileId ] = 1;
         std::string_view rel  = rootRelPath( ing, s.fileId );
         std::string      disk = diskPath( ing, s.fileId );
         // walk up as many directories as the root-relative path has, never above the root
@@ -5248,6 +5341,7 @@ inline void collectGoModules( const IngestResult& ing, FalseEdgeRules& rules )
                 {
                     it->second = goModuleTreePaths( *text );
                     modLineOfDir.try_emplace( disk, goModulePathOf( *text ) );
+                    noteGoLocalReplaces( *text, relCut == std::string_view::npos ? std::string_view{} : rel.substr( 0, relCut ), replacedDirs );
                 }
             }
             if( !it->second.empty() )
@@ -5271,6 +5365,8 @@ inline void collectGoModules( const IngestResult& ing, FalseEdgeRules& rules )
         }
     }
     std::sort( rules.goModules.begin(), rules.goModules.end() );   // determinism: discovery order follows symbol order
+    std::sort( replacedDirs.begin(), replacedDirs.end() );         // … and so would a tie between two replaces of one dir
+    noteGoReplacedPaths( ing, rules, isGoFile, replacedDirs );
 }
 
 // FE-A: the binding facts — every ModuleAlias (Go dot imports apart), every name a JS/TS import or alias binds, and every
@@ -5839,7 +5935,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     {
         PROFILE_SCOPE_DESCRIBE( "buildGraph/2i: receiver-evidence tables" );
         recvEv.localNames = &fieldNarrow.localNameSet;
-        recvEv.goPackagePath = &falseEdges.goPackagePath;
+        recvEv.goPackages = &falseEdges.goPackages;
         recvEv.build();
     }
     HashMap<std::uint64_t, char> nameOnlyEdges;   // (from<<32|to) of an edge some call bound by NAME ALONE (no receiver evidence)

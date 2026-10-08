@@ -46,6 +46,37 @@ inline bool receiverHedgeLang( Lang l ) noexcept
     }
 }
 
+// FE-B: each Go file's package import paths, built by graph.h collectGoModules — the nearest go.mod's module path plus the
+// directory below it, and the path a LOCAL `replace L => ./D` gives a file under D (L plus the directory below D). A
+// module-alias call proves a candidate by one of these paths EXACTLY. The directory-tail rule is left only for a candidate
+// with no path when no in-tree file carries the import path either (a tree with no module facts for it at all).
+struct GoPackagePaths
+{
+    std::vector<std::string>   nearest;    // fileId → "" when no go.mod with a module line sits at or above the file
+    std::vector<std::string>   replaced;   // fileId → "" when no local replace maps the file's directory
+    HashMap<std::string, char> known;      // every non-empty path in either table
+
+    bool hasPath( std::uint32_t f ) const noexcept
+    {
+        return ( f < nearest.size() && !nearest[ f ].empty() ) || ( f < replaced.size() && !replaced[ f ].empty() );
+    }
+    // does `path` name file `f`'s package exactly
+    bool names( std::uint32_t f, std::string_view path ) const noexcept
+    {
+        return ( f < nearest.size() && !nearest[ f ].empty() && nearest[ f ] == path )
+            || ( f < replaced.size() && !replaced[ f ].empty() && replaced[ f ] == path );
+    }
+    void note( std::vector<std::string>& table, std::uint32_t f, std::string path )
+    {
+        EXPECTS( f < table.size(), "collectGoModules sizes both tables to ing.files" );
+        if( !path.empty() )
+        {
+            known.try_emplace( path, '\0' );
+        }
+        table[ f ] = std::move( path );
+    }
+};
+
 // The languages where a bare `m()` inside a method is an implicit `this.m()` (or reaches a free/top-level function).
 inline bool implicitReceiverLang( Lang l ) noexcept
 {
@@ -134,7 +165,7 @@ struct ReceiverEvidence
     mutable rw::SmallVec<NodeId, 2>                       found;
     bool                                                  active = false;
     const HashMap<std::string, char>*                     localNames = nullptr;   // graph.h FieldNarrowTables::localNameSet
-    const std::vector<std::string>*                       goPackagePath = nullptr;   // graph.h FalseEdgeRules::goPackagePath
+    const GoPackagePaths*                                 goPackages = nullptr;   // graph.h FalseEdgeRules::goPackages
 
     ReceiverEvidence( const IngestResult& i, const HashMap<std::string, std::vector<std::string>>& up, const HashMap<std::string, char>& classes )
         : ing( i ), chaUp( up ), classNames( classes ) {}
@@ -696,13 +727,16 @@ struct ReceiverEvidence
         if( r.lang == Lang::Go )
         {
             // an import path names a package: the candidate's own package import path (its go.mod's module path and the
-            // directory below it — a nested module's `quoted/lib` is `example.com/qm/lib`) proves it exactly
+            // directory below it — a nested module's `quoted/lib` is `example.com/qm/lib` — or the path a local replace
+            // maps its directory to) proves it EXACTLY. A candidate with a path, or an import path some in-tree file
+            // carries, is proven by nothing else: a directory that merely ends the path is another package
             const std::uint32_t cf = ing.symbols[ c ].fileId;
-            if( goPackagePath != nullptr && cf < goPackagePath->size() && !( *goPackagePath )[ cf ].empty() && source == ( *goPackagePath )[ cf ] )
+            if( goPackages != nullptr && ( goPackages->hasPath( cf ) || goPackages->known.contains( key.assign( source ) ) ) )
             {
-                return true;
+                return goPackages->names( cf, source );
             }
-            // else the candidate's directory must end the path, segment-aligned (a replace-only tree, no go.mod above)
+            // no module facts name this path or the candidate (a tree with no go.mod): its directory must end the path,
+            // segment-aligned
             const std::string_view dir = includerDir( target );
             return !dir.empty() && source.size() >= dir.size() && source.ends_with( dir )
                 && ( source.size() == dir.size() || source[ source.size() - dir.size() - 1 ] == '/' );

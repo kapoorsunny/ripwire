@@ -80,6 +80,13 @@
 #            Merger.Get/Length; Bd an outside screen's Size, an outside value's Runes, a field or local named `log`
 #            of an outside type beside the in-repo log.Errorf. Near misses: a pointer-literal local, the method
 #            receiver itself, a real import of the in-repo log package.
+#   (G2) Go module aliases (gomod/, one tree per directory): an import path proves a package EXACTLY — the nearest
+#            go.mod's module path plus the directory below it, or the path a local `replace L => ./D` gives D. Bm:
+#            `replace github.com/up/lib => ./third/lib` beside an in-repo lib/ drew lib.Mark() to lib/ (a directory
+#            that merely ends the path); `example.com/t/pkg/lib` proved both pkg/lib and lib/ (declined). Near misses:
+#            a replace onto lib/ itself, a replaced legacy/ with and without its own go.mod, a nested module,
+#            example.com/a vs example.com/ab, a vendored copy (never the in-repo lib/), a dot import (never the decoy),
+#            and a path-less root lib/ beside a nested module that carries the path.
 #   (I) implicit receiver: Java, Kotlin, C#, C++, Swift, Ruby — a bare call inside a class whose base is OUTSIDE
 #            the tree (or that imports the name from outside) never proves an unrelated class's method. Near
 #            misses: own members (private too), an in-repo superclass's member (the cone, and Java super.m()),
@@ -462,6 +469,24 @@ exactproven go callees src/result.go:merged "method Length src/merger.go"
 exactproven go callees src/merger.go:First "method Get src/merger.go"
 exactproven go callees src/tui/tcell.go:Lines "method Size src/tui/tcell.go"
 exactproven go callees src/cmd/run.go:Run "fn Errorf src/internal/log/log.go"   # guard
+
+echo "=== (G2) Go module aliases: an import path proves a package exactly ==="
+mkdir -p "$TMP/gomod"
+exactproven gomod/fork2 callees app/app.go:Use "fn Mark third/lib/l.go"   # Bm: lib/ merely ends github.com/up/lib
+notproven   gomod/fork2 callees app/app.go:Use "Mark lib/l.go"
+exactproven gomod/tail  callees app/app.go:Use "fn Mark pkg/lib/l.go"     # Bm: lib/ ends example.com/t/pkg/lib too
+exactproven gomod/tail  callees app/near.go:Near "fn Mark lib/l.go"
+exactproven gomod/fork  callees app/app.go:Use "fn Mark lib/l.go"         # near miss: the replace names lib/ itself
+exactproven gomod/rep   callees app/app.go:Use "fn Mark legacy/lib/l.go"  # near miss: replaced, with its own go.mod
+exactproven gomod/rep   callees app/near.go:Near "fn Mark lib/l.go"
+exactproven gomod/rep2  callees app/app.go:Use "fn Mark legacy/lib/l.go"  # near miss: replaced, under the root go.mod only
+exactproven gomod/rep2  callees app/near.go:Near "fn Mark lib/l.go"
+exactproven gomod/nest  callees app/app.go:Use "fn Mark other/util/u.go"  # near miss: a nested module
+exactproven gomod/pfx   callees app/app.go:Use "fn Mark ab/lib/l.go"      # near miss: example.com/a vs example.com/ab
+exactproven gomod/pfx   callees app/near.go:Near "fn Mark lib/l.go"
+notproven   gomod/vend  callees app/app.go:Use "Mark lib/l.go"            # near miss: the vendored copy is the package
+notproven   gomod/dot   callees app/app.go:Use "Mark decoy/d.go"          # near miss: a dot import (lib/ unresolved: a floor)
+exactproven gomod/mixed callees m/app/app.go:Use "fn Mark m/lib/l.go"     # near miss: a path-less lib/ never takes a carried path
 
 echo "=== (I) implicit receiver: a bare call never proves an unrelated class's method ==="
 notproven java callees src/main/java/app/Logger.java:line "render src/main/java/app/Exporter.java"
