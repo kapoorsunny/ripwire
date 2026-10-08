@@ -111,6 +111,11 @@ CONCEPT="how does resolution work"
 # ladder trimmed used to appear in neither section), and the clause defining the tail says so. Verified before
 # re-pinning: with every comment and est_tokens= normalized out, old and new documents are byte-identical —
 # this fixture's head covers every file, so its tail is unchanged and every ranking byte is unmoved.
+# RE-PIN 2026-10-07 (lane/lean-answers-068, --for zero elision): 3776 -> 3752 B, est_tokens="1433" -> "1424". ONE
+# identified change: a lens row omits cx=/ccx=/in= when 0 and the full legend says ", each absent when 0;". Verified
+# before re-pinning: the base binary (255dc199) reproduces the previous golden byte for byte, and putting the zeros back
+# on every r= row, deleting that clause and masking est_tokens= gives the previous golden exactly — no ranking, body or
+# route byte moved (route-neutrality, this golden's purpose, untouched).
 # L1 (2026-09-19): the CLI default legend is compact; golden_for.xml was recorded from the full default and the --query arm
 # reads the full legend's "routed:" comment, so those two runs ask for the full legend.
 "$BIN" routefix --no-cache --for="$CONCEPT" --no-route --legend=full >"$TMP/concept_noroute.xml" 2>/dev/null

@@ -188,15 +188,17 @@ the kit-style default-lean posture (measured ~90% cut on comparable extract-symb
   copied out of a prior session or a doc is almost certainly stale — call `find_symbol`/
   `find_referencing_symbols` fresh each session and read the `handle` it hands back.
 
-## The per-session legend: read `ripwire://legend-dict` once
+## The per-session legend: each definition once per session
 
-Every answer defines its own attributes until the session reads the MCP resource `ripwire://legend-dict`
-(`initialize` names it). After that read, the verbs that take `legend` (and `for`) answer rows first and
-end with `<about … legend="ref" dict= dictv=/>`, which carries the root attributes; a definition arrives once
-per session, in a comment after the rows of the first answer that needs it. Lost the definitions (a
-compacted context)? Read `ripwire://legend-dict/full` for all of them, or print them with
-`ripwire --legend-dict`. `legend:"compact"` on one call keeps that answer's legend inline. The HTTP
-transport (`--listen`) keeps every legend inline.
+On the stdio server the legend session opens with the first answer that carries a legend (served inline) or
+with a read of the MCP resource `ripwire://legend-dict` (`initialize` names it). After that, the verbs that take
+`legend` (and `for`) answer rows first and end with `<about … legend="ref" dict= dictv=/>`, which carries the
+root attributes; a definition arrives once per session, in a comment after the rows of the first answer that
+needs it (an answer whose ref form would be longer stays inline). Lost the definitions (a compacted context)?
+Read `ripwire://legend-dict/full` for all of them, or print them with `ripwire --legend-dict`.
+`legend:"compact"` on one call keeps that answer's legend inline; a server started with
+`--mcp --mcp-legend=inline` keeps every answer's legend inline. The HTTP transport (`--listen`) keeps every
+legend inline.
 
 ## The 3 MCP edit verbs — the warm-server counterpart to the preferred CLI
 
