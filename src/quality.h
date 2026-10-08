@@ -4729,17 +4729,6 @@ inline std::vector<DefectSiteAt> defectSitesOf( const IngestResult& ing, std::st
     return out;
 }
 
-inline std::vector<DefectSiteKey> defectSiteKeys( const std::vector<DefectSiteAt>& sites )
-{
-    std::vector<DefectSiteKey> out;
-    out.reserve( sites.size() );
-    for( const DefectSiteAt& s : sites )
-    {
-        out.push_back( s.key );
-    }
-    return out;
-}
-
 inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::string_view root,
                                  const std::vector<char>* fileInBaseline )
 {
@@ -4798,7 +4787,11 @@ inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::s
 
     // the defect-shape baseline: every offending site (a sorted multiset of anchor + site identity) and each
     // scanned file's presence record. Filtered to the baseline files inside defectSitesOf (IDENTITY BASIS).
-    snap.defectSites = defectSiteKeys( defectSitesOf( ing, root, fileInBaseline ) );
+    {
+        const std::vector<DefectSiteAt> sites = defectSitesOf( ing, root, fileInBaseline );
+        snap.defectSites.resize( sites.size() );
+        std::ranges::transform( sites, snap.defectSites.begin(), &DefectSiteAt::key );
+    }
 
     // §D#4 short-horizon-churn baseline: per-canonId RAW-body hash so the delta detects a rewrite that moved no
     // metric (a literal-only edit). Compared, never bar-checked — presence-or-difference IS the rewrite signal.
@@ -5107,6 +5100,15 @@ inline int openBaselineSidecar( const std::string& path )
 // than absorb — and it is written as two records the snapshot reader skips as unknown kinds (`dirty 1`,
 // `absorbed N`), exactly like the `head` stamp above: the fact has to outlive the process that knew it,
 // because the report it changes the meaning of is every LATER --quality-delta, not this run.
+// The defect-shape records of a baseline sidecar: "defect <anchor> <site>", both hex, one per record.
+inline void writeDefectSiteLines( std::ostream& f, const std::vector<DefectSiteKey>& sites )
+{
+    for( const DefectSiteKey& d : sites )
+    {
+        f << "defect " << std::hex << d.anchor << ' ' << d.site << std::dec << '\n';
+    }
+}
+
 inline bool writeBaseline( const Snapshot& s, const std::string& path, std::string_view headSha = {},
                            std::size_t absorbedGating = 0 )
 {
@@ -5209,10 +5211,7 @@ inline bool writeBaseline( const Snapshot& s, const std::string& path, std::stri
     {
         f << "api " << std::hex << h << std::dec << '\n';
     }
-    for( const DefectSiteKey& d : s.defectSites )
-    {
-        f << "defect " << std::hex << d.anchor << ' ' << d.site << std::dec << '\n'; // the defect-shape kind: anchor + site identity (both hex)
-    }
+    writeDefectSiteLines( f, s.defectSites );
     // Was an unconditional `return true`: a stream that failed to flush still reported a written baseline.
     // The descriptor answers for the bytes, so a full disk is now a failure the caller can report.
     return rw::pathguard::writeAllAndClose( fd, f.str() );
@@ -7386,6 +7385,35 @@ inline void addSchemeAliases( IdentityAliases& al, const IngestResult& ing, cons
     std::sort( al.schemeAmbiguousKeys.begin(), al.schemeAmbiguousKeys.end() );
 }
 
+// The defect-shape records: a renamed definition's sites are re-filed under its current anchor, add-never-
+// overwrite like the per-symbol maps (an anchor the baseline already holds keeps its own records). Whether a site
+// is NEW never depends on this — that is decided by its text, repo-wide — only the row's was= count does.
+inline std::size_t healDefectSites( Snapshot& base, const IdentityAliases& al )
+{
+    std::size_t healed = 0;
+    std::vector<DefectSiteKey> addSites;
+    for( const auto& [ from, to ] : al.toCurrent )
+    {
+        const auto lo = std::lower_bound( base.defectSites.begin(), base.defectSites.end(), DefectSiteKey{ from, 0 } );
+        const auto toLo = std::lower_bound( base.defectSites.begin(), base.defectSites.end(), DefectSiteKey{ to, 0 } );
+        if( toLo != base.defectSites.end() && toLo->anchor == to )
+        {
+            continue;
+        }
+        for( auto it = lo; it != base.defectSites.end() && it->anchor == from; ++it )
+        {
+            addSites.push_back( { to, it->site } );
+            ++healed;
+        }
+    }
+    if( !addSites.empty() )
+    {
+        base.defectSites.insert( base.defectSites.end(), addSites.begin(), addSites.end() );
+        std::sort( base.defectSites.begin(), base.defectSites.end() );
+    }
+    return healed;
+}
+
 // Heal a BASELINE snapshot forward: an entry recorded under a pre-rename identity is re-filed under the
 // identity the current tree uses, so computeDelta's `was` lookups, its origin oracle and its churn join all
 // find it without a single edit to any of them.
@@ -7446,29 +7474,7 @@ inline std::size_t remapSnapshotIdentity( Snapshot& base, const IdentityAliases&
     healSet( base.publicApi );
     // base.cloneGroups is deliberately untouched — see the WHAT IS NOT REMAPPED note above.
 
-    // the defect-shape records: a renamed definition's sites are re-filed under its current anchor, same
-    // add-never-overwrite rule (an anchor the baseline already holds keeps its own records). Whether a site is
-    // NEW never depends on this — that is decided by its text, repo-wide — only the row's was= count does.
-    std::vector<DefectSiteKey> addSites;
-    for( const auto& [ from, to ] : al.toCurrent )
-    {
-        const auto lo = std::lower_bound( base.defectSites.begin(), base.defectSites.end(), DefectSiteKey{ from, 0 } );
-        const auto toLo = std::lower_bound( base.defectSites.begin(), base.defectSites.end(), DefectSiteKey{ to, 0 } );
-        if( toLo != base.defectSites.end() && toLo->anchor == to )
-        {
-            continue;
-        }
-        for( auto it = lo; it != base.defectSites.end() && it->anchor == from; ++it )
-        {
-            addSites.push_back( { to, it->site } );
-            ++moved;
-        }
-    }
-    if( !addSites.empty() )
-    {
-        base.defectSites.insert( base.defectSites.end(), addSites.begin(), addSites.end() );
-        std::sort( base.defectSites.begin(), base.defectSites.end() );
-    }
+    moved += healDefectSites( base, al );
     return moved;
 }
 
@@ -7898,6 +7904,46 @@ inline std::optional<StaleAckWhy> staleForDefectShape( std::uint64_t key, const 
     return StaleAckWhy::FindingGone;
 }
 
+// Which oracle answers whether an ack of kind `base` is stale — one dispatch per finding kind. An unrecognized
+// kind (a future addition, or a hand-edited line) answers nullopt: left unclassified, never guessed.
+inline std::optional<StaleAckWhy> staleWhyForKind( std::string_view base, std::uint64_t key, const Snapshot& snap )
+{
+    std::optional<StaleAckWhy> why;
+    if( base == "complexity" || base == "verbosity" || base == "nesting" || base == "params" )
+    {
+        why = staleForMetricKind( base, key, snap );
+    }
+    else if( base == "dead-code" )
+    {
+        why = staleForSetMembership( key, snap, snap.dead );
+    }
+    else if( base == "api-surface" )
+    {
+        why = staleForSetMembership( key, snap, snap.publicApi );
+    }
+    else if( base == "error-masking" )
+    {
+        why = staleForConstructCount( key, snap, snap.maskBySym );
+    }
+    else if( base == "placeholder" )
+    {
+        why = staleForConstructCount( key, snap, snap.placeholderBySym );
+    }
+    else if( base == "duplication" || base == "new-clone-of-reused-helper" )
+    {
+        why = staleForCloneKind( key, snap );
+    }
+    else if( base == "short-horizon-churn" )
+    {
+        why = staleForChurn( key, snap );
+    }
+    else if( base == "defect-shape" )
+    {
+        why = staleForDefectShape( key, snap );
+    }
+    return why;
+}
+
 inline std::vector<StaleAck> computeStaleAcks( const gtl::btree_map<std::string, AckRecord>& acks, const Snapshot& snap )
 {
     std::vector<StaleAck> out;
@@ -7911,39 +7957,7 @@ inline std::vector<StaleAck> computeStaleAcks( const gtl::btree_map<std::string,
         const std::string_view base  = ( colon == std::string::npos ) ? std::string_view( rec.kind )
                                                                        : std::string_view( rec.kind ).substr( 0, colon );
 
-        std::optional<StaleAckWhy> why;
-        if( base == "complexity" || base == "verbosity" || base == "nesting" || base == "params" )
-        {
-            why = staleForMetricKind( base, rec.key, snap );
-        }
-        else if( base == "dead-code" )
-        {
-            why = staleForSetMembership( rec.key, snap, snap.dead );
-        }
-        else if( base == "api-surface" )
-        {
-            why = staleForSetMembership( rec.key, snap, snap.publicApi );
-        }
-        else if( base == "error-masking" )
-        {
-            why = staleForConstructCount( rec.key, snap, snap.maskBySym );
-        }
-        else if( base == "placeholder" )
-        {
-            why = staleForConstructCount( rec.key, snap, snap.placeholderBySym );
-        }
-        else if( base == "duplication" || base == "new-clone-of-reused-helper" )
-        {
-            why = staleForCloneKind( rec.key, snap );
-        }
-        else if( base == "short-horizon-churn" )
-        {
-            why = staleForChurn( rec.key, snap );
-        }
-        else if( base == "defect-shape" )
-        {
-            why = staleForDefectShape( rec.key, snap );
-        }
+        const std::optional<StaleAckWhy> why = staleWhyForKind( base, rec.key, snap );
         // an unrecognized kind (a future addition, or a hand-edited line) is left unclassified rather than
         // guessed — same "degrade, do not fabricate" rule readAckRecords already applies to a malformed line.
         if( why.has_value() )

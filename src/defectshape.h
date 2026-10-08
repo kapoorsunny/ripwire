@@ -37,7 +37,10 @@
 #include <string_view>
 #include <vector>
 
+#include <cctype>
+
 #include "infra/Diagnostics.h"
+#include "infra/namesplit.h"   // the ONE ASCII identifier-character pair and the quote-pair strip
 
 namespace rw::defectshape
 {
@@ -83,16 +86,10 @@ struct Span
 namespace detail
 {
 
-inline bool isIdentStart( char c ) noexcept
-{
-    const unsigned char u = static_cast<unsigned char>( c );
-    return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || c == '_' || u >= 0x80;
-}
-
-inline bool isIdentChar( char c ) noexcept
-{
-    return isIdentStart( c ) || ( c >= '0' && c <= '9' );
-}
+// identifiers are read ASCII-only, the house rule (namesplit.h): a non-ASCII byte outside a literal becomes a
+// one-byte punctuator, which no shape below matches.
+using rw::namesplit::isIdentChar;
+using rw::namesplit::isIdentStart;
 
 inline bool isDigit( char c ) noexcept
 {
@@ -101,7 +98,7 @@ inline bool isDigit( char c ) noexcept
 
 inline bool isSpace( char c ) noexcept
 {
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
+    return std::isspace( static_cast<unsigned char>( c ) ) != 0;
 }
 
 enum class TokKind : std::uint8_t
@@ -161,12 +158,20 @@ inline std::uint32_t punctLen( std::string_view s, std::size_t i ) noexcept
 // end of the line for an unterminated literal). Backslash escapes the next byte.
 inline std::size_t skipQuoted( std::string_view s, std::size_t i, char q ) noexcept
 {
-    std::size_t j = i + 1;
-    while( j < s.size() && s[j] != q && s[j] != '\n' )
+    bool escaped = false;
+    for( std::size_t j = i + 1; j < s.size(); ++j )
     {
-        j += ( s[j] == '\\' && j + 1 < s.size() ) ? 2 : 1;
+        if( s[j] == '\n' )
+        {
+            return j;   // unterminated on its line: stop there rather than swallow the file
+        }
+        if( !escaped && s[j] == q )
+        {
+            return j + 1;
+        }
+        escaped = !escaped && s[j] == '\\';
     }
-    return ( j < s.size() && s[j] == q ) ? j + 1 : j;
+    return s.size();
 }
 
 // C++ tokens with comments and preprocessor directives dropped. A directive is skipped whole (continuation
@@ -988,8 +993,8 @@ inline std::string_view sizeCallReceiver( std::string_view src, const std::vecto
 
 inline bool isCompareOp( std::string_view src, const Tok& t ) noexcept
 {
-    const std::string_view w = tokText( src, t );
-    return w == ">" || w == ">=" || w == "<" || w == "<=" || w == "==";
+    static constexpr std::array<std::string_view, 5> kCompare = { ">", ">=", "<", "<=", "==" };
+    return std::find( kCompare.begin(), kCompare.end(), tokText( src, t ) ) != kCompare.end();
 }
 
 // Name tokens of an identifier (camelCase and snake_case boundaries), lower-cased.
@@ -1640,11 +1645,7 @@ using ShLineToks = std::vector<std::vector<ShTok>>;   // every logical line's to
 
 inline std::string_view unquoted( std::string_view w ) noexcept
 {
-    if( w.size() >= 2 && ( w.front() == '"' || w.front() == '\'' ) && w.back() == w.front() )
-    {
-        return w.substr( 1, w.size() - 2 );
-    }
-    return w;
+    return rw::namesplit::stripQuotePair( w );
 }
 
 // "$VAR" / "${VAR}" / $VAR → VAR, else empty.
@@ -2460,12 +2461,13 @@ inline std::string collapseSpaces( std::string_view s )
     return out;
 }
 
-inline void scanVacuousAssertBash( std::string_view src, const std::vector<Span>& spans, std::vector<Site>& out )
+inline std::vector<Site> scanVacuousAssertBash( std::string_view src, const std::vector<Span>& spans )
 {
+    std::vector<Site>         out;
     const std::vector<ShLine> lines = shLogicalLines( src );
     if( lines.empty() )
     {
-        return;
+        return out;
     }
     std::vector<std::size_t> scope( lines.size() );
     ShLineToks               lt( lines.size() );
@@ -2543,6 +2545,7 @@ inline void scanVacuousAssertBash( std::string_view src, const std::vector<Span>
             out.push_back( { Facet::VacuousAssert, lines[a.line].startByte, collapseSpaces( lines[a.line].text ) } );
         }
     }
+    return out;
 }
 
 }   // namespace detail
@@ -2586,24 +2589,16 @@ inline std::vector<Site> scanPython( std::string_view src )
 // definitions, the scopes a capture and its guards are matched in.
 inline std::vector<Site> scanBashTestScript( std::string_view src, const std::vector<Span>& fnSpans )
 {
-    std::vector<Site> out;
-    detail::scanVacuousAssertBash( src, fnSpans, out );
-    return out;
+    return detail::scanVacuousAssertBash( src, fnSpans );
 }
 
 // A cheap byte prefilter: can this C++ file hold any of the three C++ shapes at all?
 inline bool cppMayHoldShapes( std::string_view src ) noexcept
 {
-    for( std::string_view needle : { std::string_view( "format" ), std::string_view( "print" ), std::string_view( "emitTo" ), std::string_view( "formatTo" ),
-                                     std::string_view( "unique" ), std::string_view( "..." ), std::string_view( "\xE2\x80\xA6" ), std::string_view( "xE2" ),
-                                     std::string_view( "u2026" ) } )
-    {
-        if( src.find( needle ) != std::string_view::npos )
-        {
-            return true;
-        }
-    }
-    return false;
+    static constexpr std::array<std::string_view, 7> kNeedles = { "format", "print", "emitTo", "unique", "...", "\xE2\x80\xA6", "u2026" };
+    // "format" also covers formatTo; the escaped ellipsis "\xE2\x80\xA6" is found through its "xE2" bytes below
+    return std::any_of( kNeedles.begin(), kNeedles.end(), [ & ]( std::string_view n ) { return src.find( n ) != std::string_view::npos; } )
+        || src.find( "xE2" ) != std::string_view::npos;
 }
 
 }   // namespace rw::defectshape
