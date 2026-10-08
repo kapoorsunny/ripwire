@@ -4399,20 +4399,22 @@ inline ForEndLinesMode forEndLinesMode()
     }();
     return mode;
 }
-// THE tight-explicit-ceiling predicate (--token-budget / MCP budget_tokens set, and below the default signature share
-// kForPayloadBudgetBytes). One definition for the two decisions that must not add an uncharged byte there: e= (above) and the
-// code-above-docs reorder with its reading (docsAfterCodeFitsCeiling). 0 = no explicit ceiling.
-inline constexpr bool explicitCeilingTighterThanDefault( std::size_t budgetTokens ) noexcept
+// THE tight-explicit-ceiling predicate: the answer carries an explicit ceiling it promises (est_tokens <= it) and that ceiling is
+// tighter than the default signature share — --token-budget / MCP budget_tokens set and below kForPayloadBudgetBytes, OR a body
+// ceiling (--max-tokens with --detail; `bodyCeiling`, which has no default share to compare with). One definition for the two
+// decisions that must not add an uncharged byte there: e= (below) and the code-above-docs reorder with its reading
+// (docsAfterCodeFitsCeiling). budgetTokens 0 = no token budget; MCP has no body ceiling and passes false.
+inline constexpr bool explicitCeilingTighterThanDefault( std::size_t budgetTokens, bool bodyCeiling ) noexcept
 {
-    return budgetTokens != 0 && budgetBytesForTokens( budgetTokens ) < kForPayloadBudgetBytes;
+    return bodyCeiling || ( budgetTokens != 0 && budgetBytesForTokens( budgetTokens ) < kForPayloadBudgetBytes );
 }
 // May the code-above-docs reorder (reorderDocsAfterCode) apply? Its `docs_after_code=` attribute and reading are UNCHARGED
-// (a disclosure never costs a row), so under a tight explicit ceiling — where the answer promises est_tokens <= the budget
+// (a disclosure never costs a row), so under a tight explicit ceiling — where the answer promises est_tokens <= the ceiling
 // and every row — neither the reorder nor its note applies: the answer is the one it was before the reorder existed. At or
 // above the default share, or with no explicit ceiling, it applies. Independent of RIPWIRE_FOR_ENDLINES (that switch moves e= only).
-inline constexpr bool docsAfterCodeFitsCeiling( std::size_t budgetTokens ) noexcept
+inline constexpr bool docsAfterCodeFitsCeiling( std::size_t budgetTokens, bool bodyCeiling ) noexcept
 {
-    return !explicitCeilingTighterThanDefault( budgetTokens );
+    return !explicitCeilingTighterThanDefault( budgetTokens, bodyCeiling );
 }
 inline constexpr bool endLinesFitCeilingFor( ForEndLinesMode mode, std::size_t budgetTokens, bool bodyCeiling ) noexcept
 {
@@ -4422,10 +4424,11 @@ inline constexpr bool endLinesFitCeilingFor( ForEndLinesMode mode, std::size_t b
     case ForEndLinesMode::Never:  return false;
     case ForEndLinesMode::Auto:   break;
     }
-    return !bodyCeiling && !explicitCeilingTighterThanDefault( budgetTokens );
+    return !explicitCeilingTighterThanDefault( budgetTokens, bodyCeiling );
 }
 static_assert( endLinesFitCeilingFor( ForEndLinesMode::Auto, 0, false ) && !endLinesFitCeilingFor( ForEndLinesMode::Auto, 0, true ) );
-static_assert( docsAfterCodeFitsCeiling( 0 ) && !docsAfterCodeFitsCeiling( 1200 ) && docsAfterCodeFitsCeiling( 8000 ) );
+static_assert( docsAfterCodeFitsCeiling( 0, false ) && !docsAfterCodeFitsCeiling( 1200, false ) && docsAfterCodeFitsCeiling( 8000, false ) );
+static_assert( !docsAfterCodeFitsCeiling( 0, true ) && !docsAfterCodeFitsCeiling( 8000, true ) );   // a body ceiling is tight at any (or no) token budget
 static_assert( endLinesFitCeilingFor( ForEndLinesMode::Always, 1, true ) && !endLinesFitCeilingFor( ForEndLinesMode::Never, 0, false ) );
 inline bool endLinesFitCeiling( std::size_t budgetTokens, bool bodyCeiling )
 {

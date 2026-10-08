@@ -2218,7 +2218,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
                         notesPtr,                             // L3: field-notes surfacing (inert when null)
                         flRootArg,                            // R-E: root-relative p=, same argument the CLI twin passes
                         rw::forLensRules( !noRoute && !taskAsksAboutDocs( task ) && !std::getenv( "RIPWIRE_NO_DOCS_AFTER_CODE" )
-                                              && rw::docsAfterCodeFitsCeiling( budgetTokens ),
+                                              && rw::docsAfterCodeFitsCeiling( budgetTokens, /*bodyCeiling=*/false ),
                                           rw::endLinesFitCeiling( budgetTokens, /*bodyCeiling=*/false ) ),   // LB-A, e=, docs reorder
                         &mcpDroppedPositive,                  // A2: exact count, see droppedPositiveCount (serialize.h)
                         &mcpShownIds,                         // lane 2: see verbs_for.h shownSigIds

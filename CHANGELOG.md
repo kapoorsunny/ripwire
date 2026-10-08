@@ -38,10 +38,11 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
   choose which rows are shown, so no doc row is ever evicted by it; the shown rows' `r=` values are kept as a set and
   reassigned in the new order (so for a moved row `r=` is no longer its score rank), and `<sigs docs_after_code="N">` (JSON `"docs_after_code"`) says how many doc rows moved.
   A question that names docs (`doc…`, `readme`, `guide`, `tutorial`, `manual`, `markdown`, `wiki`, `faq`, `howto`, a
-  change or translation cue, or a named `.md`/`.rst` file) keeps the plain score order, and so does `--no-route`;
-  An answer under an explicit ceiling TIGHTER than the default signature budget
-  (`--token-budget` below it, MCP `budget_tokens` likewise) is not reordered and carries no `docs_after_code`: it is the answer
-  it was before the reorder, so its est_tokens promise stays what it was (the reading would be uncharged bytes).
+  change or translation cue, or a named `.md`/`.rst` file) keeps the plain score order, and so does `--no-route`.
+  An answer under an explicit ceiling TIGHTER than the default signature budget (`--token-budget` below it, MCP
+  `budget_tokens` below it, or a body ceiling, `--max-tokens` with `--detail`) is not reordered and carries no
+  `docs_after_code`: it is the answer it was before the reorder, so its est_tokens promise stays what it was (the reading
+  would be uncharged bytes). These are the same three ceilings that drop `e=`, decided by one predicate.
   `RIPWIRE_NO_DOCS_AFTER_CODE`, set to any value (even empty or `0`), turns the reorder off everywhere (CLI and MCP `for`).
 
 Gate: `forsigspancheck` (fixture `test/forcompletefix`, C/JS/Python/TS).

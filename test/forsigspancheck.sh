@@ -60,6 +60,9 @@
 #        MCP est_tokens is the twin's (already above 1200 on base; not this rule's to fix). Near misses: no ceiling and
 #        --token-budget=8000 still reorder and carry docs_after_code= with its reading, XML, JSON and MCP; a question that
 #        names docs keeps score order at 1200 too.
+#        A BODY ceiling (--max-tokens=N --detail=K, XML only: --json refuses the pair, MCP `for` has no max_tokens) is the third tight
+#        ceiling: the same twin equality, est_tokens <= N, on the TS fixture at 1600 and the Python+docs fixture (pydocs) at 1550
+#        (RED at f4253d45: est 1634 > 1600 / 1622 > 1550, over_ceiling="1"); near miss --detail alone still reorders.
 #   (J)  dialect parity: --for --json "sigs" entries carry "e" equal to the XML rows' e= (and none where XML has none).
 #   (M)  the MCP `for` twin: the same e= on the C rows, none on the extent_suspect rows, and a legend clause for e=.
 #   (L)  legend: --legend=full defines e= and says what it does NOT mean (absent = unknown, not 0; l= is the name's
@@ -449,6 +452,29 @@ for b in 700 1200; do
         tcheck "T/mcp budget_tokens=$b: byte-equal to the plain-order twin, no docs_after_code= (est_tokens not gated: base MCP is already over)" tight "$TMP/t$b.on.mcp.json" "$TMP/t$b.off.mcp.json"
     fi
 done
+# (T) body ceiling (--max-tokens=N --detail=K): the third tight explicit ceiling (B1' of the delta review of f4253d45).
+# est_tokens must stay <= N exactly as it did before the reorder: the answer is byte-equal to the plain-order twin. Both fixtures
+# sit in the window where the uncharged note alone pushed a within-ceiling answer over (RED at f4253d45: ts 1534 -> 1634 with
+# over_ceiling="1" at 1600; pydocs 1523 -> 1622 at 1550). JSON refuses the pair and MCP `for` has no body-ceiling input.
+QP='How is a message delivered to its handler?'
+for spec in "ts|$Q1|1600" "pydocs|$QP|1550"; do
+    r="${spec%%|*}"; rest="${spec#*|}"; q="${rest%|*}"; mt="${rest##*|}"
+    ON="$( onr "$r" "bc$mt" "$q" "--max-tokens=$mt" --detail=1 )"; OFF="$( offr "$r" "bc$mt" "$q" "--max-tokens=$mt" --detail=1 )"
+    if ran_ok "$ON" "T/body/$r" && ran_ok "$OFF" "T/body/$r (twin)"; then
+        tcheck "T/body $r --max-tokens=$mt --detail=1: byte-equal to the plain-order twin, no docs_after_code=, est_tokens <= $mt" tight "$ON" "$OFF" "$mt"
+    fi
+    # near miss: --detail alone is not a ceiling (no --max-tokens), so the reorder and its note still apply
+    ON="$( onr "$r" "bd" "$q" --detail=1 )"; OFF="$( offr "$r" "bd" "$q" --detail=1 )"
+    if ran_ok "$ON" "T/body/near/$r" && ran_ok "$OFF" "T/body/near/$r (twin)"; then
+        tcheck "T/body/near $r --detail=1 without --max-tokens: the reorder and its note still apply" reorders "$ON" "$OFF"
+    fi
+done
+# --json refuses the pair (the arm above is XML-only), and MCP `for` takes no max_tokens: if either ever accepts it, this arm must be
+# replaced by a byte-equal one.
+( cd "$CORPUS/ts" && "$BIN" . --no-cache "--for=$Q1" --max-tokens=1600 --detail=1 --json >"$TMP/bcj.out" 2>"$TMP/bcj.err" ); jrc=$?
+if [ "$jrc" -ne 0 ] && grep -q 'two output SHAPES' "$TMP/bcj.err"; then ok "T/body --json: refuses --max-tokens with --detail (no JSON body-ceiling answer to gate)"; else no "T/body --json: expected the two-shapes refusal, rc=$jrc"; fi
+mcpfor "$TMP/bcm.mcp.json" 0 "$Q1" ',"max_tokens":1600,"detail":1'
+if grep -q "unknown field: 'max_tokens'" "$TMP/bcm.mcp.json"; then ok "T/body mcp: for refuses max_tokens (no MCP body-ceiling input to gate)"; else no "T/body mcp: for no longer refuses max_tokens — add a byte-equal arm"; fi
 # near misses: the SAME question with no explicit ceiling, and a ceiling at/above the default share, still reorder
 for b in 0 8000; do
     for spec in "xml|" "json|--json"; do

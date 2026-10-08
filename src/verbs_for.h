@@ -2295,9 +2295,10 @@ std::optional<int> runForLens( const MainDispatch& d )
         LensRanking        lr        = computeLensRanking( d, cfg.forTask, forCompactPosture( cfg ),
                                                            /*fullDistribution=*/!cfg.candidates );   // deep-tail: the bundle serves the file-grain tail; candidates has no tail and keeps the H2 pruning
         std::vector<float> lensRank  = std::move( lr.rank );
+        const bool         forBodyCeiling   = cfg.maxTokens > 0 && cfg.detail > 0;   // the kShapingVerbs carve-out, read once (e= and the docs reorder share it via serialize.h explicitCeilingTighterThanDefault)
         // code above docs (filter.h): the routed path on a question that does not ask about docs — the shown set's REORDER
         const bool         forDocsAfterCode = !cfg.noRoute && !taskAsksAboutDocs( cfg.forTask ) && !std::getenv( "RIPWIRE_NO_DOCS_AFTER_CODE" )
-                                              && rw::docsAfterCodeFitsCeiling( cfg.tokenBudget > 0 ? std::size_t( cfg.tokenBudget ) : 0u );   // not under a tight explicit ceiling (uncharged note)
+                                              && rw::docsAfterCodeFitsCeiling( cfg.tokenBudget > 0 ? std::size_t( cfg.tokenBudget ) : 0u, forBodyCeiling );   // not under a tight explicit ceiling (uncharged note)
         const std::string  routeNoteRaw = std::move( lr.routeNote ); // verbatim; lands ONLY in route= (attribute-escaped) + the JSON twin — L1: the comment no longer echoes it
         const std::string  mentionNote( std::move( lr.mentionNote ) );
         const std::string  boostNote( std::move( lr.boostNote ) );
@@ -2510,7 +2511,6 @@ std::optional<int> runForLens( const MainDispatch& d )
         // header has a MEASURED hard byte constraint (fornotesbudgetcheck), where 150 bytes of prose is
         // 2% of a 1550-token ceiling. Gate: test/budgetpolicycheck.sh arm (B).
         const bool forGateBudget  = cfg.tokenBudget > 0;
-        const bool forBodyCeiling = cfg.maxTokens > 0 && cfg.detail > 0;   // the kShapingVerbs carve-out, read once
         const bool forEndLines = rw::endLinesFitCeiling( forGateBudget ? std::size_t( cfg.tokenBudget ) : 0u, forBodyCeiling );   // e= rides?
         if( forGateBudget )
         {
