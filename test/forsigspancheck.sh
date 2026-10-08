@@ -61,8 +61,8 @@
 #        --token-budget=8000 still reorder and carry docs_after_code= with its reading, XML, JSON and MCP; a question that
 #        names docs keeps score order at 1200 too.
 #        A BODY ceiling (--max-tokens=N --detail=K, XML only: --json refuses the pair, MCP `for` has no max_tokens) is the third tight
-#        ceiling: the same twin equality, est_tokens <= N, on the TS fixture at 1600 and the Python+docs fixture (pydocs) at 1550
-#        (RED at f4253d45: est 1634 > 1600 / 1622 > 1550, over_ceiling="1"); near miss --detail alone still reorders.
+#        ceiling: the same twin equality, est_tokens <= N, on the TS fixture at 1600 and the Python+docs fixture (pydocs) at 1660
+#        (RED at f4253d45: est 1634 > 1600 / 1725 > 1660, over_ceiling="1"); near miss --detail alone still reorders.
 #   (J)  dialect parity: --for --json "sigs" entries carry "e" equal to the XML rows' e= (and none where XML has none).
 #   (M)  the MCP `for` twin: the same e= on the C rows, none on the extent_suspect rows, and a legend clause for e=.
 #   (L)  legend: --legend=full defines e= and says what it does NOT mean (absent = unknown, not 0; l= is the name's
@@ -455,9 +455,9 @@ done
 # (T) body ceiling (--max-tokens=N --detail=K): the third tight explicit ceiling (B1' of the delta review of f4253d45).
 # est_tokens must stay <= N exactly as it did before the reorder: the answer is byte-equal to the plain-order twin. Both fixtures
 # sit in the window where the uncharged note alone pushed a within-ceiling answer over (RED at f4253d45: ts 1534 -> 1634 with
-# over_ceiling="1" at 1600; pydocs 1523 -> 1622 at 1550). JSON refuses the pair and MCP `for` has no body-ceiling input.
+# over_ceiling="1" at 1600; pydocs 1626 -> 1725 at 1660). JSON refuses the pair and MCP `for` has no body-ceiling input.
 QP='How is a message delivered to its handler?'
-for spec in "ts|$Q1|1600" "pydocs|$QP|1550"; do
+for spec in "ts|$Q1|1600" "pydocs|$QP|1660"; do
     r="${spec%%|*}"; rest="${spec#*|}"; q="${rest%|*}"; mt="${rest##*|}"
     ON="$( onr "$r" "bc$mt" "$q" "--max-tokens=$mt" --detail=1 )"; OFF="$( offr "$r" "bc$mt" "$q" "--max-tokens=$mt" --detail=1 )"
     if ran_ok "$ON" "T/body/$r" && ran_ok "$OFF" "T/body/$r (twin)"; then
