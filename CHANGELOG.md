@@ -966,6 +966,46 @@ after the fix.
 
 Gate: `forsigspancheck` (fixture `test/forcompletefix`, C/JS/Python/TS).
 
+### Changed — leaner answers: `--whereis` lists definitions, two lossless row spellings, the MCP legend once per session
+
+Measured on 90 rung-0 answers of a comparison table (eight repos, three in-sample and five held out), base vs this
+build: 631,732 → 611,785 B for the lossless changes alone (−3.2%), 568,600 B with the `--whereis` default (−10.0%).
+Every gold item the base answers supplied is still supplied (502 of 502), and decoding the lossless spellings gives
+the base answer back element for element on all 90.
+
+- **`--whereis=SYM` lists the definitions and counts the references, when that answer is more complete or shorter.** Every
+  `kind="def"` row is listed; the `kind="ref"` rows are counted in one `<refs count="N" next="--whereis=SYM
+  --whereis-listing=refs"/>` element whose `next=` lists exactly those rows. The default serves this page when it
+  lists MORE definitions than the `--whereis-listing=all` page does under the same row cap (a capped all page can list
+  fewer: HEAD's references fill the cap before the branch definitions arrive), whatever its bytes. When both pages list
+  the same definitions, it serves this page only if it is strictly shorter in bytes (compared as written and in the
+  compact legend), and a tie lists every hit. On a symbol with few references (one to three on a 60-symbol sample) the
+  count and its legend reading cost more than the rows they replace, so the default never serves a page that lists
+  fewer definitions, nor, for the same definitions, one that lists fewer rows in more bytes (an explicit
+  `--whereis-listing=defs` is served as asked).
+  `--whereis-listing=defs|refs|all` (MCP `listing`) picks the rows; `all` is the whole hit list. An answer with no
+  reference row, or no definition row (the mentions are then the answer), lists every hit. `kind="def"` is the
+  parser's label: a definition it does not model (a Ruby `define_method`, a `setattr`, a name bound by assignment) is
+  among the counted references, and the legend says so. Median where-defined answer 10,455 → 1,560 B.
+  `shown=`/`capped=`/`--limit`/`--offset` and `<more hits=>` window the listed rows; `hits=` counts every row;
+  `complete=` reads the listing.
+- **Lossless:** a `--whereis` row on HEAD's commit omits `tip=`/`date=` (they read `at=` and the new root
+  `head_date=`); a `--for` lens row omits `cx=`/`ccx=`/`in=` when 0 (the legend says an absent one is 0; the rows
+  kept by the byte budget are unchanged). Median per class: how-it-works −0.24 KB, orient-for −0.26 KB,
+  where-defined −1.95 KB; map answers are unchanged.
+- **MCP: the legend session opens on the first answer.** A stdio session no longer waits for a read of
+  `ripwire://legend-dict`: its first answer carries its legend inline, later answers take the `legend="ref"`
+  posture (rows first, each definition sent once per session, the core carried by the first ref answer).
+  `--mcp-legend=inline` keeps the previous posture; `legend:"compact"`/`"full"` still keep one answer inline; the
+  CLI and the HTTP transport are unchanged. A ten-call session on one repo: 45,463 → 32,622 B (inline) → 29,679 B.
+- **Manifest.** The `tools/list` manifest grows 46,732 → 46,869 B: whereis declares `listing`.
+
+Gates: `crossrefcheck` (LEAN L1–L16 — L11–L14 the same-definitions bytes rule: one ref, 73 refs, the exact tie and one
+byte either side, the MCP twin; L15 and L16 the definitions-first rule: a capped answer whose longer defs page lists more
+definitions is served, and one whose pages list the same definitions keeps the shorter all page, each with its MCP twin
+— and listing=all twins), `completecheck`, `legendrefcheck` (J), `mcptwinclaimscheck`
+(A-default), `compactlegendcheck` (re-pinned with the measured bytes; a listing=all twin pin), `mcpmanifestcheck`.
+
 
 ### Added — MCP `grep` rows carry the matched text and a `fetch_body` handle (CLI parity)
 

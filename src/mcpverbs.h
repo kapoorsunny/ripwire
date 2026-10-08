@@ -559,7 +559,8 @@ inline std::string rankByText( const std::string& root, std::string_view mode, i
 // returns "" with `seedFault` set, and the dispatcher speaks the shared refusal triple over -32602 rather
 // than answering a question the caller did not ask.
 inline std::string whereisText( const std::string& root, const std::string& symbol, const std::string& filter,
-                                std::size_t maxHits, McpPageArgs page = {}, bool* seedFault = nullptr )
+                                std::size_t maxHits, McpPageArgs page = {}, bool* seedFault = nullptr,
+                                crossref::WhereisListing listing = crossref::WhereisListing::ShorterOfDefsAll )
 {
     std::string sel = symbol;
     std::string seedSpec;
@@ -594,7 +595,7 @@ inline std::string whereisText( const std::string& root, const std::string& symb
     {
         res.nearMiss = didYouMean( getIndex( root ).ing, sel );
     }
-    return captureXml( [ & ]( std::FILE* f ) { crossref::writeWhereisPage( f, res, maxHits, page.limit, page.offset ); } );
+    return captureXml( [ & ]( std::FILE* f ) { crossref::writeWhereisPage( f, res, maxHits, page.limit, page.offset, listing ); } );
 }
 
 // `stray_content` verb: per ref, the content its own divergent work authored that the live line lacks.
@@ -1080,6 +1081,18 @@ inline std::string grepAuxJson( const std::vector<GrepAuxHit>& hits, const PageW
 //     was false: mcprefusal.h already registers the field, and the batch surface refuses loudly.
 //   · `in` reaches the batch arm at all. It previously took the defaulted GrepIn::Code with no hatch.
 // Absent reads as the default, as an OPTIONAL field must; only a PRESENT unknown spelling refuses.
+// `listing` on whereis — the CLI --whereis-listing= twin, the same closed set (defs|refs|all; absent = the page listing more definitions, else the shorter of defs and all), refused on
+// any other value through the shared sentence so a typo never reads as the default listing.
+inline std::string whereisListingFromArg( std::string_view typed, bool isPresent, crossref::WhereisListing& out )
+{
+    out = crossref::whereisListingOf( typed );
+    if( !isPresent || typed == "defs" || typed == "refs" || typed == "all" )
+    {
+        return {};
+    }
+    return mcprefuse::badValueRefusal( "listing", typed );
+}
+
 inline std::string grepInModeFromArg( std::string_view typed, GrepIn& out )
 {
     out = GrepIn::Code;
@@ -2236,7 +2249,9 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     // e=: a disclosure on the same contract (the CLI twin exempts the same clause)
     const std::size_t mcpEndLineExemptBytes = mcpEndLineLegend.size();
     const std::size_t fixedBytes = headerStr.size() - rw::kForFileTailLegend.size() - mcpConfidenceExemptBytes - mcpIdRouteExemptBytes - mcpAtLegendExemptBytes
-                                 - mcpEndLineExemptBytes + legoStr.size() + composeStr.size() + routeStr.size() + 6;   // + "</ctx>"
+                                 - mcpEndLineExemptBytes
+                                 - rw::forZeroNoteBytes( headerStr )   // lean-answers: the zero reading never costs a row
+                                 + legoStr.size() + composeStr.size() + routeStr.size() + 6;   // + "</ctx>"
     const std::size_t sigsBudget = forBudgetBytes > fixedBytes ? forBudgetBytes - fixedBytes : 1;   // ≥1: 0 = "no budget"
 
     // L3: field-notes surfacing — parity with the CLI --for lens. loadNoteIndex reads root/.ripwire_notes (a
@@ -2267,7 +2282,8 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
                         &mcpShownIds,                         // lane 2: see verbs_for.h shownSigIds
                         &mcpSigsCapped,                       // the ladder's own verdict — see the budget_bytes= splice below
                         mcpTopRowNext,                        // L-W: the widening page on a thin answer, else the body
-                        &mcpSigsCut );                        // cut-fix lane A: docs_dropped= / shrunk readings
+                        &mcpSigsCut,                          // cut-fix lane A: docs_dropped= / shrunk readings
+                        SigRowSpelling{ .elideZeroMetrics = true } );   // lean-answers lane: the CLI twin's row spelling
     } );
     // A2: same insert-before-"-->" splice as the CLI twin (verbs_for.h) — absent entirely on the (overwhelming)
     // no-drop path, so headerStr's bytes are unchanged there (byte-identical to the pre-A2 output). Bare

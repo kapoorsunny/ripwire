@@ -4261,7 +4261,30 @@ struct SigRowFacts
     std::string_view                  topNext = {};         // L-W (forpage.h): the r=1 row's next= when the caller decided
                                                            //   the answer is THIN — the file-grain widening page. Empty ⇒
                                                            //   the body follow-up (--expand=FILE:NAME) exactly as before.
+    bool                              elideZero = false;    // lean-answers lane: the --for lens (CLI and MCP) omits cx=/ccx=/in=
+                                                           //   when "0" — its legend says an absent one IS 0. Only where in=
+                                                           //   is measured on every row (fanIn supplied): without fanIn an
+                                                           //   absent in= means "not measured" (P2.4), so nothing is elided.
 };
+
+// Whether this row's zero cx=/ccx=/in= are omitted (SigRowFacts::elideZero): the lens asked AND in= is measured here.
+inline bool sigRowElidesZero( const SigRowFacts& facts, NodeId id ) noexcept
+{
+    return facts.elideZero && facts.metrics && facts.fanIn != nullptr && id < facts.fanIn->size();
+}
+
+// The bytes the zero elision removed from one row: what the row would have spelled as ` cx="0"` / ` ccx="0"` /
+// ` in="0"`. The --for ladder still CHARGES them (SigEntry::elidedBytes), so the rows the budget keeps are exactly the
+// rows it kept before the elision — the change is a format change, never a different selection.
+inline std::size_t sigRowZeroElidedBytes( const Symbol& s, const SigRowFacts& facts, NodeId id ) noexcept
+{
+    if( !sigRowElidesZero( facts, id ) )
+    {
+        return 0;
+    }
+    return ( s.cx == 0 ? sizeof( " cx=\"0\"" ) - 1 : 0u ) + ( s.ccx == 0 ? sizeof( " ccx=\"0\"" ) - 1 : 0u )
+         + ( ( *facts.fanIn )[ id ] == 0 ? sizeof( " in=\"0\"" ) - 1 : 0u );
+}
 
 // P7 (terminality round A, lane R, 2026-09-05): a lens row's own file, spelled root-relative exactly as the
 // <f p=> wrapper it replaced was — the ONE spelling both dialects' rows (p= / "p") and the r=1 next= use.
@@ -4269,6 +4292,36 @@ inline std::string lensRowPath( const IngestResult& ing, std::uint32_t fileId, s
 {
     return rootArg.empty() ? std::string( ing.files[ fileId ] )
                            : std::string( rw::sarif::rootRelativeUri( ing.files[ fileId ], rw::sarif::rootPrefixOf( rootArg ) ) );
+}
+
+// The descriptive tail of one "<d …>" row, after p=/layer= and through the closing '>': cx=/ccx=/in= under facts.metrics
+// (each omitted at 0 where sigRowElidesZero), the Q3 lens + pure, then r=. Split out of sigRowHead so the head stays a head.
+inline void sigRowTail( char* tail, std::size_t cap, const Symbol& s, const SigRowFacts& facts, NodeId id, const char* rankAttr )
+{
+    if( facts.metrics && sigRowElidesZero( facts, id ) )
+    {
+        // lean-answers lane: the same three facts, each omitted at 0 (the lens legend: absent = 0)
+        char cxAttr[ 24 ];  cxAttr[ 0 ] = '\0';
+        char ccxAttr[ 24 ]; ccxAttr[ 0 ] = '\0';
+        char inAttr[ 24 ];  inAttr[ 0 ] = '\0';
+        if( s.cx != 0 )                    { rw::formatTo( cxAttr, sizeof( cxAttr ), " cx=\"{}\"", s.cx ); }
+        if( s.ccx != 0 )                   { rw::formatTo( ccxAttr, sizeof( ccxAttr ), " ccx=\"{}\"", s.ccx ); }
+        if( ( *facts.fanIn )[ id ] != 0 )  { rw::formatTo( inAttr, sizeof( inAttr ), " in=\"{}\"", ( *facts.fanIn )[ id ] ); }
+        rw::formatTo( tail, cap, "{}{}{}{}{}{}>", rw::cstr( cxAttr ), rw::cstr( ccxAttr ), rw::cstr( inAttr ), facts.lens, facts.pure, rankAttr );
+    }
+    else if( facts.metrics )
+    {
+        char inAttr[ 24 ];  inAttr[ 0 ] = '\0';
+        if( facts.fanIn && id < facts.fanIn->size() )
+        {
+            rw::formatTo( inAttr, sizeof( inAttr ), " in=\"{}\"", ( *facts.fanIn )[ id ] );
+        }
+        rw::formatTo( tail, cap, " cx=\"{}\" ccx=\"{}\"{}{}{}{}>", s.cx, s.ccx, rw::cstr( inAttr ), facts.lens, facts.pure, rankAttr );
+    }
+    else
+    {
+        rw::formatTo( tail, cap, "{}{}{}>", facts.lens, facts.pure, rankAttr );
+    }
 }
 
 // P2.3/P2.4 — the exact "<d …>" opening tag of ONE signature row, defined once so the two-phase (globally
@@ -4316,19 +4369,7 @@ inline std::string sigRowHead( const IngestResult& ing, NodeId id, const SigRowF
         rw::formatTo( rankAttr, sizeof( rankAttr ), " r=\"{}\"", facts.rank );
     }
     char tail[ 224 ];
-    if( facts.metrics )
-    {
-        char inAttr[ 24 ];  inAttr[ 0 ] = '\0';
-        if( facts.fanIn && id < facts.fanIn->size() )
-        {
-            rw::formatTo( inAttr, sizeof( inAttr ), " in=\"{}\"", ( *facts.fanIn )[ id ] );
-        }
-        rw::formatTo( tail, sizeof( tail ), " cx=\"{}\" ccx=\"{}\"{}{}{}{}>", s.cx, s.ccx, rw::cstr( inAttr ), facts.lens, facts.pure, rw::cstr( rankAttr ) );
-    }
-    else
-    {
-        rw::formatTo( tail, sizeof( tail ), "{}{}{}>", facts.lens, facts.pure, rw::cstr( rankAttr ) );
-    }
+    sigRowTail( tail, sizeof( tail ), s, facts, id, rw::cstr( rankAttr ) );
     head += tail;
     // extent honesty (kExtentSuspectRowLegend): after r=, before next=, absent when every check held — so every
     // pre-existing adjacency on an unflagged row is byte-stable and the budget ledger still measures this string.
@@ -5012,6 +5053,13 @@ inline void pushShownSigId( std::vector<NodeId>* shownIdsOut, const std::vector<
     }
 }
 
+// lean-answers lane: packSignatures' row spelling, passed as a NAMED type rather than a trailing bool, so a parameter
+// another change appends after it cannot bind to it positionally (a bool argument does not convert to this aggregate).
+struct SigRowSpelling
+{
+    bool elideZeroMetrics = false;   // omit a zero cx=/ccx=/in= on a row (SigRowFacts::elideZero); the legend says absent = 0
+};
+
 inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::vector<float>& rank,
                             int topN, std::size_t budgetBytes,
                             bool metrics = false, const std::vector<std::uint32_t>* fanIn = nullptr,
@@ -5059,9 +5107,12 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                             std::string_view topRowNext = {},    // L-W (forpage.h): the r=1 row's next= when the caller
                                                              //   judged the answer THIN (the widening page); "" ⇒ the
                                                              //   --expand body follow-up, byte-identical to before.
-                            SigsCutReport* cutOut = nullptr )   // cut-fix lane A: the tag's shown/total/docs_dropped/capped,
+                            SigsCutReport* cutOut = nullptr,   // cut-fix lane A: the tag's shown/total/docs_dropped/capped,
                                                              //   for the caller's legend splices. Lens path only; zeroed
                                                              //   (nothing cut) on every other path.
+                            SigRowSpelling spelling = {} )   // lean-answers lane: the --for lens's zero cx=/ccx=/in= omitted
+                                                             //   (SigRowFacts::elideZero); its legend says absent = 0. Default ⇒
+                                                             //   byte-identical (pack-task, from-trace and the map stay as they were).
 {
     if( cutOut )
     {
@@ -5168,6 +5219,8 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             std::uint32_t globalRank = 0;   // 1-based global rank — the ladder's only rank input
             std::size_t   fileSlot   = 0;   // index into sigFiles (P7: the ladder releases the file's notes at liveCount 0)
             std::string   head;             // the exact "<d …>" opening tag
+            std::size_t   elidedBytes = 0;  // lean-answers lane: the zero cx=/ccx=/in= bytes `head` omits, still CHARGED by
+                                            //   entryCost so the ladder keeps exactly the rows it kept before the elision
             std::string   doc;              // RAW doc text after the rank tiers ("" ⇒ no <doc> child)
             std::string   sig;              // RAW one-line signature after the rank tiers
             std::string   notes;            // W3-N2: this symbol's note children, PRE-RENDERED (the JSON sibling's shape)
@@ -5289,7 +5342,8 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                     }
                 }
 
-                std::string head = sigRowHead( ing, id, SigRowFacts{ metrics, fanIn, qbuf, pure, globalRank, topRowNext }, esc, rootArg );   // d1: rank fact (ladder path)
+                const SigRowFacts rowFacts{ metrics, fanIn, qbuf, pure, globalRank, topRowNext, spelling.elideZeroMetrics };
+                std::string head = sigRowHead( ing, id, rowFacts, esc, rootArg );   // d1: rank fact (ladder path)
 
                 std::string doc = docCommentBefore( src, a );
                 redactInPlace( doc, redact );
@@ -5307,6 +5361,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                 e.globalRank = globalRank;
                 e.fileSlot   = fileSlot;
                 e.head       = std::move( head );
+                e.elidedBytes = sigRowZeroElidedBytes( ing.symbols[ id ], rowFacts, id );
                 e.doc        = std::move( doc );
                 e.sig        = std::move( sig );
                 e.notes      = renderNoteChildren( noteIndex, symbolNoteTarget( noteIndex, ing, s ), esc );   // L3/D5 key + W3-N2 pre-render
@@ -5336,7 +5391,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             {
                 return 0;
             }
-            std::size_t c = e.head.size() + 4;                                       // "<d …>" + "</d>"
+            std::size_t c = e.head.size() + e.elidedBytes + 4;                       // "<d …>" + "</d>" (+ the elided zeros, see SigEntry)
             if( !e.doc.empty() )
             {
                 c += 11 + escapeXml( e.doc, esc ).size(); // "<doc>" + "</doc>"

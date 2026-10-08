@@ -118,6 +118,12 @@ PY
 # re-pinning, against the pre-change golden: the root's est_tokens=, the header clause and the row's attribute are the whole
 # diff — no ranking, demotion or route byte moved, and arm (f)'s own assertions still hold. The noroute golden is
 # UNCHANGED: its <bodies> carry no <calls> row through a name-only edge, so the clause does not ride (present-only).
+# RE-PIN 2026-10-07 (lane/lean-answers-068, --for zero elision): docdemotegolden_for.xml 5821 -> 5505 B
+# (est_tokens "2328" -> "2202") and docdemotegolden_noroute.xml 9423 -> 9092 B (est_tokens "3333" -> "3200").
+# ONE identified change: a lens row omits cx=/ccx=/in= when 0 and the legend says an absent one is 0.
+# Verified before re-pinning: putting cx="0"/ccx="0"/in="0" back on every r= row, deleting the zero reading
+# from the legend comment and masking est_tokens=/at=, live and previous goldens are byte-identical on BOTH
+# fixtures — no ranking, demotion, route or row moved. (f)/(h)'s own assertions are unchanged.
 # RE-PIN 2026-09-13 (merge of lane/sc-legend and lane/for-widen): docdemotegolden_for.xml RE-MEASURED on the
 # MERGED tree at 5,809 B (est_tokens "2328"), from 5,887 on for-widen's tree and 5,425 on sc-legend's. Neither
 # lane's own number is the merged one, so this is measured, not summed. Three identified changes, and the golden

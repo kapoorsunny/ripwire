@@ -352,8 +352,25 @@ inline constexpr std::string_view kForRouteCodeLegend =
 // bytes verbatim AND the session was already served them, so a clause spelled twice would silently stop being
 // dropped (the answer stays honest — it just keeps the clause inline). Byte-identical to the inline spellings.
 // No "--" in any of them: they ride inside an XML comment (G4).
+// lean-answers lane: the zero-elision readings (an absent cx=/ccx=/in= is 0 on a --for lens row), one per dialect. Each
+// is EXEMPT from the sig ledger (forZeroNoteBytes): spelling the reading must never cost the answer a row, so the rows
+// kept are exactly the rows kept before the elision. Each is checked verbatim inside the clause that carries it.
+inline constexpr std::string_view kForZeroAbsentCompactNote = " (absent cx/ccx/in = 0)";
+inline constexpr std::string_view kForZeroAbsentFullNote = ", each absent when 0;";
+inline constexpr std::string_view kForZeroAbsentMcpNote = "; an absent cx/ccx/in is 0";
+// The bytes of those readings a header carries — what its sig ledger leaves uncharged.
+inline std::size_t forZeroNoteBytes( std::string_view header ) noexcept
+{
+    std::size_t n = 0;
+    for( const std::string_view note : { kForZeroAbsentCompactNote, kForZeroAbsentFullNote, kForZeroAbsentMcpNote } )
+    {
+        n += header.find( note ) != std::string_view::npos ? note.size() : 0u;
+    }
+    return n;
+}
 inline constexpr std::string_view kMcpForBuildingBlocksLegend =
-    ": reusable building blocks (cx=complexity, in=reuse-count) — prefer composing/reusing these over reimplementing";
+    ": reusable building blocks (cx=complexity, in=reuse-count; an absent cx/ccx/in is 0) — prefer composing/reusing these over reimplementing";
+static_assert( kMcpForBuildingBlocksLegend.find( kForZeroAbsentMcpNote ) != std::string_view::npos, "the MCP for zero reading is spelled once" );
 inline constexpr std::string_view kMcpForBundleSigsLegend =
     "; bundle=sigs: signatures only in this bundle, no inline bodies — fetch a symbol's full body with the fetch_body verb";
 inline constexpr std::string_view kMcpForLensColumnsLegend =

@@ -959,6 +959,9 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // 2026-10-01 freshness fix (crossref.h scanWorktree): present only on a checkout that differs from HEAD.
     { "worktree", "worktree=read|partial|unlisted: the checkout differs from HEAD (at= +dirty); each changed path is read from disk as ref=\"worktree\" rows replacing HEAD's, and on-head=/hits=/head_labels= count them; on-head= then reads the checkout, not HEAD's commit; partial = some changed path unreadable or a directory (nested repo, submodule), its HEAD rows may be stale; unlisted = git could not list the changes; either withholds complete=", false, "whereis", MapHeaderRead::No, {}, "whereis" },
     { "hits", "more hits=N: rows after this page; page on with offset=next_offset", true, "more", MapHeaderRead::No, {}, "whereis" },
+    // lean-answers lane (crossref.h WhereisListing / the tip-date hoist): each rides only the answer that carries it.
+    { "listing", "listing=defs|refs: only those kind= rows listed; under defs <refs count=N next=> counts the kind=ref rows and next= lists them; the window counts listed rows; default: defs if it lists more defs than all, else if shorter; a def the parser does not model (define_method, setattr, assignment) is a counted ref", false, "whereis", MapHeaderRead::No, {}, "whereis" },
+    { "head_date", "head_date=: a hit without tip= date= has tip= at=, date= this", false, "whereis", MapHeaderRead::No, {}, "whereis" },
     // the GREY ZONE of the same sweep: attributes the compact prose named in passing ("in/out, cx/ccx", "<g> groups") but never
     // DEFINED as name= — legendcoveragecheck's default rows hold the definitional predicate, so each gets its reading here.
     // affected: src/verbs_change.h runAffected
@@ -1015,7 +1018,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // doc-drift: src/docdrift.h
     { "filter", "filter=: the path filter this run was narrowed to; docs outside it were not checked", false, "doc-drift", MapHeaderRead::No, {}, "doc-drift" },
     // whereis: src/crossref.h (the exhaustiveness claim)
-    { "complete", "complete=1: the scan read every ref AND this page lists every hit (absent: one of the two is a floor)", false, "whereis", MapHeaderRead::No, {}, "whereis" },
+    { "complete", "complete=1: the scan read every ref AND this page lists every hit (of its listing=) (absent: one of the two is a floor)", false, "whereis", MapHeaderRead::No, {}, "whereis" },
     // plan-lint: src/planlint.h
     { "file", "file=/dialect=: the plan read and whether the PLAN dialect was detected (dialect=0: nothing to lint)", false, "plan-lint", MapHeaderRead::No, {}, "plan-lint" },   // also defines dialect=
     { "cards", "cards=/ledger=: card rows found / whether the doc carries a ledger (ledger_line= names its line)", false, "plan-lint", MapHeaderRead::No, {}, "plan-lint" },   // also defines ledger=
@@ -2349,6 +2352,14 @@ inline CompactOutcome applyCompactDialect( std::string& doc, std::string_view hi
 {
     std::string doc( candidate );
     return applyCompactDialect( doc, hint ) == CompactOutcome::Rewritten ? doc.size() : 0;
+}
+
+// …or, where the dialect has nothing to rewrite (0 above), the candidate's own size: the bytes the compact posture
+// delivers either way. --from-trace's section ladder and --whereis's default listing (crossref.h) price with it.
+[[nodiscard]] inline std::size_t compactDeliveredBytesOrWritten( std::string_view candidate, std::string_view hint )
+{
+    const std::size_t delivered = compactDeliveredBytes( candidate, hint );
+    return delivered > 0 ? delivered : candidate.size();
 }
 
 } // namespace rw

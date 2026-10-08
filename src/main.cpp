@@ -4353,7 +4353,8 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
             mcpRoots.emplace_back( r );
         }
         return runMcp( { .topK = cfg.topK, .stable = cfg.stable, .noRedact = cfg.noRedact, .root = std::string( cfg.rootPath ),
-                         .roots = mcpRoots, .toolMask = tools.mask, .toolSpec = std::string( cfg.mcpTools ) } );   // P2-C: --mcp turns --stable on by default (set in parseArgs); A3-F3: the server redacts by default like the CLI
+                         .roots = mcpRoots, .toolMask = tools.mask, .toolSpec = std::string( cfg.mcpTools ),
+                         .legendInline = cfg.mcpLegend == "inline" } );   // P2-C: --mcp turns --stable on by default (set in parseArgs); A3-F3: the server redacts by default like the CLI
     }
 
     // ── multi-root workspace refusals: each cut verb refuses with ONE clear stderr
