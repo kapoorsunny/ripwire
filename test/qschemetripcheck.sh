@@ -34,6 +34,11 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-10-07, lane/cr-qd-kinds-068 (the defect-shape kind): RE-DERIVED with UPDATE_GOLDEN=1 (hash 2244e7390c…a55ef7).
+#   kQSnapCacheScheme 17 -> 18: the blob gained the defect-shape (anchor, site) records after publicApi (serializeSnapshot,
+#   deserializeSnapshot and computeSnapshot all moved), a BLOB SHAPE change. The manifest gains defectSitesOf (the site
+#   identity the baseline stores); the scanners it calls live in defectshape.h, outside the manifest — disclosed in the
+#   quality.h comment. kParserVer / kCacheVersion unchanged. The train may renumber the scheme.
 # 2026-10-04, train 26a (PR #373, Ruby method lookup, merged onto main 255dc199): RE-DERIVED ONCE on the merged tree with
 #   UPDATE_GOLDEN=1 (hash 9fe75d7e33…283213). The only watched text that moved is the kParserVer declaration: 143 -> 148,
 #   above the branch's 145 and the 145–147 other branch builds have used (148's full-use file tag is 149); quality.h's

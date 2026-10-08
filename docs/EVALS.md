@@ -6178,7 +6178,10 @@ The first ten each target a failure mode measured in the literature; `placeholde
 honesty check on "done" — a stub or TODO the change added — and never gates. `defect-shape` carries four
 facets in `defect=` (`format-arity`, `utf8-cut`, `dedup-first`, `vacuous-assert`), shapes this project's own
 code review kept finding; only `format-arity` gates, and on any origin (new-symbol rows never gate, except
-defect-shape format-arity). Measured recall and false-positive counts: MEASUREMENT_PENDING.
+defect-shape format-arity). Measured (2026-10-07): recall 7/8 on the eight review findings it was built
+from; with every site treated as new, 0 format-arity false positives on this tree (1,330 literal-format calls),
+on the Python 3.13 standard library (405 calls) and on libc++'s std::format tests (80 calls; the 24 hits are its
+deliberately ill-formed `.verify.cpp` calls); vacuous-assert sample precision 30/30 on this tree's gates.
 
 Note that some user-facing summaries abbreviate four of these (`dup`, `dead`, `churn`,
 `clone-of-reused-helper` / `reuse-decline`). **Match against the strings above** when grepping real

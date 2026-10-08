@@ -236,6 +236,8 @@ std::string formattonok( int a, int b ) { char out[16]; std::format_to_n( out, 1
 std::string posnested( const std::string& s, int w ) { return std::format( "{}", s ); }
 std::string swapped( int a, int b ) { return std::format( "{} {}", a, b, b ) + std::format( "{}", a ); }
 std::string moved( int a ) { return std::format( "m={}", a, a ); }
+std::string cmpinarg( int a, int b ) { return std::format( "{}", a > b ); }
+std::string tmplarg( int a, int b ) { return std::format( "{}", b ); }
 std::string legacy( int a ) { return std::format( "{} {}", a, a, a ); }
 int drive() { return 0; }
 EOF
@@ -287,6 +289,8 @@ void ostreamprint( int a ) { std::print( std::cout, "{} {}", a ); }
 std::string formattonok( int a, int b ) { char out[16]; std::format_to_n( out, 10, "{} {}", a, b ); return out; }
 std::string posnested( const std::string& s, int w ) { return std::format( "{0:>{1}}", s, w ); }
 std::string swapped( int a, int b ) { return std::format( "{} {}", a, b ) + std::format( "{}", a, b ); }
+std::string cmpinarg( int a, int b ) { return std::format( "{}", a > b, a ); }
+std::string tmplarg( int a, int b ) { return std::format( "{} {}", std::pair<int, int>{ a, b }.first, b ); }
 std::string legacy( int a ) { return std::format( "{} {}", a, a, a ); }
 std::string freshbad( int a ) { return std::format( "{}", a, a ); }
 std::string freshok( int a ) { return std::format( "{} {}", a, a ); }
@@ -309,6 +313,7 @@ ds_has  "$L" format-arity fmtns       gating
 ds_has  "$L" format-arity localebad   gating
 ds_has  "$L" format-arity unrefpos    gating
 ds_has  "$L" format-arity swapped     gating
+ds_has  "$L" format-arity cmpinarg    gating
 ds_has  "$L" format-arity freshbad    gating-new
 ds_wasnow "$L" format-arity extra 0 1
 ds_wasnow "$L" format-arity concat 0 1
@@ -338,11 +343,12 @@ ds_none "$L" unqualified "an unqualified in-repo format() is not the format fami
 ds_none "$L" ostreamprint "the std::print ostream overload is skipped, never guessed (stated floor)"
 ds_none "$L" formattonok "std::format_to_n puts the format at index 2: two fields, two arguments"
 ds_none "$L" posnested   "a positional nested width {0:>{1}} references both arguments"
+ds_none "$L" tmplarg     "a template argument list (std::pair<int, int>) the comma split would cut makes the count unknowable (skipped)"
 ds_none_p "$L" src/vamacro.h "a format inside a macro body (__VA_ARGS__) is skipped"
 ds_none "$L" moved        "a mismatch moved out of this file is not new"
 ds_none "$L" movedRenamed "a mismatch moved to a new file and renamed is not new (its call text was already in the baseline)"
 ds_none_p "$L" src/moved.cpp "the moved mismatch's new file carries no row"
-gating_split "$L" 13
+gating_split "$L" 14
 OFMT="$QD_OUT"
 fx_run fmt_cpp
 if [ "$QD_OK" = 1 ] && [ "$OFMT" = "$QD_OUT" ]; then ok "$L: delta byte-identical run-to-run"; else no "$L: non-deterministic delta"; fi
@@ -1334,7 +1340,7 @@ print("ROWS %d FRESH %d FRESHGATE %d TOP %s NG %d" % (len(rows), len(fresh), sum
         if [ "${1:-}" != ROWS ]; then no "$L $surf: probe: $V"; continue; fi
         n="$2"; fr="$4"; frg="$6"; top="$8"; ng="${10}"
         case "$n$fr$frg$ng" in *[!0-9]*) no "$L $surf: probe printed non-numbers: $V"; continue ;; esac
-        if [ "$n" -ge 13 ]; then ok "$L $surf: carries the $n format-arity rows (kind + defect keys)"; else no "$L $surf: carries $n format-arity rows, want >= 13"; fi
+        if [ "$n" -ge 14 ]; then ok "$L $surf: carries the $n format-arity rows (kind + defect keys)"; else no "$L $surf: carries $n format-arity rows, want >= 14"; fi
         if [ "$fr" = 1 ] && [ "$frg" = 1 ]; then ok "$L $surf: the new-symbol freshbad format-arity row carries \"gating\": true"
         else no "$L $surf: freshbad rows=$fr gating=$frg (want 1 and 1)"; fi
         if [ "$top" = "$ng" ]; then ok "$L $surf: top-level \"gating\" ($top) equals the rows that carry \"gating\": true"

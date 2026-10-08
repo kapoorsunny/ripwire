@@ -707,8 +707,9 @@ inline bool isAllCapsIdent( std::string_view w ) noexcept
 }
 
 // An argument whose count is unknowable here: a pack expansion, __VA_ARGS__, an all-caps identifier alone (an
-// object-like macro may expand to a comma list), or unbalanced angle brackets (a template argument list the
-// comma split may have cut).
+// object-like macro may expand to a comma list), or more '<' than '>' (a template argument list the comma split
+// may have cut: std::pair<int, int>{} splits as "std::pair<int" and "int>{}"). A lone '>' is a comparison
+// (n > 0) and does not make the count unknowable.
 inline bool argCountUnknowable( std::string_view src, const std::vector<Tok>& toks, const ArgRange& a ) noexcept
 {
     if( a.empty() )
@@ -733,7 +734,7 @@ inline bool argCountUnknowable( std::string_view src, const std::vector<Tok>& to
         angle += tokIs( src, toks[k], "<" ) ? 1 : 0;
         angle -= tokIs( src, toks[k], ">" ) ? 1 : 0;
     }
-    return angle != 0;
+    return angle > 0;
 }
 
 // The argument's tokens are one or more adjacent string literals → their concatenated content; else empty

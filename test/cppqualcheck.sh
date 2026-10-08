@@ -256,9 +256,11 @@ US="$( run . --uses=selectBaseline --no-cache )"
 # to find an annotation naming it — one new call site, same helper.
 # 30 -> 31 (lane/fe-a-false-edges): FE-A's Go module census (graph.h collectGoModules) reads each go.mod above a Go file
 # through the canonical helper — one new call site, same helper.
-[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 31 ] \
-    && ok "repo: --uses=readWholeFile count=31 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 31"
+# 31 -> 32 (lane/cr-qd-kinds-068): quality.h defectSitesOf reads each C++ / Python / Bash test-script file for the
+# defect-shape scanners through the canonical helper — one new call site, same helper.
+[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 32 ] \
+    && ok "repo: --uses=readWholeFile count=32 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
+    || no "repo: --uses=readWholeFile expected 32"
 [ "$( cnt "$( run . --callers=writeTally --no-cache )" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \
     || no "repo: --callers=writeTally expected 1"

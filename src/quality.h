@@ -3372,6 +3372,10 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 //                                             constexpr array, not a function, so this manifest mechanism
 //                                             cannot hash IT — a future edit that only changes the built-in
 //                                             NAME LIST (not these functions' text) will not trip this gate.
+//   defectSitesOf              (quality.h) — the defect-shape site identity (anchor + facet + normalized text)
+//                                             the baseline stores. NOTE (disclosed limitation): the scanners it
+//                                             calls live in defectshape.h, outside this manifest, so a change
+//                                             to what a scanner reports must bump kQSnapCacheScheme by hand.
 // v4 (r27 P0.2) — the blob header gained the EXTRACTION IDENTITY (kIngestCacheVersionMirror +
 // kIngestParserVerMirror; see the long note at their declaration). Everything a Snapshot contains is a
 // function of tree-sitter extraction, so a parserVer bump must retire the blob — it did not, and 28c7d32's
