@@ -43,6 +43,7 @@
 
 #include "infra/Diagnostics.h"
 #include "infra/namesplit.h"   // the ONE ASCII identifier-character pair and the quote-pair strip
+#include "infra/sortutil.h"    // svLess: the string_view order a comparator lambda may use (portablebuildcheck #6c)
 
 namespace rw::defectshape
 {
@@ -845,7 +846,7 @@ inline bool inSortedNames( const std::vector<std::string>* names, std::string_vi
     {
         return false;
     }
-    const auto it = std::lower_bound( names->begin(), names->end(), w, []( const std::string& a, std::string_view b ) { return std::string_view( a ) < b; } );
+    const auto it = std::lower_bound( names->begin(), names->end(), w, []( const std::string& a, std::string_view b ) { return rw::sortutil::svLess( a, b ); } );
     return it != names->end() && *it == w;
 }
 
