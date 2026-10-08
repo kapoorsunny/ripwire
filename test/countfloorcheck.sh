@@ -43,6 +43,9 @@
 #      their derived type); (near miss) a Rust impl for a type the tree never defines still floors.
 #   M  MCP twins: grep's `enclosing` JSON carries callers_floor/floor_next exactly where the CLI <enc> does; the MCP
 #      `for` lego block equals the CLI's.
+#   GO grep <enc> on the Go kinds honesty-small-068 added (t="type" `type N string`, t="functype"): read as a struct
+#      is (a conversion is one call, a type mention is never counted) => callers_floor="1" + floor_next=, like the
+#      Go struct beside them (the kinds' rows in countfloor.h kUseFormOfKind, train 26b).
 #   N  legend: every new attribute is defined in the answer that carries it (compact and full dialects).
 #   O  determinism (x2) + xmllint.
 #
@@ -375,6 +378,24 @@ sys.exit( 0 if r.get( "callers" ) == 2 and "callers_floor" not in r and "floor_n
 MCP_F="$( mcp_call for "{\"path\":\"$W/tsl\",\"task\":\"which router classes implement the Router interface\",\"sections\":\"lego\"}" | grep -oE '<lego>.*</lego>' | head -1 )"
 CLI_F="$( run tsl '--for=which router classes implement the Router interface' --sections=lego | grep -oE '<lego>.*</lego>' | head -1 )"
 if [ -n "$CLI_F" ] && [ "$MCP_F" = "$CLI_F" ]; then ok "(M) MCP for <lego> == CLI --for <lego> (implementors_floor included)"; else no "(M) lego twin differs: cli='$CLI_F' mcp='$MCP_F'"; fi
+
+# ── GO: the Go named-type kinds floor as a struct does ──────────────────────────────────────────────────────
+echo "=== GO: grep <enc> on Go t=\"type\" / t=\"functype\" floors like the Go struct ==="
+mkdir -p "$W/go"
+printf 'package m\n\ntype TestName string\n\ntype Pair struct{ a int }\n\ntype Handler func(int) int\n\nfunc Use(s string) int {\n\tn := TestName(s)\n\tvar p Pair\n\t_ = p\n\treturn len(n)\n}\n\nfunc Wrap(h Handler) int { return h(1) }\n' > "$W/go/m.go"
+MAP_GO="$( run go )"
+for kn in "type:TestName" "struct:Pair" "functype:Handler"; do
+    printf '%s' "$MAP_GO" | grep -q "<s t=\"${kn%%:*}\" n=\"${kn#*:}\"" || no "(GO) premise: ${kn#*:} is not t=\"${kn%%:*}\" in the map"
+done
+for n in TestName Pair Handler; do
+    E_GO="$( enc_row "$( run go "--grep=$n" )" "$n" )"
+    [ -n "$E_GO" ] || { no "(GO) premise: no <enc n=\"$n\"> row"; continue; }
+    if [ "$( attr "$E_GO" callers_floor )" = 1 ] && [ "$( attr "$E_GO" floor_next )" = "--grep=$n" ]; then
+        ok "(GO) <enc n=\"$n\"> callers=\"$( attr "$E_GO" callers )\" carries callers_floor=\"1\" floor_next=\"--grep=$n\""
+    else
+        no "(GO) <enc n=\"$n\"> printed its count as a total: $E_GO"
+    fi
+done
 
 # ── N: legend ────────────────────────────────────────────────────────────────────────────────────────────
 echo "=== N: every new attribute is defined where it rides ==="
