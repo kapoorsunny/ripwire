@@ -834,6 +834,11 @@ boundary, the same rule as the other text caps, and the `...` is added only when
 exactly the cap is shown whole. `test/skillscan.sh` pins a 2-byte and a 4-byte character at the cap, a line of exactly
 120 bytes, and a plain overlong line.
 
+### Fixed — `--help-task` routing coverage figures are labelled as tuning-corpus numbers
+
+The 0.907 / 0.918 coverage and 1.000 precision figures in `docs/EVALS.md` were measured on the tuning corpus. On the held-out prompts `--help-task` recommended on 28 of 214 positive prompts (0.131, measured 2026-10-02), below the pre-registered ≥ 0.60 coverage bar, and the held-out gate that registration called for is not yet built. Docs only; no behaviour change.
+
+
 ### Added — MCP `grep` rows carry the matched text and a `fetch_body` handle (CLI parity)
 
 The MCP `grep` hit row was `{file, line, in}`: no matched text, so an agent re-read every file it had just searched, and

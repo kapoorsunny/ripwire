@@ -1104,7 +1104,7 @@ exists so that the next negative is as publishable as the last one.
 
 **The mechanism under test.** `hooks/ripwire-claude-route.sh`, a Claude Code `UserPromptSubmit` hook.
 On every submitted prompt it asks the deterministic `--help-task` classifier — the same one gated by
-`test/taskroutecheck.sh` at precision 1.000 / harmful 0.000 — and, **only** when that classifier
+`test/taskroutecheck.sh` at precision 1.000 / harmful 0.000 on the tuning corpus — and, **only** when that classifier
 returns `status="recommend"`, injects ONE paste-ready command as `additionalContext`. At
 `status="abstain"` it injects nothing at all. It is the Claude Code port of
 `hooks/ripwire-codex-route.sh`, which has shipped for Codex since 2026-08-28 and has never seen a
@@ -2301,11 +2301,13 @@ verb, so a composed expression the verb would refuse fails the gate rather than 
 | --- | ---: | ---: |
 | skills the router can name (of 16, `ripwire-router` excluded) | **8** | **16** |
 | audit's 39 surface phrasings, recommends | **3** | **9** |
-| corpus `split=test` (n=114) accuracy / coverage | 0.754 / 0.627 | **0.939 / 0.907** |
-| corpus `split=dev` (n=111) accuracy / coverage | — | 0.946 / 0.929 |
-| corpus `split=all` (n=225) accuracy / coverage | 0.809 / 0.730 | **0.942 / 0.918** |
-| precision / harmful / neg-specificity, every split | 1.000 / 0.000 / 1.000 | 1.000 / 0.000 / 1.000 |
+| tuning corpus `split=test` (n=114) accuracy / coverage | 0.754 / 0.627 | **0.939 / 0.907** |
+| tuning corpus `split=dev` (n=111) accuracy / coverage | — | 0.946 / 0.929 |
+| tuning corpus `split=all` (n=225) accuracy / coverage | 0.809 / 0.730 | **0.942 / 0.918** |
+| tuning corpus precision / harmful / neg-specificity, every split | 1.000 / 0.000 / 1.000 | 1.000 / 0.000 / 1.000 |
 | the 189 rows that predate this tier, (status, intent, resolved_symbols) | — | **0 differing** |
+
+The accuracy, coverage and precision figures in this table (0.907, 0.918, 1.000) were measured on the tuning corpus, `test/taskroutefix/prompts.tsv`, the corpus the intents were written against. On the held-out prompts, `test/skillevalfix/prompts.tsv`, `--help-task` recommended on 28 of 214 positive prompts (28/214 = 0.131, measured 2026-10-02), below the pre-registered coverage bar of ≥ 0.60; the held-out gate that registration called for is not yet built.
 
 The remaining 30 of 39 are declined by design and are gated as such: six SHAPING flags (`--scope`,
 `--slice-depth`, `--slice-flow`, `--allow-dirty`, `--no-ignore`, `--no-post-check`) are modifiers on
