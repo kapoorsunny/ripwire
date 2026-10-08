@@ -2324,4 +2324,12 @@ inline CompactOutcome applyCompactDialect( std::string& doc, std::string_view hi
     return applyCompactDialect( doc, hint ) == CompactOutcome::Rewritten ? doc.size() : 0;
 }
 
+// …or, where the dialect has nothing to rewrite (0 above), the candidate's own size: the bytes the compact posture
+// delivers either way. --from-trace's section ladder and --whereis's default listing (crossref.h) price with it.
+[[nodiscard]] inline std::size_t compactDeliveredBytesOrWritten( std::string_view candidate, std::string_view hint )
+{
+    const std::size_t delivered = compactDeliveredBytes( candidate, hint );
+    return delivered > 0 ? delivered : candidate.size();
+}
+
 } // namespace rw

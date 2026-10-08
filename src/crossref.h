@@ -98,7 +98,7 @@
 #include "serialize.h"          // escapeXml
 #include "pageview.h"           // §P8: pageWindow / pageDisclosure — the shared --limit/--offset contract
 #include "nextverb.h"           // nextAttrXml / nextFlag — the <refs next=> follow-up of the default listing
-#include "compactlegend.h"      // compactDeliveredBytes — the default listing is chosen on the bytes the compact dialect delivers
+#include "compactlegend.h"      // compactDeliveredBytesOrWritten — the default listing is chosen on the bytes the compact dialect delivers
 #include "workspace.h"          // wsdetail::segmentsOf
 #include "filter.h"             // §P11.5: rw::pathTierOf — the shared source/test/doc ORDERING tier
 #include "infra/Diagnostics.h"  // ASSUME / DISCLOSE
@@ -3139,14 +3139,6 @@ inline void writeWhereisListedPage( std::FILE* out, const WhereResult& res, std:
     rw::emitRaw( out, "</whereis>" );
 }
 
-// The bytes one whereis page DELIVERS on the posture that prices it: the compact dialect (the CLI and MCP default),
-// or the page as written when that dialect has nothing to rewrite.
-inline std::size_t whereisDeliveredBytes( std::string_view page )
-{
-    const std::size_t compact = compactDeliveredBytes( page, "whereis" );
-    return compact != 0 ? compact : page.size();
-}
-
 // THE DEFAULT, MEASURED (review B1). The Defs page pays a fixed overhead — listing=, the <refs count= next=> element
 // and, under the compact legend, their readings — that eliding one or two short ref rows does not repay: on 24 of 58
 // sampled symbols the Defs page was LONGER than the All page while listing fewer rows. So both pages are rendered and
@@ -3170,7 +3162,8 @@ inline ListedHits whereisServedListing( const WhereResult& res, std::size_t maxH
     const Rendered defsPage = renderToString( [ & ]( std::FILE* f ) { writeWhereisListedPage( f, res, maxHits, 0, 0, defs ); } );
     const Rendered allPage  = renderToString( [ & ]( std::FILE* f ) { writeWhereisListedPage( f, res, maxHits, 0, 0, all ); } );
     const bool     defsShorter = defsPage.ok && allPage.ok && defsPage.text.size() < allPage.text.size()
-                              && whereisDeliveredBytes( defsPage.text ) < whereisDeliveredBytes( allPage.text );
+                              && compactDeliveredBytesOrWritten( defsPage.text, "whereis" )
+                                     < compactDeliveredBytesOrWritten( allPage.text, "whereis" );
     return defsShorter ? std::move( defs ) : std::move( all );
 }
 
