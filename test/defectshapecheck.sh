@@ -669,6 +669,7 @@ std::string othervar( std::string buf, std::string label, std::size_t n ) { retu
 std::string replaced( const std::string& s, std::size_t n ) { return s; }
 std::string packname( const std::string& text, bool pack ) { return text; }
 std::string wordloop( const std::vector<std::string>& words ) { std::string out; return out; }
+std::string capminus( std::string s ) { return s; }
 std::u32string wide( std::u32string s, std::size_t n ) { return s; }
 std::string legacy( std::string s ) { if( s.size() > 40 ) { s.resize( 40 ); s += "..."; } return s; }
 int drive() { return 0; }
@@ -771,6 +772,15 @@ std::u32string wide( std::u32string s, std::size_t n )
     }
     return s;
 }
+std::string capminus( std::string s )
+{
+    if( s.size() > 120 )
+    {
+        s.resize( 117 );
+        s += "...";
+    }
+    return s;
+}
 std::string legacy( std::string s ) { if( s.size() > 40 ) { s.resize( 40 ); s += "..."; } return s; }
 std::string freshcut( std::string s ) { if( s.size() > 60 ) { s = s.substr( 0, 60 ) + "..."; } return s; }
 int drive() { return 1; }
@@ -782,6 +792,7 @@ ds_has  "$L" utf8-cut excerpt  minor
 ds_has  "$L" utf8-cut clip     minor
 ds_has  "$L" utf8-cut build    minor
 ds_has  "$L" utf8-cut erasecut minor
+ds_has  "$L" utf8-cut capminus minor
 ds_has  "$L" utf8-cut freshcut new-symbol
 ds_wasnow "$L" utf8-cut excerpt 0 1
 ds_none "$L" guarded    "the cut backs off continuation bytes (0xC0/0x80)"
@@ -949,8 +960,10 @@ gating_split "$L" 0
 #   checked, `|| no` on the capture, a presence check, a positive assertion on the same output before OR after
 #   the absence, an enclosing if/case that requires content of the same capture, a plain capture under set -e
 #   (errexit aborts on its failure), the match-is-pass polarity, a literal producer, a commented-out shape, a
-#   pre-existing vacuous line, a sound if, a new function with a handled capture, and the same shape in a
-#   script outside a test path.
+#   pre-existing vacuous line, a sound if, a new function with a handled capture, the same shape in a script
+#   outside a test path, a text utility over a file, a script-defined wrapper (stated floor), a presence test
+#   on a variable derived from the capture, a requirement inside a { …; } group, and an elif chain. A capture
+#   derived from another capture (TAG="$( printf '%s' "$OUT" | grep -o … )") is followed back to its run.
 fx_init vac
 mkdir -p "$WORK/vac/test" "$WORK/vac/scripts"
 VHDR="$( cat <<'EOF'
@@ -965,7 +978,7 @@ EOF
 )"
 VHDR="$VHDR
 "
-for f in t_var t_pipe t_pipefail t_if t_cont t_neg t_names t_fn t_setelocal t_setepipe n_rc n_orno n_presence n_positive n_polarity n_literal n_comment n_legacy n_ifok n_posafter n_nestif n_case n_sete n_seteuo; do
+for f in t_var t_pipe t_pipefail t_if t_cont t_neg t_names t_fn t_setelocal t_setepipe t_derived n_rc n_orno n_presence n_positive n_polarity n_literal n_comment n_legacy n_ifok n_posafter n_nestif n_case n_sete n_seteuo n_filepipe n_wrapper n_derivedguard n_bracegroup n_elif; do
     printf '%s' "$VHDR" >"$WORK/vac/test/$f.sh"
 done
 for f in t_setepipe n_sete; do printf 'set -e\n' >>"$WORK/vac/test/$f.sh"; done
@@ -1138,9 +1151,44 @@ OUT="$( "$BIN" --list 2>/dev/null )"
 printf '%s' "$OUT" | grep -q 'bad' && no "bad present" || ok "bad absent"
 EOF
 done
+cat >>"$WORK/vac/test/t_derived.sh" <<'EOF'
+OUT="$( "$BIN" --list 2>/dev/null )"
+TAG="$( printf '%s' "$OUT" | grep -o '<list[^>]*>' )"
+printf '%s' "$TAG" | grep -q 'bad=' && no "bad= present" || ok "bad= absent"
+EOF
+cat >>"$WORK/vac/test/n_filepipe.sh" <<'EOF'
+"$BIN" --list >"$TMPDIR/out.txt" 2>/dev/null
+grep -v '^#' "$TMPDIR/out.txt" | grep -q 'bad' && no "bad present" || ok "bad absent"
+EOF
+cat >>"$WORK/vac/test/n_wrapper.sh" <<'EOF'
+runit(){ "$BIN" "$@" 2>/dev/null; }
+W="$( runit --list )"
+printf '%s' "$W" | grep -q 'bad' && no "bad present" || ok "bad absent"
+EOF
+cat >>"$WORK/vac/test/n_derivedguard.sh" <<'EOF'
+OUT="$( "$BIN" --list 2>/dev/null )"
+ROWS="$( printf '%s' "$OUT" | grep -o '<r [^>]*>' )"
+[ -n "$ROWS" ] || no "the list has no rows"
+printf '%s' "$OUT" | grep -q 'bad' && no "bad present" || ok "bad absent"
+EOF
+cat >>"$WORK/vac/test/n_bracegroup.sh" <<'EOF'
+OUT="$( "$BIN" --list 2>/dev/null )"
+{ printf '%s' "$OUT" | grep -q '<list ' && printf '%s' "$OUT" | grep -q '</list>'; } && ok "the list is whole" || no "the list is cut"
+printf '%s' "$OUT" | grep -q 'bad' && no "bad present" || ok "bad absent"
+EOF
+cat >>"$WORK/vac/test/n_elif.sh" <<'EOF'
+OUT="$( "$BIN" --list 2>/dev/null )"
+if printf '%s' "$OUT" | grep -q 'bad'; then
+    no "bad present"
+elif printf '%s' "$OUT" | grep -q '<list '; then
+    ok "bad absent and the list is there"
+else
+    no "no list root"
+fi
+EOF
 fx_run vac
 L="vacuous-assert (bash)"
-for f in t_var t_pipe t_pipefail t_if t_cont t_neg t_names t_setepipe; do
+for f in t_var t_pipe t_pipefail t_if t_cont t_neg t_names t_setepipe t_derived; do
     ds_has_p "$L" vacuous-assert "test/$f.sh" minor
 done
 ds_has   "$L" vacuous-assert chk_local minor
@@ -1163,6 +1211,11 @@ ds_none_p "$L" test/n_nestif.sh   "the absence is nested in an if that requires 
 ds_none_p "$L" test/n_case.sh     "the absence is nested in a case arm that requires content of the same capture"
 ds_none_p "$L" test/n_sete.sh     "set -e: a failed plain capture aborts the script"
 ds_none_p "$L" test/n_seteuo.sh   "set -euo pipefail: a failed plain capture aborts the script"
+ds_none_p "$L" test/n_filepipe.sh "a text utility over a file is not a run under test (its input's provenance is not on the line)"
+ds_none_p "$L" test/n_wrapper.sh  "a capture through a script-defined wrapper is not judged (stated floor)"
+ds_none_p "$L" test/n_derivedguard.sh "a presence test on a variable DERIVED from the capture requires the capture's text"
+ds_none_p "$L" test/n_bracegroup.sh "a requirement inside a { …; } group on the same capture"
+ds_none_p "$L" test/n_elif.sh     "an elif chain: a crash takes the final else (a failure), not a pass"
 gating_split "$L" 0
 
 # ── 5) SURFACES: legend, help, MCP, skill and docs; JSON twin; MCP; the ack identity of a facet ───────────

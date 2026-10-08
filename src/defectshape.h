@@ -1046,13 +1046,29 @@ inline bool lengthIsSizeBound( std::string_view src, const std::vector<Tok>& tok
         {
             continue;
         }
-        // V.size() OP N
-        if( k + 6 < to && isCompareOp( src, toks[k + 5] ) && tokText( src, toks[k + 6] ) == n )
+        // V.size() OP M / M OP V.size(), where the cut length N is M, or M less the ellipsis width (1 to 3 bytes:
+        // resize( 117 ) under size() > 120 leaves room for "...")
+        const auto boundMatches = [ & ]( const Tok& m )
+        {
+            const std::string_view mt = tokText( src, m );
+            if( mt == n || n == std::string( mt ) + " - 1" || n == std::string( mt ) + " - 2" || n == std::string( mt ) + " - 3" )
+            {
+                return true;
+            }
+            if( m.kind != TokKind::Number || n.empty() || !std::all_of( n.begin(), n.end(), isDigit ) || n.size() > 9
+                || !std::all_of( mt.begin(), mt.end(), isDigit ) || mt.size() > 9 )
+            {
+                return false;
+            }
+            const long nv = std::stol( n );
+            const long mv = std::stol( std::string( mt ) );
+            return mv >= nv && mv - nv <= 3;
+        };
+        if( k + 6 < to && isCompareOp( src, toks[k + 5] ) && boundMatches( toks[k + 6] ) )
         {
             return true;
         }
-        // N OP V.size()
-        if( k >= 2 && isCompareOp( src, toks[k - 1] ) && tokText( src, toks[k - 2] ) == n )
+        if( k >= 2 && isCompareOp( src, toks[k - 1] ) && boundMatches( toks[k - 2] ) )
         {
             return true;
         }
@@ -1668,9 +1684,9 @@ enum class Reporter : std::uint8_t
 // an exit / return with a nonzero status, or a fail-flag assignment.
 inline Reporter reporterOf( const std::vector<ShTok>& t, std::size_t k, const std::vector<std::pair<std::string, Reporter>>& defined )
 {
-    while( k < t.size() && !t[k].op && ( t[k].text == "{" || t[k].text == "then" || t[k].text == "else" ) )
+    while( k < t.size() && ( ( !t[k].op && ( t[k].text == "{" || t[k].text == "then" || t[k].text == "else" ) ) || ( t[k].op && t[k].text == ";" ) ) )
     {
-        ++k;
+        ++k;   // the branch's opening words and the line breaks (joined as ';') before its first command
     }
     if( k >= t.size() || t[k].op )
     {
@@ -1790,9 +1806,49 @@ inline bool isQuietGrep( const std::vector<ShTok>& t, std::size_t b, std::size_t
     return quiet;
 }
 
+// Is the command at [b, e) a RUN UNDER TEST? Past `cd DIR &&`, environment assignments and the wrappers env /
+// nice / timeout / command / exec / time / stdbuf, the command must be spelled through a variable ("$BIN")
+// or a path. Not judged (stated floors): a text utility or builtin over a file — its input's provenance is
+// not on this line — and a function the script defines, which may wrap a run or only read a variable.
+inline bool isRunUnderTest( const std::vector<ShTok>& t, std::size_t b, std::size_t e )
+{
+    std::size_t k = b;
+    while( k < e )
+    {
+        const std::string& w = t[k].text;
+        if( !t[k].op && w == "cd" )
+        {
+            while( k < e && !( t[k].op && t[k].text == "&&" ) )
+            {
+                ++k;
+            }
+            ++k;
+            continue;
+        }
+        if( !t[k].op && ( w == "env" || w == "nice" || w == "timeout" || w == "command" || w == "exec" || w == "time" || w == "stdbuf"
+                          || ( !w.empty() && w[0] == '-' ) || ( !w.empty() && isDigit( w[0] ) )
+                          || ( w.find( '=' ) != std::string::npos && w[0] != '$' && w[0] != '"' && w[0] != '\'' ) ) )
+        {
+            ++k;
+            continue;
+        }
+        break;
+    }
+    if( k >= e || t[k].op )
+    {
+        return false;
+    }
+    const std::string_view head = unquoted( t[k].text );
+    return !head.empty() && ( head.front() == '$' || head.find( '/' ) != std::string_view::npos );
+}
+
 inline GrepPipe grepPipe( const std::vector<ShTok>& t, std::size_t b, std::size_t e )
 {
     GrepPipe g;
+    while( b < e && !t[b].op && ( t[b].text == "{" || t[b].text == "(" ) )
+    {
+        ++b;   // a brace group or subshell around the pipe: { echo "$V" | grep -q P && … ; }
+    }
     if( b < e && t[b].op && t[b].text == "!" )
     {
         g.negated = true;
@@ -1856,6 +1912,16 @@ inline GrepPipe grepPipe( const std::vector<ShTok>& t, std::size_t b, std::size_
             }
             else if( t[k].text.find( "$(" ) != std::string::npos )
             {
+                const std::vector<ShTok> inner = shTokens( std::string_view( t[k].text ).substr( t[k].text.find( "$(" ) + 2 ) );
+                std::size_t              innerEnd = 0;
+                while( innerEnd < inner.size() && !( inner[innerEnd].op && inner[innerEnd].text == "|" ) )
+                {
+                    ++innerEnd;
+                }
+                if( !isRunUnderTest( inner, 0, innerEnd ) )
+                {
+                    return g;   // printf "$( wrapper … )": not a run under test
+                }
                 g.direct = true;
             }
         }
@@ -1872,9 +1938,9 @@ inline GrepPipe grepPipe( const std::vector<ShTok>& t, std::size_t b, std::size_
         g.ok  = true;
         return g;
     }
-    if( cmd == "cat" || cmd == "true" || cmd == "false" || cmd == ":" )
+    if( !isRunUnderTest( t, p0, p0e ) )
     {
-        return g;   // a file's content or a constant: not a run under test
+        return g;   // a direct pipe judges only a run under test
     }
     g.direct = true;
     g.ok     = true;
@@ -1968,19 +2034,15 @@ inline std::vector<ShAssert> shAssertions( const ShLineToks& lt, const std::vect
         {
             from = 1;
         }
-        if( !t[from].op && ( t[from].text == "if" || t[from].text == "elif" || t[from].text == "while" ) )
+        if( !t[from].op && ( t[from].text == "elif" || t[from].text == "while" ) )
         {
-            std::size_t thenAt = t.size();
-            for( std::size_t k = from + 1; k < t.size(); ++k )
-            {
-                if( !t[k].op && t[k].text == "then" )
-                {
-                    thenAt = k;
-                    break;
-                }
-            }
+            continue;   // an elif / while condition is not judged (a stated floor)
+        }
+        if( !t[from].op && t[from].text == "if" )
+        {
             std::size_t condEnd = from + 1;
-            while( condEnd < t.size() && !( t[condEnd].op && ( t[condEnd].text == ";" || t[condEnd].text == "&&" || t[condEnd].text == "||" ) ) )
+            while( condEnd < t.size() && !( t[condEnd].op && ( t[condEnd].text == ";" || t[condEnd].text == "&&" || t[condEnd].text == "||" ) )
+                   && !( !t[condEnd].op && t[condEnd].text == "then" ) )
             {
                 ++condEnd;
             }
@@ -1989,37 +2051,54 @@ inline std::vector<ShAssert> shAssertions( const ShLineToks& lt, const std::vect
             {
                 continue;
             }
-            // the then-branch's first command: on this line after `then`, or the next logical line
-            Reporter onThen = Reporter::None;
-            if( thenAt + 1 < t.size() )
+            // the whole if … fi, lines joined with ';': its top-level then / elif / else, nested ifs skipped
+            std::vector<ShTok> st;
+            for( std::size_t j = li; j < lt.size() && j < li + 80; ++j )
             {
-                onThen = reporterOf( t, thenAt + 1, defined );
+                st.insert( st.end(), lt[j].begin(), lt[j].end() );
+                st.push_back( { ";", true } );
             }
-            else if( li + 1 < lt.size() )
+            std::size_t thenAt = st.size(), elseAt = st.size();
+            bool        hasElif = false;
+            int         depth   = 0;
+            for( std::size_t k = 0; k < st.size(); ++k )
             {
-                const std::vector<ShTok>& n = lt[li + 1];
-                onThen = reporterOf( n, ( !n.empty() && n[0].text == "then" ) ? 1 : 0, defined );
-                if( onThen == Reporter::None && !n.empty() && n[0].text == "then" && n.size() == 1 && li + 2 < lt.size() )
+                if( st[k].op )
                 {
-                    onThen = reporterOf( lt[li + 2], 0, defined );
+                    continue;
+                }
+                const std::string& w = st[k].text;
+                if( w == "if" )
+                {
+                    ++depth;
+                }
+                else if( w == "fi" )
+                {
+                    if( --depth == 0 )
+                    {
+                        break;
+                    }
+                }
+                else if( depth == 1 && w == "then" && thenAt == st.size() )
+                {
+                    thenAt = k;
+                }
+                else if( depth == 1 && w == "elif" )
+                {
+                    hasElif = true;
+                }
+                else if( depth == 1 && w == "else" )
+                {
+                    elseAt = k;
                 }
             }
-            // an if whose then-branch reports failure is an absence when the else-branch (or nothing) passes;
-            // whose then-branch does anything else, it REQUIRES the text (a guard for an absence nested in it).
-            Polarity pol = Polarity::Requirement;
-            if( onThen == Reporter::Fail && !g.negated )
+            if( thenAt == st.size() || hasElif )
             {
-                pol = Polarity::Absence;
+                continue;   // no then found, or an elif chain (its branches are not judged)
             }
-            else if( onThen == Reporter::Pass && g.negated )
-            {
-                pol = Polarity::Absence;
-            }
-            else if( onThen == Reporter::Fail && g.negated )
-            {
-                pol = Polarity::Requirement;
-            }
-            out.push_back( { li, g, pol } );
+            const Reporter onThen = reporterOf( st, thenAt + 1, defined );
+            const Reporter onElse = elseAt < st.size() ? reporterOf( st, elseAt + 1, defined ) : Reporter::None;
+            out.push_back( { li, g, polarityOf( g.negated, onThen, onElse ) } );
             continue;
         }
         std::vector<ShTok> list( t.begin() + static_cast<std::ptrdiff_t>( from ), t.end() );
@@ -2086,6 +2165,53 @@ inline std::size_t assignmentOf( const ShLineToks& lt, const std::vector<std::si
     return std::string::npos;
 }
 
+// Is the text of `v` required somewhere in the absence's scope: a presence test (-n / -z / ${#v}), a case on
+// it, or a requirement assertion (a match is the pass branch, or no match the failure branch) on it?
+inline bool contentRequired( const std::vector<ShLine>& lines, const ShLineToks& lt, const std::vector<std::size_t>& scope,
+                             const std::vector<ShAssert>& asserts, std::size_t absenceLine, std::string_view v )
+{
+    const std::string q1 = "\"$" + std::string( v ) + "\"";
+    const std::string q2 = "\"${" + std::string( v ) + "}\"";
+    const std::string q3 = "$" + std::string( v );
+    const std::string q4 = "${#" + std::string( v ) + "}";
+    for( std::size_t k = 0; k < lines.size(); ++k )
+    {
+        if( scope[k] != scope[absenceLine] || k == absenceLine )
+        {
+            continue;
+        }
+        const std::string& l = lines[k].text;
+        for( const char* test : { "-n ", "-z " } )
+        {
+            for( std::size_t p = l.find( test ); p != std::string::npos; p = l.find( test, p + 1 ) )
+            {
+                const std::string_view rest = std::string_view( l ).substr( p + 3 );
+                if( rest.starts_with( q1 ) || rest.starts_with( q2 ) || ( rest.starts_with( q3 ) && ( rest.size() == q3.size() || !isIdentChar( rest[q3.size()] ) ) ) )
+                {
+                    return true;
+                }
+            }
+        }
+        if( l.find( q4 ) != std::string::npos )
+        {
+            return true;
+        }
+        const std::vector<ShTok>& ct = lt[k];
+        if( ct.size() >= 3 && ct[0].text == "case" && varRef( ct[1].text ) == v )
+        {
+            return true;
+        }
+    }
+    for( const ShAssert& a : asserts )
+    {
+        if( a.line != absenceLine && scope[a.line] == scope[absenceLine] && a.pol == Polarity::Requirement && !a.pipe.direct && a.pipe.var == v )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Is the variable's capture guarded — its failure checked or its content required somewhere in scope?
 inline bool captureGuarded( const std::vector<ShLine>& lines, const ShLineToks& lt, const std::vector<std::size_t>& scope,
                             const std::vector<ShAssert>& asserts, std::size_t absenceLine, std::size_t assignLine, std::string_view v, bool errexit )
@@ -2138,44 +2264,41 @@ inline bool captureGuarded( const std::vector<ShLine>& lines, const ShLineToks& 
     {
         return true;
     }
-    // a presence test, a case on the text, or a requirement on the text anywhere in scope
-    const std::string q1 = "\"$" + std::string( v ) + "\"";
-    const std::string q2 = "\"${" + std::string( v ) + "}\"";
-    const std::string q3 = "$" + std::string( v );
-    const std::string q4 = "${#" + std::string( v ) + "}";
+    // a presence test, a case on the text, or a requirement on the text anywhere in scope — on the variable
+    // itself or on one DERIVED from it (W="$( printf '%s' "$V" | … )" then a check on W): a check that W is
+    // non-empty or carries a pattern is a check that V had content.
+    if( contentRequired( lines, lt, scope, asserts, absenceLine, v ) )
+    {
+        return true;
+    }
+    const std::string ref1 = "\"$" + std::string( v ) + "\"";
     for( std::size_t k = 0; k < lines.size(); ++k )
     {
-        if( scope[k] != scope[absenceLine] || k == absenceLine )
+        if( scope[k] != scope[absenceLine] || k == absenceLine || lt[k].empty() || lt[k][0].op )
         {
             continue;
         }
-        const std::string& l = lines[k].text;
-        for( const char* test : { "-n ", "-z " } )
+        const std::string& w0 = lt[k][0].text;
+        const std::size_t  eqAt = w0.find( '=' );
+        if( eqAt == std::string::npos || eqAt == 0 || w0.find( "$(" ) == std::string::npos )
         {
-            for( std::size_t p = l.find( test ); p != std::string::npos; p = l.find( test, p + 1 ) )
+            continue;
+        }
+        const std::string_view rhs = std::string_view( w0 ).substr( eqAt + 1 );
+        const std::size_t      cap = rhs.find( "$(" );
+        const std::string_view in  = rhs.substr( cap + 2 );
+        std::size_t            b   = 0;
+        while( b < in.size() && isSpace( in[b] ) )
+        {
+            ++b;
+        }
+        if( ( in.substr( b ).starts_with( "printf" ) || in.substr( b ).starts_with( "echo" ) ) && in.find( ref1 ) != std::string_view::npos )
+        {
+            const std::string w = w0.substr( 0, eqAt );
+            if( w != v && contentRequired( lines, lt, scope, asserts, absenceLine, w ) )
             {
-                const std::string_view rest = std::string_view( l ).substr( p + 3 );
-                if( rest.starts_with( q1 ) || rest.starts_with( q2 ) || ( rest.starts_with( q3 ) && ( rest.size() == q3.size() || !isIdentChar( rest[q3.size()] ) ) ) )
-                {
-                    return true;
-                }
+                return true;
             }
-        }
-        if( l.find( q4 ) != std::string::npos )
-        {
-            return true;
-        }
-        const std::vector<ShTok>& ct = lt[k];
-        if( ct.size() >= 3 && ct[0].text == "case" && varRef( ct[1].text ) == v )
-        {
-            return true;
-        }
-    }
-    for( const ShAssert& a : asserts )
-    {
-        if( a.line != absenceLine && scope[a.line] == scope[absenceLine] && a.pol == Polarity::Requirement && !a.pipe.direct && a.pipe.var == v )
-        {
-            return true;
         }
     }
     return false;
@@ -2353,28 +2476,38 @@ inline void scanVacuousAssertBash( std::string_view src, const std::vector<Span>
         bool vacuous = a.pipe.direct;
         if( !vacuous )
         {
-            // follow a derived capture (V="$( printf '%s' "$W" | … )") back to its source, up to three steps
-            std::string var   = a.pipe.var;
+            // follow a derived capture (V="$( printf '%s' "$W" | … )") back to its source, up to three steps: the
+            // absence is vacuous only when the chain ends in a capture of a RUN UNDER TEST and no step of it is
+            // guarded (its failure checked, or its content required).
+            std::string var = a.pipe.var;
             bool        guard = false;
-            bool        found = false;
-            for( int step = 0; step < 3 && !guard; ++step )
+            bool        runSource = false;
+            for( int step = 0; step < 3 && !guard && !runSource; ++step )
             {
                 const std::size_t as = assignmentOf( lt, scope, a.line, var );
                 if( as == std::string::npos )
                 {
                     break;
                 }
-                const std::string& al = lines[as].text;
-                const std::size_t  eq = al.find( var + "=" );
+                const std::string&     al  = lines[as].text;
+                const std::size_t      eq  = al.find( var + "=" );
                 const std::string_view rhs = std::string_view( al ).substr( eq + var.size() + 1 );
-                if( rhs.find( "$(" ) == std::string_view::npos && rhs.find( '`' ) == std::string_view::npos )
+                if( rhs.find( "$(" ) == std::string_view::npos )
                 {
                     break;   // a literal or a copy: not a run under test
                 }
-                guard = captureGuarded( lines, lt, scope, asserts, a.line, as, var, errexit[as] != 0 );
-                found = true;
-                // derived from another variable's text?
                 const std::vector<ShTok> inner = shTokens( rhs.substr( rhs.find( "$(" ) + 2 ) );
+                std::size_t              innerEnd = 0;
+                while( innerEnd < inner.size() && !( inner[innerEnd].op && inner[innerEnd].text == "|" ) )
+                {
+                    ++innerEnd;
+                }
+                guard = captureGuarded( lines, lt, scope, asserts, a.line, as, var, errexit[as] != 0 );
+                if( isRunUnderTest( inner, 0, innerEnd ) )
+                {
+                    runSource = true;
+                    break;
+                }
                 std::string next;
                 if( !inner.empty() && ( inner[0].text == "printf" || inner[0].text == "echo" ) )
                 {
@@ -2389,11 +2522,11 @@ inline void scanVacuousAssertBash( std::string_view src, const std::vector<Span>
                 }
                 if( next.empty() )
                 {
-                    break;
+                    break;   // a text utility over a file, or a wrapper function: not judged
                 }
                 var = next;
             }
-            vacuous = found && !guard;
+            vacuous = runSource && !guard;
         }
         if( vacuous )
         {
