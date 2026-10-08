@@ -69,8 +69,16 @@ ONTASK="Circle Square shape area implementors"
 # without the flag every row below would see the counted stub instead (test/forsectioncollapsecheck.sh owns
 # THAT shape). Byte-identical to the pre-L2 default otherwise.
 "$BIN" . --no-cache --for="$OFFTASK" --sections=lego,compose >"$TMP/off.xml"  2>/dev/null
-"$BIN" . --no-cache --for="$ONTASK"  --sections=lego,compose >"$TMP/on.xml"   2>/dev/null
-"$BIN" . --no-cache --for="$ONTASK"  --sections=lego,compose >"$TMP/on2.xml"  2>/dev/null
+# The on-task corpus excludes the product's own src/ (train 26b, 2026-10-08): over the whole checkout the answer's shown set
+# is decided by this repo's own src — on the merged train-26b tree src/'s lego/compose/countfloor code outranks and out-budgets
+# test/legofix (20 rows shown, legofix's Circle at rank 24; the d82e4cf1 binary gives the same 20 on that tree and 23 on its
+# own, so the move is the tree's content, not the binary). The arm asserts the §P3 filter over a tree full of fixture
+# interfaces, which test/ still is; the premise below fails by name if the fixture ever leaves the shown set again.
+"$BIN" . --no-cache --for="$ONTASK"  --sections=lego,compose --exclude=src/ >"$TMP/on.xml"   2>/dev/null
+"$BIN" . --no-cache --for="$ONTASK"  --sections=lego,compose --exclude=src/ >"$TMP/on2.xml"  2>/dev/null
+grep -q '<d [^>]*p="test/legofix/shapes.h"' "$TMP/on.xml" \
+    && ok "--for=\"$ONTASK\" (premise): test/legofix/shapes.h is in the shown <sigs> rows the lego block is narrowed to" \
+    || no "--for=\"$ONTASK\" (premise): test/legofix/shapes.h is not among the shown rows — the on-task arm below would test another corpus"
 
 for f in off on; do
     [ -s "$TMP/$f.xml" ] || no "bundle $f.xml is empty — the rest of this gate is meaningless"

@@ -300,7 +300,9 @@ done
     && ok "§B1.4: an off-task surface with no interfaces reports lego_total:0 (genuinely absent)" \
     || no "§B1.4: off-task lego_total is '$( printf '%s' "$LOFF" | jget lego_total )', expected 0"
 
-LON="$( "$BIN" "$ROOT" --for="Circle Square shape area implementors" --json --no-cache 2>/dev/null | jsonok "--for --json (on-task, real lego surface)" )"
+# --exclude=src/ (train 26b): the product's own src/ decides the whole-checkout shown set and pushed test/legofix out of it
+# (legobundlecheck's on-task note); both dialects below read the same fixture-only corpus.
+LON="$( "$BIN" "$ROOT" --for="Circle Square shape area implementors" --exclude=src/ --json --no-cache 2>/dev/null | jsonok "--for --json (on-task, real lego surface)" )"
 LON_LEGO="$( printf '%s' "$LON" | jget lego_total )"
 { [ -n "$LON_LEGO" ] && [ "$LON_LEGO" -gt 0 ]; } 2>/dev/null \
     && ok "§B1.4: an on-task surface (Shape/Circle/Square) reports lego_total:$LON_LEGO (dropped, not absent)" \
@@ -311,7 +313,7 @@ LON_LEGO="$( printf '%s' "$LON" | jget lego_total )"
 # arm counts — --for collapses it to a counted stub by default, and the stub's own total= is a DIFFERENT
 # (post-dedup) count than lego_total by design (serialize.h sectionStubXml's own comment), so counting the
 # stub's total= here instead of the real <iface> rows would compare the wrong two numbers.
-XML_IFACES="$( "$BIN" "$ROOT" --for="Circle Square shape area implementors" --sections=lego,compose --no-cache 2>/dev/null | grep -oE '<iface ' | wc -l | tr -d ' ' )"
+XML_IFACES="$( "$BIN" "$ROOT" --for="Circle Square shape area implementors" --sections=lego,compose --exclude=src/ --no-cache 2>/dev/null | grep -oE '<iface ' | wc -l | tr -d ' ' )"
 # >0 guard on the XML side (2026-08-23 serving-shape sweep): without it this arm degrades to N>=0 the
 # moment the XML sibling stops emitting <iface> rows at all — an under-count is unobservable against an
 # empty roster, so the comparison must first prove the roster is non-empty (the routes arm below already
