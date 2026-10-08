@@ -1030,8 +1030,8 @@ inline std::vector<std::pair<rw::NodeId, std::uint32_t>> safeDeleteCallSites( co
 // risk= NAMES what was found, never a go/no-go verdict: "none-found" (zero 1-hop callers AND zero use
 // sites of any role — an ABSENCE of evidence, never evidence of absence: dynamic dispatch, callbacks and
 // unindexed macros contribute no edge either, same as every call-graph surface here), "untested-radius"
-// (callers/uses exist and NONE of the transitive blast radius is test-covered), or "uses-exist" (callers/
-// uses exist and at least part of the radius is tested).
+// (callers/uses exist and NONE of the radius is test-covered), "uses-exist" (callers/uses exist and part of the
+// radius is tested), or "unmodelled" (nothing found, but uses_floor=: a read/named kind those counts cannot see).
 std::optional<int> runSafeDelete( const MainDispatch& d )
 {
     using namespace rw;
