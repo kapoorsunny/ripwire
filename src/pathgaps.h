@@ -24,7 +24,7 @@
 // a FOUND path a guess, which prov="split" / amb= already disclose). Calls to names with no in-repo definition at all
 // (Undefined) are not counted either: the graph keeps no per-caller tally of them, and nearly all are library calls.
 // Both are floors the legend sentence states. A via="name" call whose every same-language, same-kind definition of the
-// name already has an edge from the caller is not a gap either: nothing it could bind to was left unsearched.
+// name is in the searched cone (its own edge or another cone symbol's) is not a gap either: nothing it could bind to was unsearched.
 //
 // ONE analysis and ONE emitter for both transports (verbs_navigate.h runPath, mcpverbs.h pathText): the two used to
 // carry their own copies of the hint and must not drift on this clause.
@@ -77,8 +77,10 @@ struct PathSearchGaps
 };
 
 // NAME gaps: per cone symbol, the callee names it reaches only by name (an edge whose Graph::outNameOnly bit is set) for
-// which the tree holds a same-language, same-kind DEFINITION the caller has no edge to — a namesake the search never
-// walked. Counted once per such name per caller. Only the names behind the cone's name-only edges are looked up.
+// which the tree holds a same-language, same-kind DEFINITION outside the cone — a namesake the search never walked. A
+// namesake inside the cone was searched (another cone symbol reaches it), and every edge target of a cone symbol is in
+// the cone, so "outside the cone" also means the call has no edge to it. Counted once per such name per caller. Only the
+// names behind the cone's name-only edges are looked up.
 inline void countUnlistedNamesakes( const IngestResult& ing, const Graph& g, std::span<const NodeId> cone, std::vector<PathGapCounts>& per )
 {
     EXPECTS( g.outNameOnly.size() == g.outTargets.size(), "buildGraph allocates the hedge bits one per flattened edge" );
@@ -123,41 +125,47 @@ inline void countUnlistedNamesakes( const IngestResult& ing, const Graph& g, std
     }
     std::ranges::sort( names, sortutil::svLess );
     names.erase( std::ranges::unique( names ).begin(), names.end() );
-    std::vector<Key> defs;   // the tree's definitions of exactly those names
-    for( const Symbol& s : ing.symbols )
+    std::vector<char> searched( ing.symbols.size(), 0 );   // the cone, by symbol id
+    for( const NodeId u : cone )
     {
-        if( isDefinitionNotDeclaration( s ) && std::ranges::binary_search( names, std::string_view( s.name ), sortutil::svLess ) )
+        if( u < searched.size() )
         {
-            defs.push_back( Key{ s.lang, s.kind, s.name } );
+            searched[u] = 1;
         }
     }
-    std::ranges::sort( defs, keyLess );
+    std::vector<Key> unsearched;   // the tree's definitions of exactly those names that the search never reached
+    for( std::size_t i = 0; i < ing.symbols.size(); ++i )
+    {
+        const Symbol& s = ing.symbols[i];
+        if( searched[i] == 0 && isDefinitionNotDeclaration( s ) && std::ranges::binary_search( names, std::string_view( s.name ), sortutil::svLess ) )
+        {
+            unsearched.push_back( Key{ s.lang, s.kind, s.name } );
+        }
+    }
+    if( unsearched.empty() )
+    {
+        return;
+    }
+    std::ranges::sort( unsearched, keyLess );
     for( const NodeId u : cone )
     {
         if( !hasHedge( u ) )
         {
             continue;
         }
-        std::vector<Key> listed, hedged;   // every target u has an edge to; the targets it reached by name alone
+        std::vector<Key> hedged;   // the targets u reached by name alone
         for( std::uint32_t k = g.outOff[u]; k < g.outOff[u + 1]; ++k )
         {
-            if( !isSym( k ) )
-            {
-                continue;
-            }
-            listed.push_back( keyOf( g.outTargets[k] ) );
-            if( g.outNameOnly[k] != 0 )
+            if( isSym( k ) && g.outNameOnly[k] != 0 )
             {
                 hedged.push_back( keyOf( g.outTargets[k] ) );
             }
         }
-        std::ranges::sort( listed, keyLess );
         std::ranges::sort( hedged, keyLess );
         hedged.erase( std::ranges::unique( hedged, keyEq ).begin(), hedged.end() );
         for( const Key& key : hedged )
         {
-            const bool unlisted = std::ranges::equal_range( defs, key, keyLess ).size() > std::ranges::equal_range( listed, key, keyLess ).size();
-            per[u][ std::size_t( PathGapKind::Name ) ] += unlisted ? 1u : 0u;
+            per[u][ std::size_t( PathGapKind::Name ) ] += std::ranges::binary_search( unsearched, key, keyLess ) ? 1u : 0u;
         }
     }
 }

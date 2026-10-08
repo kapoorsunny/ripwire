@@ -874,8 +874,8 @@ says the search was incomplete: `searched=` (the symbols it reached), `gaps="dec
 `next=` that expands their bodies. A `<gap>` row is where the search could not see, never a hop. Ambiguous calls are not
 counted (every candidate has an edge the search follows), nor calls to names defined nowhere in the tree. A call bound by
 name alone (`via="name"`) counts as a `name` gap when the tree defines that name, same language and kind, somewhere the
-call has no edge to: the search follows only the candidates such a call lists, so a namesake in another directory is
-never searched and may be the missing hop (`run(obj)` calling `obj.process()`, bound to the same-directory
+search never reached (a namesake another searched symbol reaches was searched, and is not counted): the search follows
+only the candidates such a call lists, so a namesake in another directory is never searched and may be the missing hop (`run(obj)` calling `obj.process()`, bound to the same-directory
 `A.process`, while `other/B.process` calls the target). When the
 search met no such call the answer is unchanged, byte for byte. The legend dictionary gains three entries. A floor:
 the `next=` names a gap row by file and name, so where one file holds two definitions of that name it serves both. Gate:
