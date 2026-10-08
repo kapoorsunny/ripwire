@@ -355,9 +355,14 @@ if [ -n "$W_MORE" ]; then
         || no "§B8.2 whereis: shown=$W_SHOWN more=$W_MORE hits=$W_HITS rows=$W_ROWS — the remainder does not add up"
     # past-the-end page: the element must VANISH exactly when nothing is left, never print more="0".
     WEND="$( "$BIN" "$R" --whereis=computeBudget --limit=1 --offset="$W_HITS" --whereis-listing=all 2>/dev/null )"
-    printf '%s' "$WEND" | grep -q '<more ' \
-        && no "§B8.2 whereis: a past-the-end page still emits a <more> remainder" \
-        || ok "§B8.2 whereis: the <more> remainder is absent on a page with nothing left"
+    # the absence is read only off a run that produced its <whereis> root (a crash prints nothing and has no <more> either)
+    if ! printf '%s' "$WEND" | grep -q '<whereis '; then
+        no "§B8.2 whereis: the past-the-end page produced no <whereis> root"
+    elif printf '%s' "$WEND" | grep -q '<more '; then
+        no "§B8.2 whereis: a past-the-end page still emits a <more> remainder"
+    else
+        ok "§B8.2 whereis: the <more> remainder is absent on a page with nothing left"
+    fi
 else
     no "§B8.2 whereis: --limit=1 produced no <more hits=> to check (fixture has too few hits)"
 fi
@@ -372,9 +377,13 @@ WD_ROWS="$(  printf '%s' "$W1D" | sed 's/<!--.*-->//' | grep -oE '<hit ' | grep 
     && ok "§B8.2 whereis (default listing twin): shown($WD_SHOWN) + more($WD_MORE) + refs count($WD_REFS) == hits($WD_HITS)" \
     || no "§B8.2 whereis (default listing twin): shown=$WD_SHOWN more=$WD_MORE refs=$WD_REFS hits=$WD_HITS rows=$WD_ROWS"
 WDEND="$( "$BIN" "$R" --whereis=computeBudget --limit=1 --offset="$WD_HITS" 2>/dev/null )"
-printf '%s' "$WDEND" | grep -q '<more ' \
-    && no "§B8.2 whereis (default listing twin): a past-the-end page still emits a <more> remainder" \
-    || ok "§B8.2 whereis (default listing twin): no <more> past the end (the <refs> count is not a page remainder)"
+if ! printf '%s' "$WDEND" | grep -q '<whereis '; then
+    no "§B8.2 whereis (default listing twin): the past-the-end page produced no <whereis> root"
+elif printf '%s' "$WDEND" | grep -q '<more '; then
+    no "§B8.2 whereis (default listing twin): a past-the-end page still emits a <more> remainder"
+else
+    ok "§B8.2 whereis (default listing twin): no <more> past the end (the <refs> count is not a page remainder)"
+fi
 
 # the stray-content sibling: force the per-ref file listing (capped at 12) past its cap on its own branch.
 g checkout -q main
