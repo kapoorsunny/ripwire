@@ -179,8 +179,8 @@ struct Graph
 
 // FE-B: is the call edge from → to NAME-ONLY, over the raw out-CSR and its parallel hedge bits — bound by name alone at
 // every site that bound it, so every surface renders it via="name". false for an edge that does not exist and for empty
-// hedge bits (a graph with no name-only edge at all). The Graph overload below and serialize.h's <calls> block share it.
-inline bool edgeNameOnly( const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
+// hedge bits (a graph with no name-only edge at all). edgeNameOnly( Graph ) below and serialize.h's <calls> block share it.
+inline bool edgeNameOnlyInCsr( const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
                           const std::vector<std::uint8_t>& nameOnly, NodeId from, NodeId to ) noexcept
 {
     if( nameOnly.empty() || std::size_t( from ) + 1 >= outOff.size() )
@@ -196,7 +196,7 @@ inline bool edgeNameOnly( const std::vector<std::uint32_t>& outOff, const std::v
 inline bool edgeNameOnly( const Graph& g, NodeId from, NodeId to ) noexcept
 {
     EXPECTS( g.outNameOnly.empty() || g.outNameOnly.size() == g.outTargets.size(), "buildGraph allocates the hedge bits per edge, or none" );
-    return edgeNameOnly( g.outOff, g.outTargets, g.outNameOnly, from, to );
+    return edgeNameOnlyInCsr( g.outOff, g.outTargets, g.outNameOnly, from, to );
 }
 
 // FE-B: does the call edge from → to exist at all (the out-CSR is ascending within a source)
@@ -5268,7 +5268,7 @@ struct GoModReads
     std::vector<std::pair<std::string, std::string>> replacedDirs;
 
     // the tree paths of the go.mod in disk directory `disk` (root-relative `modDir`), read on first use
-    const std::vector<std::string>& at( const std::string& disk, std::string_view modDir )
+    const std::vector<std::string>& read( const std::string& disk, std::string_view modDir )
     {
         auto [ it, fresh ] = treePaths.try_emplace( disk, std::vector<std::string>{} );
         if( fresh )
@@ -5357,7 +5357,7 @@ inline void collectGoModules( const IngestResult& ing, FalseEdgeRules& rules )
             }
             disk.resize( diskCut );
             const std::string_view          modDir = relCut == std::string_view::npos ? std::string_view{} : rel.substr( 0, relCut );
-            const std::vector<std::string>& paths  = reads.at( disk, modDir );
+            const std::vector<std::string>& paths  = reads.read( disk, modDir );
             if( !paths.empty() )
             {
                 rules.goUnderModule[ s.fileId ] = 1;

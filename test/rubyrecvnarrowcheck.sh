@@ -213,7 +213,8 @@ command -v xmllint >/dev/null 2>&1 && { if xmllint --noout "$MAP"; then ok "xmll
 
 SPLIT="$DIR/split"; sed 's/></>\n</g' "$MAP" >"$SPLIT"
 rowOf(){ awk -v pat="$1" '$0 ~ pat{f=1;print;next} /^<s /{f=0} f' "$SPLIT"; }   # an <s> row + its <c> children
-edgesTo(){ echo "$1" | grep -c "<c n=\"$2\""; }                                  # how many <c> rows of that name
+# how many <c> edges of that name; FE-B: a merged via="name" row <c … x="N"/> stands for N edges (serialize.h writeMapCalleeRows)
+edgesTo(){ echo "$1" | grep -o "<c n=\"$2\"[^>]*>" | awk '{ n = 1; if ( match( $0, / x="[0-9]+"/ ) ) n = substr( $0, RSTART + 4, RLENGTH - 5 ) + 0; s += n } END { print s + 0 }'; }
 
 echo "=== the fixture parsed the way this gate assumes ==="
 for want in 'n="add" sc="Calc"' 'n="add" sc="Tally"' 'n="run" sc="Engine"' 'n="run" sc="Motor"' \

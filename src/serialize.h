@@ -5846,7 +5846,7 @@ inline void appendMergedCalleeNameRows( std::string& callsBody, std::vector<Merg
 inline bool calleeRowVia( const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets, NodeId id, NodeId cid,
                           std::size_t& used, const CalleeCallsSink& sink )
 {
-    const bool via = sink.nameOnly != nullptr && edgeNameOnly( outOff, outTargets, *sink.nameOnly, id, cid );
+    const bool via = sink.nameOnly != nullptr && edgeNameOnlyInCsr( outOff, outTargets, *sink.nameOnly, id, cid );
     if( via && sink.viaLegendCharged != nullptr && !*sink.viaLegendCharged )
     {
         used += viaNameLegendComment().size();
