@@ -3679,7 +3679,7 @@ std::optional<int> runForLens( const MainDispatch& d )
     {
         return paidRc;
     }
-    ASSUME( !paidRc.has_value() );   // the paid run returned before writing anything
+    ASSUME( !paidRc );   // the paid run returned before writing anything
     d.redactCounts = tallyAtEntry;
     return runForLensPass( d, /*sigsNextPayFromRows=*/false, nullptr );
 }
