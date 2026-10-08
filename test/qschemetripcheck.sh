@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# PENDING (train 26b, not yet re-derived): the pin below is FE-B's lane pin (34d7ef2e81…), and it is stale on the train,
+#   whose watched text is kParserVer 156 (above FE-B's 154 and its rich tag 155; honesty-small and train25-cr2-followup
+#   folded in too), kCacheVersion 29 (FE-B) and kQSnapCacheScheme 18 (train25-cr2-followup), with quality.h's mirrors.
+#   Re-derive ONCE with UPDATE_GOLDEN=1 after the train's last lane merges and replace this line with that entry.
 # 2026-10-08, lane FE-B fix round 2 (review B4): RE-DERIVED with UPDATE_GOLDEN=1 (hash 34d7ef2e81…a5bd559d). kParserVer
 #   152 -> 154 (binding spans and tombstones, type parameters; 153 is 152's rich tag); quality.h's mirror with it.
 #   kCacheVersion and kQSnapCacheScheme unchanged. The train renumbers if needed.

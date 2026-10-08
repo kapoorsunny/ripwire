@@ -44,7 +44,10 @@ in a Java class with an outside base drawn to an unrelated class's `flush`.
   even when a class of that name exists. Wider than the language, and so name-only rather than resolved: a pattern
   variable hides its field in its whole enclosing block (an `else` branch too), a Java local hides a field anywhere in
   its method, and a Python rebinding anywhere in its function. Not read, the floor: a nested function or class
-  declaration that reuses a typed binding's name (JS/TS/Python), and Kotlin's implicit `it` beside a field named `it`. A JS/TS call on the class object reaches its `static` members only,
+  declaration that reuses a typed binding's name (JS/TS/Python), Kotlin's implicit `it` beside a field named `it`, and a
+  Python conditional or later rebinding, which still types the variable for the whole function: `tank = Barrel()` in a
+  branch proves `Barrel.spill` for a `tank.spill()` beside it, even one before the assignment (the older assignment-type
+  rule, which this change does not read). A JS/TS call on the class object reaches its `static` members only,
   and a call on an instance never one. A Ruby call's candidates that Ruby's own method lookup proves (the entries below) are its
   answer, never `via="name"`.
 - **A call nothing proves is NAME-ONLY.** Its candidates the language's own lookup proves are its answer (an
@@ -66,7 +69,7 @@ in a Java class with an outside base drawn to an unrelated class's `flush`.
   change); the `--max-tokens=3000` maps of the eight repositories keep 337 rows (331 before the change). The gate is
   `test/receiverevidencecheck.sh` (every surface, CLI/MCP parity, census conservation, and near misses
   for every evidence rule). Ingest records the receiver chain and the Java/C#/Kotlin/Swift declarations
-  (`kParserVer` 154, `kCacheVersion` 29), so a cache written by an earlier build is re-parsed.
+  (`kParserVer` 156 in this release, see the versions note; `kCacheVersion` 29), so a cache written by an earlier build is re-parsed.
 
 ### Changed — a Ruby call to self, or on an instance the code builds, answers from its own side: an instance never reaches `def self.m`
 
@@ -956,6 +959,10 @@ after the fix.
   `docs_after_code`: it is the answer it was before the reorder, so its est_tokens promise stays what it was (the reading
   would be uncharged bytes). These are the same three ceilings that drop `e=`, decided by one predicate.
   `RIPWIRE_NO_DOCS_AFTER_CODE`, set to any value (even empty or `0`), turns the reorder off everywhere (CLI and MCP `for`).
+- **A hop row needs a resolved callee.** In a compact `--for` answer's `<hops>`, a candidate whose every callee edge
+  was bound by name alone (the `via="name"` rows of the receiver-evidence entry above) gets no `<h>` row and is counted
+  in `noedge=`, whose reading is "no RESOLVED callee found", never "none exists". The header then defines `via=` only
+  when a hop that keeps its row has such a callee. Gates: `test/forsigspancheck.sh` (H), `test/docdemotecheck.sh` (f).
 
 Gate: `forsigspancheck` (fixture `test/forcompletefix`, C/JS/Python/TS).
 
@@ -1482,11 +1489,11 @@ files, RSpec matcher chains, class objects — then 142 and 145 for its rebase a
 change); 141 sat above every number a branch build of unreleased work had used, and the review fixes to the global-object
 shadow and the value-reference slot text take 143, above 141's full-use file tag 142. The Ruby method lookup lands at
 148, renumbered from its branch's 145: other branch builds in flight have used up to 147, and 148's full-use file tag is
-149. The Go named-type kinds and the train 25 re-review's extraction fixes each took 145 on their branches and land
-together at 156: branch builds in flight have used up to 154, whose full-use file tag is 155, so no cache such a build
-wrote is read as this release's), `kCacheVersion` 25 → 28
-(the function-literal fix's record changes, then the false-edge fix's member-call fields; the Ruby branch's appended
-binding kinds need no bump of their own) and `kQSnapCacheScheme` 15 → 18
+149. The Go named-type kinds and the train 25 re-review's extraction fixes each took 145 on their branches, and the
+receiver-evidence records took 145 to 154 on theirs; all three land together at 156: branch builds have used up to 154,
+whose full-use file tag is 155, so no cache such a build wrote is read as this release's), `kCacheVersion` 25 → 29
+(the function-literal fix's record changes, then the false-edge fix's member-call fields, then the receiver chain
+`memberPath`/`memberCtor`; the Ruby branch's appended binding kinds need no bump of their own) and `kQSnapCacheScheme` 15 → 18
 (the `--quality-delta` error-masking and placeholder changes, then the dead kind agreeing with `--dead-code` on functions
 held as values, then on a function that only stores itself). Every ingest cache written by an earlier build is refused and re-indexed once, and every
 cached quality snapshot is recomputed. The session legend dictionary is `dictv=cbadf4aa6acda0c2 entries=787`.
