@@ -526,6 +526,12 @@ probeFor()
 # parser does not model (define_method, setattr, assignment) is a counted ref" (+87 B) — +136 B, nothing else moved.
 # Both ride only a page that carries listing=. The OLD path keeps its own pin: the whereis-listing=all twin after the
 # universe loop holds the whole-list page's legend at 700 B (measured 692), so it cannot grow inside this headroom.
+# RE-PINNED 2026-10-08 (lane/lean-answers-068 fix round 2, review D1), measured on this gate's fixture: ripwire.whereis/v1
+# 1023->1037, pin 1040->1050 (measured + 10 rounded up to 10): the listing= reading "default: defs only if strictly shorter
+# than all" becomes "default: defs if it lists more defs than all, else if shorter" (+14 B) because the default now serves
+# the defs page whenever it lists MORE definitions than the all page under the row cap, whatever its bytes. Rides only a
+# page that carries listing=; nothing else moved. The OLD path keeps its pin: the whereis-listing=all twin holds the
+# whole-list page's legend at 700 B (measured 692, unchanged).
 PIN_TABLE='
 ripwire.edit-check/v1             610   595
 ripwire.map/v1                   910   892
@@ -587,7 +593,7 @@ ripwire.at/v1                    180   161
 ripwire.from-trace/v1            1300  1281
 ripwire.plan-lint/v1              570   551
 ripwire.merge-scout/v1            570   558
-ripwire.whereis/v1               1040  1023
+ripwire.whereis/v1               1050  1037
 ripwire.community/v1             730   719
 ripwire.layout/v1                1220  1203
 ripwire.pack-task/v1             990   974

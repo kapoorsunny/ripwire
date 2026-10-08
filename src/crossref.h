@@ -152,11 +152,13 @@ constexpr std::size_t   kWhereisHits      = 60;
 //         list holds no ref row (nothing to elide) or no def row (the mentions ARE the answer then).
 //   Refs  the kind="ref" rows only, in the hit list's order: the <refs next=> page.
 //   All   every row.
-//   ShorterOfDefsAll  the DEFAULT (no flag, no MCP `listing`): the Defs page when it is STRICTLY shorter in bytes than
-//         the All page, else the All page (review B1: on a symbol with one or two refs the Defs page pays more for its
-//         <refs> element, listing= and their legend readings than the ref rows it elides, and a lean answer that is
-//         longer while listing less is strictly worse). Measured, never guessed: whereisServedListing renders both.
-//         An explicit defs is served as asked.
+//   ShorterOfDefsAll  the DEFAULT (no flag, no MCP `listing`): complete answers first. The Defs page when it SHOWS MORE
+//         definitions than the All page under the shared row cap (a capped All page can list fewer: HEAD's references fill
+//         the cap before the branch definitions arrive; review D1), whatever its bytes; when both pages show the same
+//         definitions, the Defs page only when it is STRICTLY shorter in bytes (review B1: on a symbol with one or two
+//         refs the Defs page pays more for its <refs> element, listing= and their legend readings than the ref rows it
+//         elides), else the All page. Measured, never guessed: whereisServedListing renders both. An explicit defs is
+//         served as asked.
 enum class WhereisListing : std::uint8_t { Defs, Refs, All, ShorterOfDefsAll };
 
 // ── blob facts (the per-sha memo payload) ────────────────────────────────────────────────────────────────
@@ -2899,8 +2901,8 @@ inline bool whereisRowOnHeadCommit( const WhereHit& h, std::string_view headSha,
     return !head.empty() && !headDate.empty() && std::string_view( h.tip ).substr( 0, 9 ) == head && h.date == headDate;
 }
 
-// The listing a validated --whereis-listing= / MCP `listing` value names; "" (absent) is the default, the shorter of
-// defs and all (WhereisListing::ShorterOfDefsAll). Both surfaces refuse any other value before they get here.
+// The listing a validated --whereis-listing= / MCP `listing` value names; "" (absent) is the default, defs when it
+// lists more definitions than all, else the shorter of the two (WhereisListing::ShorterOfDefsAll). Both surfaces refuse any other value before they get here.
 inline WhereisListing whereisListingOf( std::string_view v ) noexcept
 {
     return v == "refs" ? WhereisListing::Refs : v == "all" ? WhereisListing::All
@@ -3091,15 +3093,17 @@ inline void writeWhereisListedPage( std::FILE* out, const WhereResult& res, std:
                        "the other end (what this page did not print). Page with limit= and offset=; the more element is "
                        "absent exactly when this page reached the end of the hit list. "
                        // lean-answers lane — the default LISTING and the tip/date hoist, defined where they appear.
-                       "LISTING: by default only the kind=\"def\" rows are listed (listing=\"defs\" on the root) when that page is "
-                       "STRICTLY shorter in bytes than the listing=all page under the same row cap (both compared without limit= or "
+                       "LISTING: by default only the kind=\"def\" rows are listed (listing=\"defs\" on the root) when that page lists "
+                       "MORE definitions than the listing=all page lists under the same row cap (a capped all page can list fewer: "
+                       "references can fill the cap before the branch definitions arrive), whatever its bytes, or, when both pages "
+                       "list the same definitions, is STRICTLY shorter in bytes than the all page (both compared without limit= or "
                        "offset=, as written and in the compact dialect, so every page of one answer lists the same rows); "
                        "otherwise the default lists every hit. Under listing=\"defs\" the "
                        "kind=\"ref\" rows are COUNTED by the trailing refs element: count= is exactly the number of kind=\"ref\" "
                        "rows in the hit list, none of them printed here, and its next= lists exactly those rows (listing=\"refs\", "
                        "the same rows byte for byte that listing=all prints). listing= is absent when every hit is listed: the hit "
                        "list holds no kind=\"ref\" row, or no kind=\"def\" row (then the mentions are the answer), or the defs page "
-                       "would not be shorter, or the whole list was asked for (the whereis-listing flag, value all; its value defs "
+                       "would neither list more definitions nor be shorter, or the whole list was asked for (the whereis-listing flag, value all; its value defs "
                        "lists the definitions whatever the size). kind=\"def\" on a HEAD row is the parser's label, not a proof: a "
                        "definition the parser does not model (a Ruby define_method, a setattr, a name bound by assignment such as an "
                        "alias in a class body) is a kind=\"ref\" row, so under listing=\"defs\" it is among the counted refs. "
@@ -3139,7 +3143,9 @@ inline void writeWhereisListedPage( std::FILE* out, const WhereResult& res, std:
     rw::emitRaw( out, "</whereis>" );
 }
 
-// THE DEFAULT, MEASURED (review B1). The Defs page pays a fixed overhead — listing=, the <refs count= next=> element
+// THE DEFAULT, MEASURED (review B1, then D1). First the definitions: the Defs page is served whenever it SHOWS more
+// definitions than the All page under the row cap (a capped All page can list fewer), whatever its bytes. Only when both
+// pages show the same definitions do the bytes decide. The Defs page pays a fixed overhead — listing=, the <refs count= next=> element
 // and, under the compact legend, their readings — that eliding one or two short ref rows does not repay: on 24 of 58
 // sampled symbols the Defs page was LONGER than the All page while listing fewer rows. So both pages are rendered and
 // Defs is served only when it is STRICTLY shorter both as written (the full legend, whose prose is the same text on
@@ -3158,7 +3164,23 @@ inline ListedHits whereisServedListing( const WhereResult& res, std::size_t maxH
     {
         return defs;   // Defs already degraded to every hit (no ref row, or no def row): nothing to compare
     }
-    ListedHits     all      = listedHits( res, WhereisListing::All );
+    ListedHits all = listedHits( res, WhereisListing::All );
+    // COMPLETE ANSWERS FIRST (orchestrator ruling 2026-10-08, review D1). Under the shared row cap the All page can list
+    // FEWER definitions than the Defs page: HEAD's ref rows fill the cap before the branch definitions arrive. Both
+    // lists are in hit-list order and Defs is the def subsequence, so the definitions the All page shows are a PREFIX
+    // of the Defs page's: comparing the counts compares the sets. More definitions wins whatever its bytes; only equal
+    // sets fall to the bytes rule below.
+    const auto defsShown = [ & ]( const ListedHits& l )
+    {
+        const std::size_t n = std::min( l.rows.size(), maxHits );
+        return std::size_t( std::count_if( l.rows.begin(), l.rows.begin() + std::ptrdiff_t( n ),
+                                           [ & ]( std::size_t i ) { return res.hits[ i ].isDef; } ) );
+    };
+    ENSURES( defsShown( defs ) >= defsShown( all ), "the All page's shown definitions are a prefix of the Defs page's" );
+    if( defsShown( defs ) > defsShown( all ) )
+    {
+        return defs;
+    }
     const Rendered defsPage = renderToString( [ & ]( std::FILE* f ) { writeWhereisListedPage( f, res, maxHits, 0, 0, defs ); } );
     const Rendered allPage  = renderToString( [ & ]( std::FILE* f ) { writeWhereisListedPage( f, res, maxHits, 0, 0, all ); } );
     const bool     defsShorter = defsPage.ok && allPage.ok && defsPage.text.size() < allPage.text.size()

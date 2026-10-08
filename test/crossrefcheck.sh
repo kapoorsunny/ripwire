@@ -589,8 +589,10 @@ else
 fi
 
 # ── THE DEFAULT IS THE SHORTER PAGE (fix round 1, review B1; crossref.h whereisServedListing) ────────────────────
-# The default serves the defs page only when it is STRICTLY shorter, in bytes, than the listing=all page (as written
-# AND in the compact dialect); otherwise it serves the all page. An explicit --whereis-listing=defs is served as asked,
+# When the defs page and the listing=all page show the SAME definitions, the default serves the defs page only when it is
+# STRICTLY shorter, in bytes, than the all page (as written AND in the compact dialect); otherwise it serves the all page.
+# (Fix round 2, review D1: when the defs page shows MORE definitions under the row cap, the default serves it whatever its
+# bytes — the L15/L16 arms below.) An explicit --whereis-listing=defs is served as asked,
 # so each arm reads the two explicit pages of the same binary and checks which one the default is, byte for byte.
 nbytes(){ printf '%s' "$1" | wc -c | tr -d ' '; }
 # (L11) a 1-ref symbol: the defs page is LONGER than the all page, so the default IS the all page (no listing=, no <refs>)
@@ -651,6 +653,66 @@ if command -v python3 >/dev/null 2>&1; then
         || no "LEAN (L14): the MCP default serves a different page than the CLI"
 else
     printf '  SKIP  LEAN (L14) MCP twin (no python3)\n'
+fi
+
+# ── COMPLETE ANSWERS FIRST (fix round 2, review D1; crossref.h whereisServedListing) ───────────────────────────────
+# Under the shared row cap the all page can list FEWER definitions than the defs page (HEAD's references fill the cap
+# before the branch definitions arrive). The default serves the page that SHOWS MORE definitions whatever its bytes; only
+# when both show the same definitions do the bytes decide. The arms are fixture-built and compare the DEFAULT with the two
+# explicit pages of the same binary, byte for byte.
+defs_in(){ hits_of def | wc -l | tr -d ' '; }
+dw(){ "$BIN" "$1" --whereis="$2" --no-cache "${@:3}" 2>/dev/null; }
+# (L15) the cap bites: HEAD defines zqCap once and calls it 70 times; 64 branches sit at the previous commit (same files)
+# and HEAD adds one unrelated commit, so every branch row carries tip=/date=. The all page lists HEAD's definition and 59
+# references (60 rows), the defs page 60 definitions, and the defs page is the LONGER one in bytes — the default is defs.
+D15="$TMP/cap15"; mkdir -p "$D15"; git -C "$D15" init -q -b main >/dev/null 2>&1; git -C "$D15" config commit.gpgsign false
+printf 'int zqCap( int x ) { return x; }\n' >"$D15/def.c"
+{ printf 'int useAll( void )\n{\n    int s = 0;\n'; i=0; while [ $i -lt 70 ]; do printf '    s += zqCap( %d );\n' $i; i=$((i+1)); done; printf '    return s;\n}\n'; } >"$D15/use.c"
+printf '// head\n' >"$D15/other.c"
+git -C "$D15" add -A >/dev/null 2>&1; git -C "$D15" commit -qm cap1 >/dev/null 2>&1
+i=0; while [ $i -lt 64 ]; do git -C "$D15" branch "b$i" >/dev/null 2>&1; i=$((i+1)); done
+printf '// head, later\n' >"$D15/other.c"; git -C "$D15" add -A >/dev/null 2>&1
+GIT_COMMITTER_DATE="2026-02-02T00:00:00Z" GIT_AUTHOR_DATE="2026-02-02T00:00:00Z" git -C "$D15" commit -qm cap2 >/dev/null 2>&1
+C_D="$( dw "$D15" zqCap )"; C_A="$( dw "$D15" zqCap --whereis-listing=all )"; C_F="$( dw "$D15" zqCap --whereis-listing=defs )"
+CD_A="$( printf '%s' "$C_A" | defs_in )"; CD_F="$( printf '%s' "$C_F" | defs_in )"
+if [ "$CD_F" -gt "$CD_A" ] 2>/dev/null && [ "$( nbytes "$C_F" )" -gt "$( nbytes "$C_A" )" ] \
+   && printf '%s' "$C_A" | lroot | grep -q ' capped="1"'; then
+    { [ "$C_D" = "$C_F" ] && printf '%s' "$C_D" | lroot | grep -q ' listing="defs"'; } \
+        && ok "LEAN (L15): capped, the defs page is LONGER ($( nbytes "$C_F" ) B vs $( nbytes "$C_A" ) B) but lists more definitions ($CD_F vs $CD_A) — the default is the defs page" \
+        || { no "LEAN (L15): the default ($( nbytes "$C_D" ) B) is not the defs page ($( nbytes "$C_F" ) B, $CD_F defs) over the all page ($( nbytes "$C_A" ) B, $CD_A defs)"; printf '%s\n' "$C_D" | lroot; }
+else
+    no "LEAN (L15): premises not met: defs shown $CD_F vs all $CD_A, bytes $( nbytes "$C_F" ) vs $( nbytes "$C_A" ), all capped?"
+fi
+# (L15-MCP) the same symbol over MCP (no `listing`): byte-identical to the CLI defs page.
+if command -v python3 >/dev/null 2>&1; then
+    { [ -n "$C_F" ] && [ "$( mcpq "$D15" zqCap '' )" = "$C_F" ] && [ "$( mcpq "$D15" zqCap ',"listing":"all"' )" = "$C_A" ]; } \
+        && ok "LEAN (L15-MCP): MCP whereis serves the same defs page as the CLI default on the capped answer (listing:\"all\" still the all page)" \
+        || no "LEAN (L15-MCP): the MCP default differs from the CLI's on the capped answer"
+else
+    printf '  SKIP  LEAN (L15-MCP) MCP twin (no python3)\n'
+fi
+# (L16) the negative for the bytes rule: 61 definitions on HEAD, one reference, a single branch. Both pages are capped at
+# 60 rows and both show the SAME 60 definitions (definitions sort before references), and the all page is shorter (no
+# <refs> element). The default is the all page: a fix that serves defs whenever the all page is capped, or that counts
+# the TOTAL definitions instead of the SHOWN ones, goes red here.
+D16="$TMP/cap16"; mkdir -p "$D16"; git -C "$D16" init -q -b main >/dev/null 2>&1; git -C "$D16" config commit.gpgsign false
+i=0; while [ $i -lt 61 ]; do printf 'int zqMany( int );\n' >"$D16/h$i.h"; i=$((i+1)); done
+printf 'int useMany( void ) { return zqMany( 1 ); }\n' >"$D16/use.c"
+git -C "$D16" add -A >/dev/null 2>&1; git -C "$D16" commit -qm many >/dev/null 2>&1
+M16_D="$( dw "$D16" zqMany )"; M16_A="$( dw "$D16" zqMany --whereis-listing=all )"; M16_F="$( dw "$D16" zqMany --whereis-listing=defs )"
+M16_DA="$( printf '%s' "$M16_A" | defs_in )"; M16_DF="$( printf '%s' "$M16_F" | defs_in )"
+if [ "$M16_DA" = "$M16_DF" ] && [ "$M16_DA" -ge 60 ] 2>/dev/null && printf '%s' "$M16_A" | lroot | grep -q ' capped="1"' \
+   && printf '%s' "$M16_F" | lroot | grep -q ' capped="1"' && [ "$( nbytes "$M16_A" )" -lt "$( nbytes "$M16_F" )" ]; then
+    { [ "$M16_D" = "$M16_A" ] && ! printf '%s' "$M16_D" | lroot | grep -q ' listing='; } \
+        && ok "LEAN (L16): capped on both pages, the SAME $M16_DA definitions shown — the shorter all page ($( nbytes "$M16_A" ) B < $( nbytes "$M16_F" ) B) is the default" \
+        || { no "LEAN (L16): the default ($( nbytes "$M16_D" ) B) is not the shorter all page ($( nbytes "$M16_A" ) B) when both show the same definitions"; printf '%s\n' "$M16_D" | lroot; }
+else
+    no "LEAN (L16): premises not met: defs shown $M16_DA (all) vs $M16_DF (defs), bytes $( nbytes "$M16_A" ) vs $( nbytes "$M16_F" )"
+fi
+if command -v python3 >/dev/null 2>&1; then
+    [ "$( mcpq "$D16" zqMany '' )" = "$M16_A" ] \
+        && ok "LEAN (L16-MCP): MCP whereis serves the same all page as the CLI when both pages show the same definitions" \
+        || no "LEAN (L16-MCP): the MCP default differs from the CLI's on the capped, same-definitions answer"
 fi
 
 if command -v xmllint >/dev/null 2>&1; then

@@ -292,7 +292,14 @@ tools = json.loads( line )[ "result" ][ "tools" ]
 # field's description now says what its default does ("defs (refs counted), refs or all; default: the shorter page":
 # absent `listing` serves the defs page only when it is strictly shorter than the all page), +18 B in whereis's schema;
 # every other tool unchanged. Headroom after this line: 4 B.
-CEILING = 46850
+# RE-ANCHORED 2026-10-08 (lane/lean-answers-068 fix round 2, review D1): 46,850 -> 46,890, measured 46,869 (from 46,846,
+# 33 tools). The default `listing` is no longer "the shorter page": absent `listing` serves the defs page when it lists MORE
+# definitions than the all page under the row cap (a capped all page can list fewer), whatever its bytes, and otherwise the
+# strictly shorter of the two. The field's description follows the mechanism, "default: the shorter page" ->
+# "default: more defs listed, else the shorter page" (+23 B, the minimum that is true). Attributed: whereis schema 828 -> 851 B
+# (+23 B), whereis description unchanged at 701 B, every other tool unchanged. Headroom after this line: 21 B. The twin below
+# (1c) pins what must not move with it: whereis's description stays 701 B and the listing field says the exact rule.
+CEILING = 46890
 manifest = len( json.dumps( { "tools": tools }, separators = ( ",", ":" ) ) )
 descBytes   = sum( len( t[ "description" ] ) for t in tools )
 schemaBytes = sum( len( json.dumps( t[ "inputSchema" ], separators = ( ",", ":" ) ) ) for t in tools )
@@ -300,6 +307,14 @@ print( "  INFO  %d tools, manifest %d B (~%d tokens): descriptions %d B, schemas
        % ( len( tools ), manifest, manifest // 4, descBytes, schemaBytes ) )
 check( manifest <= CEILING,
        "(1) tools/list is %d B, within the %d B per-session ceiling" % ( manifest, CEILING ) )
+
+# (1c) TWIN of the ceiling re-anchor (PROCESS rule 4): the growth is the listing field's description and nothing else.
+whereisTool = [ t for t in tools if t[ "name" ] == "whereis" ]
+check( len( whereisTool ) == 1 and len( whereisTool[ 0 ][ "description" ] ) == 701,
+       "(1c) whereis's own description is still 701 B (the re-anchor was spent in the listing field, not in prose)" )
+listingDesc = whereisTool[ 0 ][ "inputSchema" ].get( "properties", {} ).get( "listing", {} ).get( "description", "" ) if whereisTool else ""
+check( listingDesc.endswith( "default: more defs listed, else the shorter page" ),
+       "(1c) whereis's listing field states the default rule exactly (got: %r)" % listingDesc )
 
 # ── (1b) the CHANGELOG's own copy of this figure does not silently rot ──────────────────────────────
 # train10.md's "manifest anchor" finding: the byte figure above lives in two places — this file's own

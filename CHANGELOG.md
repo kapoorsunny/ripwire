@@ -22,13 +22,16 @@ build: 631,732 → 611,785 B for the lossless changes alone (−3.2%), 568,600 B
 Every gold item the base answers supplied is still supplied (502 of 502), and decoding the lossless spellings gives
 the base answer back element for element on all 90.
 
-- **`--whereis=SYM` lists the definitions and counts the references, when that answer is shorter.** Every `kind="def"`
-  row is listed; the `kind="ref"` rows are counted in one `<refs count="N" next="--whereis=SYM
-  --whereis-listing=refs"/>` element whose `next=` lists exactly those rows. The default serves this page only when it
-  is strictly shorter, in bytes, than the `--whereis-listing=all` page under the same row cap (compared as written and
-  in the compact legend); otherwise it lists every hit. On a symbol with few references (one to three on a 60-symbol
-  sample) the count and its legend reading cost more than the rows they replace, and the default never serves a page
-  that lists fewer rows in more bytes (an explicit `--whereis-listing=defs` is served as asked).
+- **`--whereis=SYM` lists the definitions and counts the references, when that answer is more complete or shorter.** Every
+  `kind="def"` row is listed; the `kind="ref"` rows are counted in one `<refs count="N" next="--whereis=SYM
+  --whereis-listing=refs"/>` element whose `next=` lists exactly those rows. The default serves this page when it
+  lists MORE definitions than the `--whereis-listing=all` page does under the same row cap (a capped all page can list
+  fewer: HEAD's references fill the cap before the branch definitions arrive), whatever its bytes. When both pages list
+  the same definitions, it serves this page only if it is strictly shorter in bytes (compared as written and in the
+  compact legend), and a tie lists every hit. On a symbol with few references (one to three on a 60-symbol sample) the
+  count and its legend reading cost more than the rows they replace, so the default never serves a page that lists
+  fewer definitions, nor, for the same definitions, one that lists fewer rows in more bytes (an explicit
+  `--whereis-listing=defs` is served as asked).
   `--whereis-listing=defs|refs|all` (MCP `listing`) picks the rows; `all` is the whole hit list. An answer with no
   reference row, or no definition row (the mentions are then the answer), lists every hit. `kind="def"` is the
   parser's label: a definition it does not model (a Ruby `define_method`, a `setattr`, a name bound by assignment) is
@@ -44,10 +47,12 @@ the base answer back element for element on all 90.
   posture (rows first, each definition sent once per session, the core carried by the first ref answer).
   `--mcp-legend=inline` keeps the previous posture; `legend:"compact"`/`"full"` still keep one answer inline; the
   CLI and the HTTP transport are unchanged. A ten-call session on one repo: 45,463 → 32,622 B (inline) → 29,679 B.
-- **Manifest.** The `tools/list` manifest grows 46,732 → 46,846 B: whereis declares `listing`.
+- **Manifest.** The `tools/list` manifest grows 46,732 → 46,869 B: whereis declares `listing`.
 
-Gates: `crossrefcheck` (LEAN L1–L14 — L11–L14 the shorter-page default: one ref, 73 refs, the exact tie and one byte
-either side, the MCP twin — and listing=all twins), `completecheck`, `legendrefcheck` (J), `mcptwinclaimscheck`
+Gates: `crossrefcheck` (LEAN L1–L16 — L11–L14 the same-definitions bytes rule: one ref, 73 refs, the exact tie and one
+byte either side, the MCP twin; L15 and L16 the definitions-first rule: a capped answer whose longer defs page lists more
+definitions is served, and one whose pages list the same definitions keeps the shorter all page, each with its MCP twin
+— and listing=all twins), `completecheck`, `legendrefcheck` (J), `mcptwinclaimscheck`
 (A-default), `compactlegendcheck` (re-pinned with the measured bytes; a listing=all twin pin), `mcpmanifestcheck`.
 
 

@@ -31,7 +31,9 @@ minimal joining subgraph over N task symbols — the L4 one-call/B11-parity trio
 pair `whereis` / `stray_content`, which answer "where does this content live?" across every branch: the
 question `git cherry` cannot, since it compares commit ancestry and every other verb indexes one worktree.
 `stray_content` marks a branch `superseded` when the live line re-implemented its work, which is exactly
-the case `git cherry` calls unmerged forever) + the 3 span-addressed
+the case `git cherry` calls unmerged forever; `whereis` lists the definitions and counts the references
+(`listing:"defs"` on the root) when that page lists MORE definitions than the whole list would under the same row
+cap, or the same ones in strictly fewer bytes — `listing:"all"` asks for every row) + the 3 span-addressed
 edit verbs (`replace_symbol_body`, `insert_before_symbol`, `insert_after_symbol`). Only `find_symbol` and
 `find_referencing_symbols` attach a stable `handle=` instead of the body (fetch it only when you need it,
 via `fetch_body`); the edit verbs enforce a safety contract (staleness refusal, ambiguity refusal, atomic
