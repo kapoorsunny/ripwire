@@ -2568,7 +2568,8 @@ inline constexpr char kHelpTail[] =
         "                               here and in the full legend. DATA comments stay (the map header, pack-task's\n"
         "                               body-omitted rows, +more). Per call this drops 2.8-5.8 KB on the navigation verbs\n"
         "                               (--edit-check's legend 7.4 KB -> 0.9 KB). --for compacts too (ripwire.for/v1 header);\n"
-        "                               under --token-budget it never costs a row --legend=full would keep. The MCP twin\n"
+        "                               under --token-budget it never costs a row --legend=full would keep, unless its\n"
+        "                               own header is the larger one and the row pays for <sigs next=> to fit. The MCP twin\n"
         "                               is the argument legend, compact by default there as well, legend:\"full\" restores\n"
         "                               the prose. Runs with nothing to compact ignore the default; an ASKED --legend=compact\n"
         "                               refuses there, naming the verb: prose/markdown/JSON answers (--situ --recall --report\n"
@@ -4277,7 +4278,8 @@ inline void validateLintSelectionModifierGuards( Config& c ) noexcept
 // it are agents, scripts and harnesses making repeated calls. `--legend=full` restores the full prose legend
 // byte-for-byte (compactlegendcheck (A) pins it against the pre-L1 bytes). --for is no longer exempt: its compact
 // header is its own dialect (verbs_for.h), and under a --token-budget it never loses a row --legend=full keeps
-// (compactlegendcheck (P1) asserts rows(default) ⊇ rows(--legend=full)).
+// (compactlegendcheck (P1) asserts rows(default) ⊇ rows(--legend=full)) — with ONE ruled exemption (knob-honesty-068 round 3,
+// option B): a default whose header is larger than full's, that fits its budget and paid the row for its <sigs next=> (P1-B).
 inline constexpr std::string_view kLegendPostures[]     = { "full", "compact" };
 inline constexpr std::string_view kDefaultLegendPosture = "compact";
 static_assert( std::ranges::contains( kLegendPostures, kDefaultLegendPosture ), "the default is a registered posture" );

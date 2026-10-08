@@ -33,7 +33,8 @@ Three cuts were disclosed and still dead ends — counted, with no pasteable cal
   exempt from the signature trim — the rows shown are the ones they were. Under a tighter explicit ceiling (a hard one)
   `next=` rides alone, and rows pay for it ONLY where paying is what makes the answer fit: the answer with every row the
   cut leaves plus `next=` is served whenever it fits; only when it lands past its ceiling are rows dropped to pay (a
-  capped compact answer then serves the rows the full one keeps), and that paid answer is served only when it fits. Past
+  capped compact answer then serves the rows a paid full one keeps — fewer than `--legend=full` serves only where the
+  compact header is the larger one and full fits unpaid), and that paid answer is served only when it fits. Past
   the ceiling either way (the rank 1..4 floor has nothing left to give, or the MCP `for` answer, whose header overshoots
   `budget_tokens` on its own), no row is dropped for it — the answer keeps the rows the cut alone leaves, `next=` still
   ships (the call that recovers a cut is never the thing cut), and the root says `over_ceiling="1"`, with a clause naming
@@ -50,7 +51,7 @@ Three cuts were disclosed and still dead ends — counted, with no pasteable cal
 
 Also: the `ripwire-handoff` skill passed `--top-k=20` to `--for`, which does not read it; it now spells
 `--signatures-only`. Gates: `forrankordercheck` (9), `lintbudgetcheck` (5), `impactimportcheck` (#9d), `estchargecheck`
-(#11 A7 unpaid twin), `compactlegendcheck` (P4 floor twin), `forrankordercheck` (10) and (11), `fordisclosurecheck` (#2c).
+(#11 A7 unpaid twin), `compactlegendcheck` (P4 floor twin, P1-B), `forrankordercheck` (10) and (11), `fordisclosurecheck` (#2c).
 
 
 ### Added — MCP `grep` rows carry the matched text and a `fetch_body` handle (CLI parity)

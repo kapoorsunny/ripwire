@@ -3077,7 +3077,9 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, bo
         // less header than it emits and leans on the header rungs to land inside the ceiling, so a charged one also reserves
         // the room the compact charge was given beyond full's (compactLedgerGapBytes) — in the plan, so only a block the ladder
         // already trims pays it: a PAID capped compact answer serves the rows the full one does and lands no further over its
-        // ceiling (compactlegendcheck P4). An uncapped answer is untouched. AT THE FLOOR (rank 1..4, nothing left to shed) the
+        // ceiling (compactlegendcheck P4). (Rows a PAID full answer would serve: where full's UNPAID answer fits and the compact
+        // one's does not — a compact header larger than full's, round 3 — full keeps a row the compact answer pays; that is the
+        // one exemption compactlegendcheck (P1-B) rules, orchestrator option B.) An uncapped answer is untouched. AT THE FLOOR (rank 1..4, nothing left to shed) the
         // handle still ships and an overshoot is labelled (rootFinish.sigsUnpaidOver below; orchestrator ruling 2026-10-07).
         // AND ONLY WHERE PAYING IS WHAT MAKES IT FIT (ruling C3, completed 2026-10-08): runForLens renders unpaid first
         // (sigsNextPayFromRows=false: no ledger gap, no payment — the rows the cut alone leaves) and pays only when that

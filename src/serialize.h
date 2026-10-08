@@ -4558,7 +4558,7 @@ struct SigsCutContinuation
                                          //   next_budget_tokens=, is the argument a re-call of the same tool needs
     std::size_t      ledgerGapBytes = 0; // a CHARGED one's plan also reserves this: the sig room the caller's dialect was given beyond
                                          //   what its header honestly costs (the --for compact dialect, verbs_for.h compactLedgerGapBytes),
-                                         //   so a capped compact block is cut to the rows the full one keeps
+                                         //   so a capped compact block is cut to the rows a PAID full one keeps
     bool             payFromRows = true; // a CHARGED one: pay for it in rows (the plan's ledger gap + paySigsContinuationFromRows).
                                          //   false = the caller found that paying cannot make its answer fit (over its ceiling either
                                          //   way; orchestrator ruling C3, 2026-10-07): the block keeps the rows the cut alone leaves —

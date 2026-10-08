@@ -764,7 +764,50 @@ ds, df = rows( sys.argv[ 1 ] ); fs, ff = rows( sys.argv[ 2 ] )
 lostSym = sorted( fs - ds ); lostFiles = sorted( ff - df )
 print( len( ds ), len( fs ), len( lostSym ) + len( lostFiles ), ( lostSym + lostFiles )[ :3 ] )
 PY
-p1n=0; p1bad=0; p1more=0
+# THE ONE EXEMPTION (knob-honesty-068 round 3, orchestrator ruling option B, 2026-10-08; PROCESS rule 4 — re-ruled by the
+# orchestrator, not reworded by the lane). Ruling C3 pays for a capped <sigs> next= in rows ONLY when that is what makes the
+# answer fit. At a tight budget the compact header can finish LARGER than --legend=full's (full's rung zero drops its long prose
+# clauses; compact's own drop cannot pay, verbs_for.h "AND THE DROP MUST PAY"), and then full keeps a row unpaid that the compact
+# answer must pay to fit: P1, P4 and C3 cannot all hold on that argv (lane report, fix round 2 "BLOCKING"). Option D (serve
+# full's header there) was built and measured — branch lane/compact-header-068 — and leaves the default answer's own legend
+# short of definitions (G4: bodies=/bundle=/reason=/task=/pure= undefined in full's header; legendcoveragecheck (G)/(A)/(E)
+# red), so the ruling fell back to B: a lost row is EXEMPT only where ALL of these hold on that very argv —
+#   • the default's header (root open tag + the legend comments right after it) is strictly LARGER than --legend=full's;
+#   • the default fits its own budget (est_tokens <= the budget, no over_ceiling="1") — P4 then holds outright;
+#   • the default's <sigs> carries next= — the row went to pay for the call that recovers it (C3), not to anything else.
+# Every other lost row is still a P1 failure (the TWIN: P1 on every argv the exemption does not name), each exempt run is
+# printed (never silent), and arm (P1-B) below pins the predicate itself, on synthetic headers and on two short-root argv.
+cat > "$TMP/p1d.py" <<'PY'
+import re, sys
+def doc( path ):
+    return open( path, encoding = "utf-8", errors = "replace" ).read()
+def header( t ):   # the root open tag + the comments right after it (the legend); -1 when there is no <ctx> root
+    m = re.match( r"\s*<ctx\s[^>]*>", t )
+    if not m: return -1
+    i = m.end()
+    while t.startswith( "<!--", i ):
+        j = t.find( "-->", i ); i = len( t ) if j < 0 else j + 3
+    return i
+def est( t ):
+    m = re.search( r'<ctx\s[^>]*\sest_tokens="([0-9]+)"', t ); return int( m.group( 1 ) ) if m else -1
+d, f = doc( sys.argv[ 1 ] ), doc( sys.argv[ 2 ] )
+over = 1 if re.match( r'\s*<ctx\s[^>]*\sover_ceiling="1"', d ) else 0
+nxt  = 1 if re.search( r'<sigs\s[^>]*\snext="', d ) else 0
+print( header( d ), header( f ), est( d ), est( f ), over, nxt )
+PY
+# p1HeaderLarger DEFAULT_HDR FULL_HDR — the exemption's header comparison, ONE spelling (arm (P1-B) pins it, and a mutant of it).
+p1HeaderLarger(){ [ "$1" -gt "$2" ]; }
+# p1Exempt DEF FULL BUDGET — 0 when a lost row is the ruled exemption; leaves the facts it read in $p1facts either way. Every
+# field is checked present and numeric before any comparison (CHECKLIST 14): an unreadable answer is never exempt.
+p1Exempt(){
+    set -- $( python3 "$TMP/p1d.py" "$1" "$2" ) "$3"
+    if [ $# -ne 7 ] || ! printf '%s' "$1$2$3$4$5$6$7" | grep -qE '^[0-9]+$'; then
+        p1facts="unreadable answer ($*)"; return 1
+    fi
+    p1facts="header $1 B vs full's $2 B, est_tokens $3 (full $4) of $7, over_ceiling=$5, sigs next=$6"
+    p1HeaderLarger "$1" "$2" && [ "$3" -le "$7" ] && [ "$5" -eq 0 ] && [ "$6" -eq 1 ]
+}
+p1n=0; p1bad=0; p1more=0; p1exempt=0
 for task in "rank symbols by pagerank" "token budget ceiling ladder" "parse command line flags" "legend posture compact" "escapeXml"; do
     for tb in 700 1500 3000 6000; do
         "$BIN" "$ROOT/src" --for="$task" --token-budget=$tb >"$TMP/p1.def" 2>/dev/null
@@ -772,19 +815,101 @@ for task in "rank symbols by pagerank" "token budget ceiling ladder" "parse comm
         set -- $( python3 "$TMP/rows.py" "$TMP/p1.def" "$TMP/p1.full" | tr -d "[](),'" )
         p1n=$(( p1n + 1 ))
         if [ "${3:-1}" -ne 0 ]; then
-            p1bad=$(( p1bad + 1 )); no "(P1) --for='$task' --token-budget=$tb: the default LOST $3 answer row(s) that --legend=full carries (default $1, full $2 symbol rows): ${4:-} ${5:-} ${6:-}"
+            p1lost="the default LOST $3 answer row(s) that --legend=full carries (default $1, full $2 symbol rows): ${4:-} ${5:-} ${6:-}"
+            if p1Exempt "$TMP/p1.def" "$TMP/p1.full" "$tb"; then
+                p1exempt=$(( p1exempt + 1 )); printf '  ..    (P1 exempt, ruling B) --for=%s --token-budget=%s: %s; %s\n' "'$task'" "$tb" "$p1lost" "$p1facts"
+            else
+                p1bad=$(( p1bad + 1 )); no "(P1) --for='$task' --token-budget=$tb: $p1lost — not the ruled exemption ($p1facts)"
+            fi
         fi
         [ "${1:-0}" -gt "${2:-0}" ] && p1more=$(( p1more + 1 ))
         grep -q '<sigs [^>]*capped="1"' "$TMP/p1.full" && head -c 300 "$TMP/p1.def" | grep -qF 'schema="ripwire.for/v1"' && p1bind=$(( ${p1bind:-0} + 1 ))
     done
 done
-[ "$p1bad" -eq 0 ] && [ "$p1n" -eq 20 ] && ok "(P1) rows(default) ⊇ rows(--legend=full) on all $p1n budgeted --for runs (5 tasks x 4 budgets)"
+[ "$p1bad" -eq 0 ] && [ "$p1n" -eq 20 ] && ok "(P1) rows(default) ⊇ rows(--legend=full) on all $p1n budgeted --for runs (5 tasks x 4 budgets) but the $p1exempt the ruled exemption names (header larger than full's, fits its budget, the row paid for <sigs next=>)"
 # THE BINDING GUARD (L1 fix round): it asked for a run where the default carries MORE rows. Since the fix round the compact
 # header defines task=/next=/pure=/<field> and its sig charge is capped at the full dialect's (verbs_for.h runForLens), so
 # the default buys no row it cannot pay for and "more" is no longer the claim. What the superset arm needs is that the
 # budget BINDS (the full answer's <sigs> was cut) on a default that IS the compact posture — else it compares nothing.
 [ "${p1bind:-0}" -gt 0 ] && ok "(P1) the arm binds: on ${p1bind} of $p1n runs the budget cut the full answer's <sigs> and the default is the compact posture (default carries more rows on $p1more)" \
                         || no "(P1) on none of $p1n runs did the budget cut the full answer's <sigs> under a compact default — the superset arm proved nothing"
+
+# (P1-B) THE EXEMPTION, PINNED (knob-honesty-068 round 3, ruling B). Three parts:
+#   1. the header comparison on synthetic sizes — larger is exempt, a tie and a smaller header are not (a mutant of
+#      p1HeaderLarger goes red here even where no live argv lands on the boundary);
+#   2. FIXED ARMS on a SHORT RELATIVE root (`src`, run from $ROOT): the sweep above runs on "$ROOT/src", and that path rides the
+#      header the rows are budgeted against, so a checkout path longer than ~52 chars hid these two (green locally, red on CI's
+#      shorter path at 4acbcd22: default 7 vs full 8, 9 vs 10). Each must keep every row full keeps OR be the ruled exemption,
+#      and P4 holds on both whatever the branch: inside the budget, or no further over it than full;
+#   3. the TWIN on the same root: at --token-budget=6000 the compact header is the SMALLER one, so the exemption cannot apply
+#      and P1 holds strictly.
+# …and a sentinel: MCP `for` has ONE dialect (it declares no `legend` field, src/mcprefusal.h; the compact layer never runs on
+# it), so no compact header exists there to exceed full's; it goes red the day MCP `for` gains a compact dialect.
+p1bbad=0
+if p1HeaderLarger 1201 1000 && ! p1HeaderLarger 1000 1000 && ! p1HeaderLarger 900 1000; then
+    ok "(P1-B) the exemption's header comparison: a larger default header is exempt, a tie and a smaller one are not"
+else
+    p1bbad=$(( p1bbad + 1 )); no "(P1-B) the exemption's header comparison is not 'strictly larger' (1201>1000 exempt, 1000=1000 and 900<1000 not)"
+fi
+# …and the other two conditions, on synthetic answers (each a near miss the predicate could wave through): the positive is a
+# larger header that fits and paid for next=; over the budget, labelled over_ceiling="1", or with no <sigs next=> is not exempt.
+p1syn(){ printf '<ctx task="t" est_tokens="%s"%s><!-- %s --><sigs shown="1"%s></sigs></ctx>' "$1" "$2" "$3" "$4" >"$TMP/p1s.def"; }
+printf '<ctx task="t" est_tokens="1400"><!-- short --><sigs shown="2"></sigs></ctx>' >"$TMP/p1s.full"
+p1synbad=""
+p1syn 1450 "" "a much longer legend comment" ' next="x"';                   p1Exempt "$TMP/p1s.def" "$TMP/p1s.full" 1500 || p1synbad="$p1synbad positive($p1facts)"
+p1syn 1550 "" "a much longer legend comment" ' next="x"';                   p1Exempt "$TMP/p1s.def" "$TMP/p1s.full" 1500 && p1synbad="$p1synbad over-budget"
+p1syn 1450 ' over_ceiling="1"' "a much longer legend comment" ' next="x"';  p1Exempt "$TMP/p1s.def" "$TMP/p1s.full" 1500 && p1synbad="$p1synbad over_ceiling"
+p1syn 1450 "" "a much longer legend comment" "";                            p1Exempt "$TMP/p1s.def" "$TMP/p1s.full" 1500 && p1synbad="$p1synbad no-next"
+p1syn 1450 "" "tiny" ' next="x"';                                           p1Exempt "$TMP/p1s.def" "$TMP/p1s.full" 1500 && p1synbad="$p1synbad smaller-header"
+if [ -z "$p1synbad" ]; then
+    ok "(P1-B) the exemption on synthetic answers: exempt only when the header is larger AND it fits AND <sigs next=> rides (4 near misses refused)"
+else
+    p1bbad=$(( p1bbad + 1 )); no "(P1-B) the exemption on synthetic answers misjudged:$p1synbad"
+fi
+p1b_arm(){   # p1b_arm TASK BUDGET MODE(either|strict)
+    ( cd "$ROOT" && "$BIN" src --for="$1" --token-budget="$2" ) >"$TMP/p1b.def" 2>/dev/null
+    ( cd "$ROOT" && "$BIN" src --for="$1" --token-budget="$2" --legend=full ) >"$TMP/p1b.full" 2>/dev/null
+    local task="$1" tb="$2" mode="$3"
+    set -- $( python3 "$TMP/rows.py" "$TMP/p1b.def" "$TMP/p1b.full" | tr -d "[](),'" )
+    local drows="${1:-}" frows="${2:-}" lost="${3:-}"
+    set -- $( python3 "$TMP/p1d.py" "$TMP/p1b.def" "$TMP/p1b.full" )
+    if [ $# -ne 6 ] || ! printf '%s' "$1$2$3$4$drows$frows$lost" | grep -qE '^[0-9]+$'; then
+        p1bbad=$(( p1bbad + 1 )); no "(P1-B) --for='$task' --token-budget=$tb on root src: could not read both answers (a <ctx> root, est_tokens=, rows) — got '$*' rows='$drows/$frows/$lost'"; return
+    fi
+    local dh="$1" fh="$2" de="$3" fe="$4" why=""
+    [ "$de" -gt "$tb" ] && [ "$de" -gt "$fe" ] && why="$why P4: est_tokens $de over the budget AND over full's $fe;"
+    if [ "$mode" = strict ]; then
+        [ "$lost" -ne 0 ] && why="$why P1: lost $lost row(s) full carries (default $drows, full $frows);"
+        p1HeaderLarger "$dh" "$fh" && why="$why twin premise: the compact header ($dh B) is no longer the smaller one (full's $fh B);"
+        branch="P1 strict, header $dh B < full's $fh B"
+    elif [ "$lost" -ne 0 ]; then
+        if p1Exempt "$TMP/p1b.def" "$TMP/p1b.full" "$tb"; then branch="exempt ($p1facts)"
+        else why="$why P1: lost $lost row(s) full carries (default $drows, full $frows) and is not the ruled exemption ($p1facts);"; fi
+    else
+        branch="P1 holds"
+    fi
+    if [ -n "$why" ]; then
+        p1bbad=$(( p1bbad + 1 )); no "(P1-B) --for='$task' --token-budget=$tb on root src:$why"
+    else
+        ok "(P1-B) --for='$task' --token-budget=$tb on root src: rows $drows (full $frows), est $de (full $fe): $branch"
+    fi
+}
+p1b_arm "rank symbols by pagerank" 1500 either
+p1b_arm "parse command line flags" 1500 either
+p1b_arm "rank symbols by pagerank" 6000 strict
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"for","arguments":{"path":"src","task":"parse command line flags","budget_tokens":1500}}}' \
+    | ( cd "$ROOT" && "$BIN" --mcp 2>/dev/null ) | tail -1 >"$TMP/p1b.mcp"
+if grep -q '<ctx ' "$TMP/p1b.mcp"; then
+    if grep -q 'schema=\\"ripwire.for' "$TMP/p1b.mcp"; then
+        p1bbad=$(( p1bbad + 1 )); no "(P1-B) MCP for now answers in a compact dialect (schema=) — its header must face the same P1/P4 arms as the CLI's"
+    else
+        ok "(P1-B) MCP for budget_tokens=1500 on path src answers in its one (full) dialect — no compact header exists to exceed full's"
+    fi
+else
+    p1bbad=$(( p1bbad + 1 )); no "(P1-B) MCP for budget_tokens=1500 on path src produced no <ctx> answer — the sentinel proves nothing"
+fi
+[ "$p1bbad" -eq 0 ] && ok "(P1-B) the ruled exemption is pinned: its comparison, the short-root fixed arms, the scope twin and the MCP sentinel"
 
 # (P2) the default map's --token-budget gate decides on the price the default PRINTS. It used to decide on the full
 # dialect's price before the compact layer ran, so a map that fits once compacted was withheld (exit 3). Budget = the
