@@ -356,8 +356,8 @@ inline constexpr std::string_view kForRouteCodeLegend =
 // is EXEMPT from the sig ledger (forZeroNoteBytes): spelling the reading must never cost the answer a row, so the rows
 // kept are exactly the rows kept before the elision. Each is checked verbatim inside the clause that carries it.
 inline constexpr std::string_view kForZeroAbsentCompactNote = " (absent cx/ccx/in = 0)";
-inline constexpr std::string_view kForZeroAbsentFullNote    = ", each absent when 0;";
-inline constexpr std::string_view kForZeroAbsentMcpNote     = "; an absent cx/ccx/in is 0";
+inline constexpr std::string_view kForZeroAbsentFullNote = ", each absent when 0;";
+inline constexpr std::string_view kForZeroAbsentMcpNote = "; an absent cx/ccx/in is 0";
 // The bytes of those readings a header carries — what its sig ledger leaves uncharged.
 inline std::size_t forZeroNoteBytes( std::string_view header ) noexcept
 {
