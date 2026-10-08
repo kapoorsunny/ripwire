@@ -108,6 +108,11 @@ QUERY="frobnicate widget cache"
 # ladder trimmed used to appear in neither section), and the clause defining the tail says so. Verified before
 # re-pinning: with every comment and est_tokens= normalized out, old and new documents are byte-identical —
 # this fixture's head covers every file, so its tail is unchanged and every ranking byte is unmoved.
+# RE-PIN 2026-10-07 (lane for-spine-span-068, by design): 3557 -> 3807 B (+250 B), est_tokens="1349" -> "1449". CAUSE: --for
+# rows with a known extent carry e="N" (the definition's last line) right after l= (3 rows here), and the full
+# legend gains the clause defining e=. Verified before re-pinning (tmp re-pin script, base binary 0c115310 == old golden):
+# with e= attributes, that clause and est_tokens normalized out, old and new documents are byte-identical — no
+# ranking, body or route byte moved.
 # L1 (2026-09-19): the CLI default legend is compact; this arm compares against a golden recorded from the full default, so it asks for it.
 "$BIN" anchorfix --no-cache --for="$QUERY" --no-route --legend=full >"$TMP/plain_full.xml" 2>/dev/null
 diff -q "$TMP/plain_full.xml" "$ROOT/test/anchorfix/golden_for.xml" >/dev/null \

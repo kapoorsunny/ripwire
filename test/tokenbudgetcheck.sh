@@ -361,7 +361,25 @@ else
         # L1 (2026-09-19): the o200k/cl100k counts were pinned (bench/tokenaudit/pin.py, needs tiktoken) on the FULL-legend
         # documents, the default when they were taken; the CLI default is compact now, so the pinned argv asks for the
         # document the counts describe. Re-pinning the default posture needs tiktoken — recorded in the L1 lane report.
-        EST_OUT="$( cd "$EST_TMP" && "$BIN" f $rest --legend=full 2>/dev/null )"
+        # A LEADING NAME=VALUE token is an environment assignment (pin.py's ENV_TOKEN), not argv: for-named-noe, the
+        # e=-free twin of for-named, sets RIPWIRE_FOR_ENDLINES=never. Every pin runs with that switch otherwise UNSET, so
+        # an ambient value cannot move a pin. ${a[@]+...} keeps an empty array legal under set -u on bash 3.2.
+        est_env=(); est_args=()
+        for est_tok in $rest; do
+            if [ "${#est_args[@]}" -eq 0 ] && printf '%s' "$est_tok" | grep -Eq '^[A-Z][A-Z0-9_]*='; then est_env+=( "$est_tok" ); else est_args+=( "$est_tok" ); fi
+        done
+        EST_OUT="$( cd "$EST_TMP" && env -u RIPWIRE_FOR_ENDLINES ${est_env[@]+"${est_env[@]}"} "$BIN" f ${est_args[@]+"${est_args[@]}"} --legend=full 2>/dev/null )"
+        # #18d TWIN PREMISE: for-named prices the e= rows the lane added and for-named-noe the e=-free answer it twins; a
+        # twin whose env token was dropped would silently re-measure for-named, so each must show its own side.
+        case "$label" in
+            for-named)
+                if printf '%s' "$EST_OUT" | grep -Eq '<d l="[0-9]+" e="[0-9]+"'; then ok "#18d for-named: the pinned answer carries e= rows"
+                else no "#18d for-named: the pinned answer carries no e= row — the pin no longer describes the e= path"; fi ;;
+            for-named-noe)
+                if ! printf '%s' "$EST_OUT" | grep -q '<d '; then no "#18d for-named-noe: the twin printed no <d> rows (premise)"
+                elif printf '%s' "$EST_OUT" | grep -Eq ' e="[0-9]+"'; then no "#18d for-named-noe: the twin carries e= — RIPWIRE_FOR_ENDLINES=never did not reach the binary"
+                else ok "#18d for-named-noe: the twin is the e=-free answer (RIPWIRE_FOR_ENDLINES=never)"; fi ;;
+        esac
         EST_GOT="$( printf '%s' "$EST_OUT" | grep -oE 'est_tokens="[0-9]+"' | head -1 | grep -oE '[0-9]+' )"
         if [ -z "$EST_GOT" ]; then
             no "#18 $label: no est_tokens in the output — the pin says this verb prices itself"
@@ -393,9 +411,10 @@ else
         fi
     fi
 
-    # #18c MUTATION CONTROL. Eight pins are committed; a loop that measured fewer (a manifest truncated by
-    # a merge, a verb that stopped printing est_tokens) asserted less than the PASS lines above suggest.
-    if [ "$est_pins" -ge 8 ]; then
+    # #18c MUTATION CONTROL. Nine pins are committed (eight verbs + for-named's e=-free twin); a loop that measured
+    # fewer (a manifest truncated by a merge, a verb that stopped printing est_tokens) asserted less than the PASS
+    # lines above suggest.
+    if [ "$est_pins" -ge 9 ]; then
         ok "#18c $est_pins pins measured against the tokenizer manifest"
     else
         no "#18c only $est_pins pin(s) measured — the band arms above asserted almost nothing"

@@ -99,6 +99,13 @@ PY
 "$BIN" docdemotefix --for="$BUGQ" --no-route --format=candidates --no-cache >"$TMP/noroute.xml" 2>/dev/null
 "$BIN" docdemotefix --for="$BUGQ"     --no-cache >"$TMP/bugfor.xml"    2>/dev/null
 "$BIN" docdemotefix --for="$TRACEQ"   --no-cache >"$TMP/tracefor.xml"  2>/dev/null
+# RE-PIN 2026-10-04 (lane for-spine-span-068, by design): docdemotegolden_for.xml 5821 -> 6268 B and
+# docdemotegolden_noroute.xml 9423 -> 9695 B. Every <d> row with a known extent gains e="N" right after l= (5 and 6
+# rows), the full legend gains the e= clause, est_tokens moves with the bytes. The routed golden also shows the
+# code-above-docs REORDER: the same 14 rows, flush_cache (r=7 -> r=5) now above the two notes/paging_design.md rows,
+# <sigs docs_after_code="2"> and its reading. --no-route has no reorder (the rule is routed-path only). Checked
+# mechanically: removing e=, est_tokens=, the e= clause and the docs_after_code attribute/reading leaves the no-route
+# golden byte-identical and the routed one differing only in that row order. Gate: test/forsigspancheck.sh.
 # RE-PIN 2026-09-13 (merge of lane/sc-legend and lane/for-widen): docdemotegolden_for.xml RE-MEASURED on the
 # MERGED tree at 5,809 B (est_tokens "2328"), from 5,887 on for-widen's tree and 5,425 on sc-legend's. Neither
 # lane's own number is the merged one, so this is measured, not summed. Three identified changes, and the golden

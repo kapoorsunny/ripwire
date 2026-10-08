@@ -288,6 +288,11 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # outside-import/use,super-past-the-tree;...)" (was "(builtin/stdlib-name-...,external-import,...)"), +106 B — and the
 # est_tokens= that prices them, 858 -> 901 (header and root). Checked: the new output differs from the pin by exactly
 # those two clauses and that figure; the six other pins are unchanged.
+# RE-ANCHORED BY HAND 2026-10-04 (lane for-spine-span-068, by design), for.xml only: the four <d> rows gain e="N" (the
+# definition's last line) right after l=, the full legend gains the present-only e= clause ("; e= on a d row: the 1-based
+# line where that definition ends, …", 221 B), and est_tokens= moves 1580 -> 1683 with the bytes (3937 -> 4194 B).
+# Checked: removing the four e= attributes and that clause and masking est_tokens leaves the pin byte-identical (at=
+# masked); no docs_after_code (the fixture has no markdown row). The six other pins are unchanged.
 PIN_DIR="$ROOT/test/compactlegendfix/pre_l1_full"
 # the one normalisation, in python on BOTH sides so no sed dialect decides it (BSD sed appends a final newline, GNU
 # sed does not): at="…" masked, trailing newlines dropped.
