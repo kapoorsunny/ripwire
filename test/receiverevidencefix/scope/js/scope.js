@@ -5,4 +5,5 @@ export function arrowParam(bs) { const tank = new Tank(); bs.forEach((tank) => t
 export function forOf(bs) { const tank = new Tank(); for (const tank of bs) { tank.spill(); } }
 export function catchParam() { const tank = new Tank(); try { } catch (tank) { tank.spill(); } }
 export function blockOutside(b) { const tank = new Tank(); { const tank = b; } tank.spill(); }
+export function reassign(b) { let tank = new Tank(); tank = b; tank.spill(); }
 export function constructed() { const t = new Tank(); t.spill(); }

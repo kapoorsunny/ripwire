@@ -36,7 +36,8 @@ in a Java class with an outside base drawn to an unrelated class's `flush`.
   from the declaration to the block's end, a parameter in its function or lambda, a Python name in its whole function.
   Every other binding of a name also hides the field or the outer local it shadows there — a loop, lambda, catch,
   resource or `with`/`except` variable, a pattern, `case`, `out var` or `match` capture, a destructuring entry, Swift
-  `if`/`guard`/`while let`, a Go range / type-switch / short variable, a JS/TS/Python/Go reassignment. Such a binding
+  `if`/`guard`/`while let`, a Go range / type-switch / short variable, a JS or Python reassignment (a statically typed
+  variable keeps its declared type when reassigned). Such a binding
   names its own class only when it is written or constructed with one (a typed loop, lambda or resource variable); otherwise the call
   through it is name-only, like a call through an untyped local or an interface-typed receiver with several
   implementors. A written type that names a generic's type parameter (`<Tank>`, `[T any]`, `def f[T]`) names no class,

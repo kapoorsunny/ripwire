@@ -5048,20 +5048,19 @@ inline void captureGoEvidence( BindCtx& cx, TSNode n, const char* t, std::uint32
             return true;
         } );
     }
-    else if( kindIs( t, "short_var_declaration" ) || kindIs( t, "assignment_statement" ) )
+    else if( kindIs( t, "short_var_declaration" ) )
     {
-        // `x := T{}` names T; `a, b := …`, `x := f()` name no class. An ASSIGNMENT rebinds a name declared elsewhere: no span.
+        // `x := T{}` names T; `a, b := …`, `x := f()` name no class. (A plain assignment `x = …` keeps x's declared type:
+        // Go's static typing, so it records nothing.)
         const TSNode left  = fieldChild( n, NodeField::Left );
         const TSNode right = fieldChild( n, NodeField::Right );
         const bool   one   = !ts_node_is_null( left ) && !ts_node_is_null( right ) && ts_node_named_child_count( left ) == 1 && ts_node_named_child_count( right ) == 1;
-        pushGoNames( cx, left, one ? constructedBy( ts_node_named_child( right, 0 ), cx.lang, src ) : std::string_view{},
-                     kindIs( t, "assignment_statement" ) ? BindSite{ at, 0u, 0u } : goShortVarSite( n, at ) );
+        pushGoNames( cx, left, one ? constructedBy( ts_node_named_child( right, 0 ), cx.lang, src ) : std::string_view{}, goShortVarSite( n, at ) );
     }
-    else if( kindIs( t, "range_clause" ) || kindIs( t, "receive_statement" ) )
+    else if( ( kindIs( t, "range_clause" ) || kindIs( t, "receive_statement" ) ) && jsHasToken( n, ":=" ) )
     {
-        // `for k, v := range xs` (the loop) / `case v := <-ch:` (the case); `=` assigns names declared elsewhere: no span
-        const BindSite site = jsHasToken( n, ":=" ) ? siteIn( at, ancestorOfKind( n, { "for_statement", "communication_case" } ) ) : BindSite{ at, 0u, 0u };
-        pushGoNames( cx, fieldChild( n, NodeField::Left ), {}, site );
+        // `for k, v := range xs` (the loop) / `case v := <-ch:` (the case); with `=` they assign names declared elsewhere
+        pushGoNames( cx, fieldChild( n, NodeField::Left ), {}, siteIn( at, ancestorOfKind( n, { "for_statement", "communication_case" } ) ) );
     }
     else if( kindIs( t, "type_switch_statement" ) )
     {
@@ -5223,7 +5222,10 @@ inline void captureJsEvidence( BindCtx& cx, TSNode n, const char* t, std::uint32
         }
         if( kindIs( ts_node_type( lhs ), "identifier" ) )
         {
-            pushLocalEvidence( cx, lhs, constructedBy( fieldChild( n, NodeField::Right ), lang, src ), BindSite{ at, 0u, 0u } );   // a rebinding: no span
+            if( lang == Lang::JavaScript )   // a JS rebinding can change the class (no span); a TS one keeps the declared type
+            {
+                pushLocalEvidence( cx, lhs, constructedBy( fieldChild( n, NodeField::Right ), lang, src ), BindSite{ at, 0u, 0u } );
+            }
             return;
         }
         if( !kindIs( ts_node_type( lhs ), "member_expression" ) )

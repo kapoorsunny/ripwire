@@ -97,7 +97,7 @@
 #            class: Java for/lambda/catch/resource/instanceof/case/record-pattern variables, C# foreach/lambda/is/out
 #            var/case/deconstruction/catch/LINQ, Kotlin for/destructuring/lambda/let/when/catch, Swift for-in/case let/
 #            tuple/closure/if-guard-while let/catch, and the same shapes where FE-B reads TS/JS/Python/Go evidence
-#            (arrow and catch parameters, for-of, a block const, a destructuring; a Python for/lambda/comprehension/
+#            (arrow and catch parameters, for-of, a block const, a destructuring, a JS reassignment; a Python for/lambda/comprehension/
 #            with/except/walrus/match/reassignment; a Go range/if/type-switch variable). Outside its block a local never
 #            lends its class (a nested block, a lambda's typed parameter), and the field (or outer local) proves again.
 #            (b) A generic's type parameter spelled like a class (`<Tank>`, `Box<Tank>`, `[Tank Spiller]`, `def f[Tank]`)
@@ -586,7 +586,7 @@ echo "--- (B) the same shapes where FE-B reads TS / JS / Python / Go evidence (a
 hides scope/ts    scope.ts spill 4 5 arrowParam forOf blockLocal catchParam destructure
 hides scope/ts    scope.ts spill 4 4 typeParam classTypeParam typeParamField
 proven scope/ts   callees scope.ts:typedParam "method spill scope.ts:4"
-hides scope/js    scope.js spill 2 3 arrowParam forOf catchParam
+hides scope/js    scope.js spill 2 3 arrowParam forOf catchParam reassign
 proven scope/js   callees scope.js:blockOutside "method spill scope.js:2"         # the outer local, past the block that hid it
 proven scope/js   callees scope.js:constructed "method spill scope.js:2"
 hides scope/py    scope.py spill 3 6 for_loop lambda_param comprehension with_as except_as walrus reassign match_capture match_as
