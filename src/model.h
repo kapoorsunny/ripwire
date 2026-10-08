@@ -393,6 +393,9 @@ inline bool isJsTsBuiltinMember( std::string_view ctor, std::string_view name ) 
 //             field reuse (graph.h valueRefIndex reads exactly these): fieldName = the slot as written (into=),
 //             recvVar = the simple container identifier, composeRel = the normalised key, qualifier = scope char +
 //             file-shadow flag, argCount = the argument index.
+//             ONE Value record per file may instead be the DEPTH CUT (qualifier = kValueRefDepthCutScope, name = "",
+//             which no identifier is): the walk stopped at its depth cap there and argCount subtrees were not visited
+//             (saturating), line = the first one. It is no row; valuerefindex.h counts it for the answers' depth disclosure.
 //   Through — a call THROUGH a value: a called parameter, `tbl[k](…)` / `tbl.k(…)` on a container that received a
 //             function value. name = the container, fieldName = the written callee, composeRel = the key,
 //             qualifier = p|l|f, argCount = the parameter index. Joined to Value rows only (called_by=/through=, a
@@ -432,6 +435,9 @@ inline ValueRefFamily valueRefFamily( Lang l ) noexcept
 {
     return enumTableAt( kValueRefFamilyOfLang, l, ValueRefFamily::None );
 }
+// The scope char (qualifier[0]) of a file's depth-cut Value record (see RefRole::Value above): written by
+// src/ingest_valuerefs.h, read by src/valuerefindex.h — distinct from every row scope (f l a p x).
+inline constexpr char kValueRefDepthCutScope = 'd';
 
 // Essential-complexity ev_why= reason vocabulary (the essential-complexity design note, §5.1). PUBLIC the
 // moment it ships (test/attrvocabcheck.sh's standing posture; test/essentialcxcheck.sh pins the spellings):

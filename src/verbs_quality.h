@@ -2021,6 +2021,9 @@ std::optional<int> runQualityViews( const MainDispatch& d )
         std::size_t decoratedExcluded     = 0;   // 0.6.6 D4 review: decorated Python defs, counted apart (decorated-excluded=)
         std::size_t valueRefExcluded      = 0;   // reference-as-value round: held as a VALUE by a table/field/argument (value-ref-excluded=)
         const rw::ValueRefIndex dcVri( ing );    // valuerefs.h — the same rows --callers shows, under its visibility rules
+        // The value walk's depth cut over EVERY armed family (ingest_valuerefs.h kVrMaxDepth): a table entry below it was never
+        // seen, so a listed function may still be held as a value there — disclosed beside value-ref-excluded=, absent when none.
+        const rw::ValueRefIndex::DepthCuts dcDepthCut = dcVri.depthCutsFor( {}, /*everyFamily=*/true );
 
         // Optional path filter (--dead-code=DIR). §P0.3: this was a bare SUFFIX test, so it could only ever
         // match a FILENAME — every directory argument produced count="0" with confidence="high", and a typo'd
@@ -2157,10 +2160,13 @@ std::optional<int> runQualityViews( const MainDispatch& d )
                      "absent at 0. A `static` inside a comment is not linkage evidence. "
                      "Graph evidence is local to the indexed tree; verify before deleting. {}{}-->",
                      // Reference-as-value round: beside its hyphenated siblings above, exactly when the root carries it.
-                     valueRefExcluded > 0 ? "value-ref-excluded=N (absent when 0): internal functions kept off this list because a table, "
-                                            "field or argument holds them as a VALUE (matched by name; it is not a proven call; the callers verb "
-                                            "lists the sites). One entity, one reason: a def a reason above already excluded is counted there only. "
-                                          : "",
+                     ( std::string( valueRefExcluded > 0 ? "value-ref-excluded=N (absent when 0): internal functions kept off this list because "
+                                                           "a table, field or argument in ANOTHER function or at file scope holds them as a VALUE "
+                                                           "(matched by name; it is not a proven call; the callers verb lists the sites); a function "
+                                                           "that only stores itself is still listed. One entity, one reason: a def a reason above "
+                                                           "already excluded is counted there only. "
+                                                         : "" )
+                       + rw::valueRefsDepthLegend( dcDepthCut.files > 0 ) ).c_str(),   // exactly when the root carries the depth disclosure
                      rw::graphCountFloorBrief( rw::graphGaugeClauses( g ) ).c_str() );
         // §P15/§P16: candidates is already deterministically sorted (path asc, line asc, name asc) and used to
         // print every candidate unconditionally — completeness was the whole contract, matching --uses' shape,
@@ -2179,7 +2185,8 @@ std::optional<int> runQualityViews( const MainDispatch& d )
         // 0.6.6 D4: runner-root-excluded= is absent at 0, so a tree with no Python test/decorated root is byte-identical
         const std::string runnerRootAttr = ( runnerRootExcluded == 0 ? std::string() : std::format( " runner-root-excluded=\"{}\"", runnerRootExcluded ) )
                                          + ( decoratedExcluded == 0 ? std::string() : std::format( " decorated-excluded=\"{}\"", decoratedExcluded ) )
-                                         + ( valueRefExcluded == 0 ? std::string() : std::format( " value-ref-excluded=\"{}\"", valueRefExcluded ) );
+                                         + ( valueRefExcluded == 0 ? std::string() : std::format( " value-ref-excluded=\"{}\"", valueRefExcluded ) )
+                                         + rw::valueRefsDepthAttrXml( ing, dcDepthCut, rw::VrRender{ qvSingleRoot, qvRootPrefix } );   // absent when no cut
         rw::emitTo( stdout, "<dead-code count=\"{}\" evidence=\"internal-linkage+zero-callers\" register-macro-excluded=\"{}\"{}{}{}{}{}{}>",
                      candidates.size(), registerMacroExcluded, runnerRootAttr,
                      dcFilterAttr.c_str(),

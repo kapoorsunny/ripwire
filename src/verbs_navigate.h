@@ -227,7 +227,8 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                          ( std::string( rw::unprovenDefsLegend( chRows.unprovenDefs > 0 ) )      // H1: likewise, exactly when unproven_defs= is there
                            + rw::crossKindLegend( !chRows.crossKind.empty() ) ).c_str(),           // hono-07: likewise for cross_kind=
                          rw::modScopeLegend( chHasModScope ),                   // #60: likewise, exactly when a t="modscope" row is
-                         ( rw::graphCountDisclosure( rw::graphGaugeClauses( g ) ) + rw::valueRefsLegend( !chRows.valueRefs.rows.empty(), wantCallers ) ).c_str(),
+                         ( rw::graphCountDisclosure( rw::graphGaugeClauses( g ) ) + rw::valueRefsLegend( !chRows.valueRefs.rows.empty(), wantCallers )
+                           + rw::valueRefsDepthLegendFor( chRows.valueRefs ) ).c_str(),   // exactly when the root carries the depth disclosure
                          rw::rootRelPathsLegend( chSingleRoot ),
                          rw::multiRootTableLegend( ing.rootLabels.size() >= 2 ) );
         }
@@ -239,8 +240,8 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         // The tier-3 declines count= does not include (callhierarchy.h), on every dialect; absent at zero.
         const std::string chDeclinedAttr = rw::declinedCallsAttrXml( chRows.declinedCalls ) + rw::declinedIfaceAttrXml( chRows.declinedIface );
         // Reference-as-value round: value_refs= beside count= (never in it), absent at zero; the <vrs> window after the rows.
-        const std::string    chValueRefsAttr = rw::valueRefsCountAttrXml( chRows.valueRefs.rows.size() );
         const rw::VrRender   chVr { chSingleRoot, chRootPrefix };
+        const std::string    chValueRefsAttr = ( rw::valueRefsCountAttrXml( chRows.valueRefs.rows.size() ) + rw::valueRefsDepthAttrXml( ing, chRows.valueRefs.depthCut, chVr ) );   // + the depth cut that makes it a floor
         const std::string    chVrNext = "--uses=" + std::string( sym );
 
         // --format=columnar (RESEARCH lever 1): the same page window, re-encoded as a path-table + parallel
@@ -289,7 +290,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
             if( chSingleRoot ) { rw::emitTo( stdout, ",\"root\":\"{}\"", jsonStr( cfg.roots[0] ).c_str() ); }
             rw::emitTo( stdout, ",\"hop_tested\":{},\"hop_untested\":{}{}{}", chTested.tested, chTested.untested,
                          rw::declinedCallsKeyJson( chRows.declinedCalls ) + rw::declinedIfaceKeyJson( chRows.declinedIface ),   // A6; then the XML root's declined_calls=/declined_iface=
-                         rw::valueRefsCountKeyJson( chRows.valueRefs.rows.size() ) );
+                         ( rw::valueRefsCountKeyJson( chRows.valueRefs.rows.size() ) + rw::valueRefsDepthKeyJson( ing, chRows.valueRefs.depthCut, chVr ) ) );
             rw::emitTo( stdout, "{}{}", pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
                                         cfg.pageLimit, cfg.pageOffset, chDiscloseCap, kJsonPageSyntax ),
                          rw::graphCountFloorAttrJson( g ).c_str() );   // §H4 §3.4 — the JSON dialect's spelling of the same marker
@@ -552,7 +553,7 @@ struct UseSite { std::uint32_t fileId; std::uint32_t line; rw::RefRole role; std
 // that never matched the row's own root-relative p=, the map's id=, or a git path — the M6/L1/M0-5 finding.
 inline std::pair<std::vector<UseSite>, std::size_t>
 collectUseSites( const rw::IngestResult& ing, const UsesSelector& sel, std::span<const char> isChosenCaller,
-                 std::string_view rootForId = {}, std::span<const rw::NodeId> valueDefs = {} )
+                 std::string_view rootForId = {}, std::span<const rw::NodeId> valueDefs = {}, const rw::ValueRefIndex* valueIndex = nullptr )
 {
     using namespace rw;
     std::vector<UseSite> sites;
@@ -560,7 +561,7 @@ collectUseSites( const rw::IngestResult& ing, const UsesSelector& sel, std::span
     const ElixirResolver elixirResolver( ing );
     // Reference-as-value round: valuerefs.h UsesValueFilter — role="value" sites the resolver binds to the selector's
     // definitions (the same rows --callers shows), never a Through, never a duplicate read row at a value site.
-    const UsesValueFilter valueFilter( ing, sel.siteMatchName, valueDefs );
+    const UsesValueFilter valueFilter( ing, sel.siteMatchName, valueDefs, valueIndex );
     for( std::uint32_t refIndex = 0; refIndex < ing.references.size(); ++refIndex )
     {
         const Reference& r = ing.references[refIndex];
@@ -689,8 +690,12 @@ std::optional<int> runUses( const MainDispatch& d )
         const std::vector<char> isChosenCaller = ( sel.fileQualified || sel.scopeNarrowed ) ? usesChosenCallers( ing, g, defs ) : std::vector<char>{};
 
         // the sorted use-sites, plus the un-narrowed call-role total the disclosure reports.
+        // The value index is this verb's own, so the depth cut the --callers answer discloses (valuerefs.h) is read off the
+        // SAME index the role="value" rows come from: a file nested past the walk's cap holds a use below it that no row shows.
+        const rw::ValueRefIndex usVri( ing );
         auto [ sites, callSitesOfName ] = collectUseSites( ing, sel, isChosenCaller,
-                                                           usSingleRoot ? std::string_view( cfg.roots[0] ) : std::string_view{}, defs );
+                                                           usSingleRoot ? std::string_view( cfg.roots[0] ) : std::string_view{}, defs, &usVri );
+        const rw::ValueRefIndex::DepthCuts usDepthCut = usVri.depthCutsFor( defs );
         rw::rankUseSites( ing, g, sites );   // cut-fix C: most-depended-on sites first, so the cap drops the lightest
 
         // §A6b(ii): a file: qualifier naming a file with NO definition of the name is a WRONG SELECTOR — its
@@ -749,7 +754,8 @@ std::optional<int> runUses( const MainDispatch& d )
                      "{}{}{}-->{}{}", rw::kUsesLegendOpen,
                      ( rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::Uses, usUnprovenDefs > 0 )           // H1: exactly when the root carries unproven_defs=
                        + rw::declinedCallsLegendWithGate( usDeclinedCalls > 0, g.gateDeclinedCalls > 0 )                                // exactly when it carries declined_calls=
-                       + rw::usesValueRoleLegend( std::any_of( sites.begin(), sites.end(), []( const UseSite& u ) { return u.role == RefRole::Value; } ) ) ).c_str(),
+                       + rw::usesValueRoleLegend( std::any_of( sites.begin(), sites.end(), []( const UseSite& u ) { return u.role == RefRole::Value; } ) )
+                       + rw::valueRefsDepthLegend( usDepthCut.files > 0 ) ).c_str(),   // exactly when the root carries the depth disclosure
                      rw::capLegendClause( rw::computePageDisclosure( pageRows, sites.size(), upw.end,
                                                                     cfg.pageLimit, cfg.pageOffset, usDiscloseCap ).active ),
                      rw::graphCountDisclosure( rw::graphGaugeClauses( g ) ).c_str(), rw::rootRelPathsLegend( usSingleRoot ),
@@ -773,16 +779,18 @@ std::optional<int> runUses( const MainDispatch& d )
             const std::string attr = "of=\"" + ex( sym ) + "\" defs=\"" + std::to_string( defs.size() )
                                    + "\" external=\"" + ( external ? "1" : "0" ) + "\" count=\"" + std::to_string( sites.size() ) + "\""
                                    + rw::unprovenDefsAttrXml( usUnprovenDefs )   // H1: where the XML root carries it
-                                   + selectorAttrs + usRootAttr + upage + rw::graphCountFloorAttrXml( g );   // §H4 §3.4
+                                   + selectorAttrs + usRootAttr + upage + rw::graphCountFloorAttrXml( g )   // §H4 §3.4
+                                   + rw::valueRefsDepthAttrXml( ing, usDepthCut, rw::VrRender{ usSingleRoot, usRootPrefix } );   // the depth cut that makes count= a floor; absent when none
             emitColumnarUseSites( stdout, ing, attr, ufiles, ulines, uroles, uins, usRootPrefix );
             return 0;
         }
 
-        rw::emitTo( stdout, "<uses of=\"{}\" defs=\"{}\" external=\"{}\" count=\"{}\"{}{}{}{}{}>",
+        rw::emitTo( stdout, "<uses of=\"{}\" defs=\"{}\" external=\"{}\" count=\"{}\"{}{}{}{}{}{}>",
                      ex( sym ).c_str(), defs.size(), external ? 1 : 0, sites.size(),
                      rw::unprovenDefsAttrXml( usUnprovenDefs ).c_str(),   // H1: beside the count it qualifies; absent at zero
                      selectorAttrs.c_str(), usRootAttr.c_str(), upage,
-                     rw::graphCountFloorAttrXml( g ).c_str() );
+                     rw::graphCountFloorAttrXml( g ).c_str(),
+                     rw::valueRefsDepthAttrXml( ing, usDepthCut, rw::VrRender{ usSingleRoot, usRootPrefix } ).c_str() );   // the depth cut that makes count= a floor; absent when none
         rw::writeMultiRootTable( stdout, ing );   // M12: the roots list this element's own root= cannot carry
         for( std::size_t siteIndex = upw.begin; siteIndex < upw.end; ++siteIndex )
         {
@@ -850,6 +858,7 @@ struct SafeDeleteLegendFlags
     bool        callersFloor  = false;   // callers_floor= on the root (countfloor.h): callers= may be short for THIS definition
     bool        usesFloor     = false;   // uses_floor= on the root: this kind's reads/type mentions are not indexed in this run
     bool        hasSitesL     = false;   // a <c sites_l=> row is on this page
+    bool        valueRefDepthCut = false;   // the depth disclosure is on the root: the value walk stopped at its depth cap
 };
 
 // count-floor (countfloor.h) + CALLSITE-LINE: the safe-delete legend's clauses for callers_floor=, uses_floor=, next= and
@@ -925,6 +934,7 @@ inline void emitSafeDeleteLegend( std::size_t defCount, std::size_t unprovenDefs
         declinedClause += "none-found beside declined_calls= is not a safety reading: those calls may reach this definition. ";
     }
     declinedClause += rw::valueRefsSafeDeleteLegend( flags.valueRefs > 0 );   // exactly when the root carries value_refs=
+    declinedClause += rw::valueRefsDepthLegend( flags.valueRefDepthCut );      // exactly when it carries the depth disclosure
     declinedClause += safeDeleteFloorLegend( flags, risk );   // count-floor + CALLSITE-LINE: present-only clauses
     rw::emitTo( stdout, "<!-- ripwire safe-delete: composes signals the tool already computes into one \"can I delete this?\" READ "
                 "— never a verdict. defs= is resolveAllByNameQualified's match count, exactly as the impact/uses/callers "
@@ -1107,11 +1117,13 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
     // --edit-check's overload fold states) — so a multi-def selector withholds the claim rather than
     // guessing which definition it would apply to.
     // Reference-as-value round: a function a table, field or argument holds is not dead — its value sites are uses
-    // (sites above) and they keep dead_code_candidate at 0, exactly as --dead-code's value-ref-excluded= does.
+    // (sites above) and they keep dead_code_candidate at 0 by --dead-code's own rule (ValueRefIndex::isValueReferenced):
+    // a row made inside the function itself (`timer_set( tick )` in tick) or a wrapper decorator does not.
     const rw::ValueRefIndex sdVri( ing );
     const rw::ValueRefRows  sdValueRefs = rw::valueRefCallerRows( ing, sdVri, defs );
+    const rw::VrRender      sdVr { sdSingleRoot, sdRootPrefix };   // the <vrs> rows' and the depth cut's paths
     bool deadCodeCandidate = false;
-    if( defs.size() == 1 && callerIds.empty() && sdValueRefs.rows.empty() )
+    if( defs.size() == 1 && callerIds.empty() && !sdVri.isValueReferenced( defs[0] ) )
     {
         const Symbol& only = ing.symbols[ defs[0] ];
         if( deadCodeEligibleKind( ing, only ) )
@@ -1192,7 +1204,7 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
                           SafeDeleteLegendFlags{ sdSingleRoot, rw::graphGaugeClauses( g ),
                                                  anyModuleScopeRow( ing, std::span<const NodeId>( callerIds ).subspan( sdLw.begin, sdLw.end - sdLw.begin ) ),
                                                  sdDeclinedCalls, g.gateDeclinedCalls > 0, sdValueRefs.rows.size(),
-                                                 sdFloor.isFloor, usesFloor, !sdCallSites.empty() } );
+                                                 sdFloor.isFloor, usesFloor, !sdCallSites.empty(), sdValueRefs.depthCut.files > 0 } );
 
     const Symbol&      lead = ing.symbols[ defs[0] ];   // resolveAllByNameQualified walks ascending id — defs[0] is the
                                                         // lowest, same convention --impact/--uses/--callers's of=/defs=
@@ -1213,7 +1225,7 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
                 testedSelf ? 1 : 0, radiusTested, radiusUntested, deadCodeCandidate ? 1 : 0, risk,
                 rw::unprovenDefsAttrXml( sdUnprovenDefs ).c_str(),   // H1: beside the verdict it qualifies; absent at zero
                 rw::declinedCallsAttrXml( sdDeclinedCalls ).c_str(), // beside risk= too: declined calls that may reach it; absent at zero
-                rw::valueRefsCountAttrXml( sdValueRefs.rows.size() ), // value uses: in uses=, never in callers=/impact_reaches=; absent at zero
+                ( rw::valueRefsCountAttrXml( sdValueRefs.rows.size() ) + rw::valueRefsDepthAttrXml( ing, sdValueRefs.depthCut, sdVr ) ), // value uses: in uses=, never in callers=/impact_reaches=; absent at zero
                 pageDisclosure( cab, sizeof( cab ), cw.end - cw.begin, callerIds.size(), cw.end, cfg.pageLimit, cfg.pageOffset, true ),
                 rw::graphCountFloorAttrXml( g ).c_str(), sdRootAttr.c_str(), sdNextAttr.c_str() );
     for( std::size_t i = cw.begin; i < cw.end; ++i )
@@ -1231,8 +1243,7 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
         }
         rw::emitTo( stdout, "/>" );
     }
-    const std::string sdVrPrefix = sdSingleRoot ? rw::sarif::rootPrefixOf( cfg.roots[0] ) : std::string();
-    rw::emitTo( stdout, "{}</safe-delete>", rw::valueRefsXml( ing, sdValueRefs, true, rw::VrRender{ sdSingleRoot, sdVrPrefix },
+    rw::emitTo( stdout, "{}</safe-delete>", rw::valueRefsXml( ing, sdValueRefs, true, sdVr,
                                                               "--uses=" + std::string( cfg.safeDeleteSym ) ) );
     return 0;
 }
@@ -2280,18 +2291,21 @@ std::optional<int> runPath( const MainDispatch& d )
         {
             pthValueIdx.emplace( ing );
         }
-        const std::size_t pthToValueRefs = path.empty() ? rw::toValueRefsCount( ing, true, dstDefs, &*pthValueIdx ) : 0;
+        const rw::ToValueRefs pthToValueRefs = path.empty() ? rw::toValueRefs( ing, true, dstDefs, &*pthValueIdx ) : rw::ToValueRefs{};
         const rw::PathSearchGaps pthGaps = path.empty() ? rw::pathSearchGaps( ing, g, srcDefs, *pthValueIdx ) : rw::PathSearchGaps{};
         rw::emitTo( stdout, "<!-- ripwire path: one DIRECTED call path from= to to= (each <s> a hop); reachable= is 0 and hops= 0 when the "
                      "graph holds none. {}{}{}{}-->{}", rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::Path, pthUnprovenDefs > 0 ).c_str(),
-                     rw::toValueRefsLegend( pthToValueRefs > 0 ), rw::pathGapsLegend( pthGaps.any() ),
+                     ( std::string( rw::toValueRefsLegend( pthToValueRefs.count > 0 ) ) + rw::valueRefsDepthLegend( pthToValueRefs.depthCut.files > 0 ) ).c_str(),
+                     rw::pathGapsLegend( pthGaps.any() ),
                      rw::graphCountFloorBrief( rw::graphGaugeClauses( g ) ).c_str(), rw::rootRelPathsLegend( pthSingleRoot ) );
         rw::emitTo( stdout, "<path from=\"{}\" to=\"{}\" from_p=\"{}\" to_p=\"{}\" from_defs=\"{}\" to_defs=\"{}\"{} reachable=\"{}\" hops=\"{}\"{}{}",
                      ex( srcN ).c_str(), ex( dstN ).c_str(), loc( srcUsed ).c_str(), loc( dstUsed ).c_str(),
                      srcDefs.size(), dstDefs.size(), rw::unprovenDefsAttrXml( pthUnprovenDefs ).c_str(),   // H1: beside the defs counts it is not in
                      path.empty() ? 0 : 1, path.empty() ? std::size_t( 0 ) : path.size() - 1, pthRootAttr.c_str(),
                      rw::graphCountFloorAttrXml( g ).c_str() );
-        rw::emitTo( stdout, "{}", rw::countAttrXmlOrEmpty( "to_value_refs", pthToValueRefs ) );   // absent at zero: byte-identical otherwise
+        // absent at zero: byte-identical otherwise; the depth cut beside it makes the count (or its absence) a floor
+        rw::emitTo( stdout, "{}{}", rw::countAttrXmlOrEmpty( "to_value_refs", pthToValueRefs.count ),
+                     rw::valueRefsDepthAttrXml( ing, pthToValueRefs.depthCut, rw::VrRender{ pthSingleRoot, pthRootPrefix } ).c_str() );
         // P2.10: a dead end is exactly the moment to name the next verb. --path is DIRECTED; --connect searches
         // undirected and finds the shared-caller join a directed walk can never see.
         const rw::PathGapsXml pthUnreached = path.empty()
@@ -2460,7 +2474,7 @@ int emitImpactColumnar( const ImpactView& v )
                                  + "\" radius_untested=\"" + std::to_string( v.radiusUntested ) + "\""
                                  + rw::declinedCallsAttrXml( v.declinedCalls )                    // tier-3 declines into the radius
                                  + rw::declinedIfaceAttrXml( v.declinedIface )
-                                 + rw::valueRefsCountAttrXml( v.valueRefs.rows.size() )           // value uses (rows: the XML form)
+                                 + ( rw::valueRefsCountAttrXml( v.valueRefs.rows.size() ) + rw::valueRefsDepthAttrXml( v.ing, v.valueRefs.depthCut, rw::VrRender{ v.singleRoot, v.rootPrefix } ) )   // value uses (rows: the XML form)
                                  + std::string( v.rootAttr )
                                  + pageDisclosure( ipab, sizeof( ipab ), shownRows, v.show.size(), v.page.end,
                                                    v.pageLimit, v.pageOffset, true )
@@ -2507,7 +2521,7 @@ int emitImpactJson( const ImpactView& v )
                  rw::countFieldOrEmpty( "tsconfig_unread", std::size_t( v.imports.tsconfigUnread ), /*json=*/true ) );
     rw::emitTo( stdout, ",\"radius_tested\":{},\"radius_untested\":{}{}{}", v.radiusTested, v.radiusUntested,
                  rw::declinedCallsKeyJson( v.declinedCalls ) + rw::declinedIfaceKeyJson( v.declinedIface ),   // A6; then the XML root's declined_calls=/declined_iface=
-                 rw::valueRefsCountKeyJson( v.valueRefs.rows.size() ) );
+                 ( rw::valueRefsCountKeyJson( v.valueRefs.rows.size() ) + rw::valueRefsDepthKeyJson( v.ing, v.valueRefs.depthCut, rw::VrRender{ v.singleRoot, v.rootPrefix } ) ) );
     if( v.singleRoot ) { rw::emitTo( stdout, ",\"root\":\"{}\"", jsonStr( v.rootRaw ).c_str() ); }   // R-E
     rw::emitTo( stdout, "{}{}{},\"impact\":[",
                  pageDisclosure( ipab, sizeof( ipab ), shownRows, v.show.size(), v.page.end,
@@ -2538,7 +2552,7 @@ int emitImpactXml( const ImpactView& v )
                  rw::byDepthAttrXml( v.byDepth ),                                                              // 0.6.5: partitions reaches= by hop depth
                  v.imports.xmlAttrs.c_str(), v.radiusTested, v.radiusUntested,
                  ( rw::declinedCallsAttrXml( v.declinedCalls ) + rw::declinedIfaceAttrXml( v.declinedIface ) ).c_str(),   // tier-3 declines into the radius
-                 rw::valueRefsCountAttrXml( v.valueRefs.rows.size() ),   // value uses: never in reaches=; absent at zero
+                 ( rw::valueRefsCountAttrXml( v.valueRefs.rows.size() ) + rw::valueRefsDepthAttrXml( v.ing, v.valueRefs.depthCut, rw::VrRender{ v.singleRoot, v.rootPrefix } ) ),   // value uses: never in reaches=; absent at zero
                  std::string( v.rootAttr ).c_str(),
                  pageDisclosure( ipab, sizeof( ipab ), shownRows, v.show.size(), v.page.end,
                                  v.pageLimit, v.pageOffset, true ),
@@ -2646,7 +2660,8 @@ std::optional<int> runImpact( const MainDispatch& d )
                          rw::declinedCallsLegendWithGate( imDeclinedCalls > 0, g.gateDeclinedCalls > 0 ),           // exactly when the root carries declined_calls=
                          rw::declinedIfaceLegend( imDeclinedIface > 0 ),                                             // likewise, exactly when declined_iface= is there
                          rw::modScopeLegend( imHasModScope ),                      // #60: likewise, exactly when a t="modscope" row is
-                         rw::valueRefsReachLegend( !imValueRefs.rows.empty() ),     // exactly when the root carries value_refs=
+                         ( std::string( rw::valueRefsReachLegend( !imValueRefs.rows.empty() ) )   // exactly when the root carries value_refs=
+                           + rw::valueRefsDepthLegendFor( imValueRefs ) ).c_str(),                 // ... and the depth disclosure
                          rw::graphCountDisclosure( rw::graphGaugeClauses( g ) ).c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
         }
         // P2.1 + §P8 G1: the rank-ordered listing's 40 is a DEFAULT now, not a ceiling — see the §P10.3 note

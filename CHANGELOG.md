@@ -952,13 +952,28 @@ call-shaped references, so on such a function `--callers`, `--callees`, `--impac
   tree, django and webpack, 30 were identical. The 3 that differed are in scope: a read row became
   `role="value"`; a callee answer gained 2 rows; `--dead-code` dropped 4 functions that a `NODE_SET_METHOD`
   argument or a CommonJS `module.exports` table holds.
+- **Depth.** The capture does not descend past 512 levels of nesting (a 300-link C `else if` chain reaches it). That
+  cut is disclosed, never silent: every answer that reads value references for the cut file's language — the
+  callers/callees roots, `--impact`, `--safe-delete`, `--dead-code`, `--uses`, `--path` (beside `to_value_refs=`),
+  `--json` and the MCP twins — carries `value_refs_depth_capped=N` (files cut) and `value_refs_depth_at=FILE:LINE`
+  (the first cut), so a missing row, a `count=` or a listed dead function there reads as a floor. The one exception,
+  named: `--quality-delta`'s dead-code kind and its `value-ref-excluded=` count (CLI and MCP) read the rows and do not
+  yet carry it. An answer over a tree with no cut is byte-identical.
+- **Second review.** A parameter of a prototype, a function-pointer typedef or parameter, a C++ member declaration, a
+  Go func type or interface method, or a TS function type, `declare function` or interface signature no longer hides a
+  same-named function in the enclosing scope (`signal( SIGINT, handler )` beside `typedef void (*fn_t)( int handler )`
+  was no row). A function that only stores ITSELF (`timer_set( tick )` inside tick) is no longer kept off `--dead-code`
+  or `dead_code_candidate`, as a recursive self-call is no caller. `--callees` rows are per binding site and written
+  callee: two calls `tbl.k(); tbl.k();` through one slot are one row, and `sites=` counts binding sites, not calls. A
+  known floor: one slot called under two spellings (`tbl.k()` and `tbl["k"]()`) is two written callees, so two rows. A C `[expr]` designator, a numeric key
+  and an identifier key are capped like every other written slot.
 - **Cost.** A cold default map costs +3.6% CPU on this tree, +6.3% on django and +5.2% on webpack (median of 5,
   `sim/refval_cpu.sh`).
 - **Cache.** `kParserVer` moves.
 - **Manifest.** The `tools/list` manifest grows 46,591 → 46,732 B: the two find descriptions name `valueRefs` as
   not a proven call.
 
-Gate: `test/recallshapecheck.sh`. It has 177 arms across C, C++, JS, JSX, TS, TSX, Python and Go:
+Gate: `test/recallshapecheck.sh`. It has 201 CLI arms (plus the parity checks) across C, C++, JS, JSX, TS, TSX, Python and Go:
 - positives;
 - near-miss negatives for every guard, each proven able to fail by a mutation (`sim/refval_mutate.sh`);
 - named floors;
@@ -1384,9 +1399,9 @@ shadow and the value-reference slot text take 143, above 141's full-use file tag
 together at 156: branch builds in flight have used up to 154, whose full-use file tag is 155, so no cache such a build
 wrote is read as this release's), `kCacheVersion` 25 → 28
 (the function-literal fix's record changes, then the false-edge fix's member-call fields; the Ruby branch's appended
-binding kinds need no bump of their own) and `kQSnapCacheScheme` 15 → 17
+binding kinds need no bump of their own) and `kQSnapCacheScheme` 15 → 18
 (the `--quality-delta` error-masking and placeholder changes, then the dead kind agreeing with `--dead-code` on functions
-held as values). Every ingest cache written by an earlier build is refused and re-indexed once, and every
+held as values, then on a function that only stores itself). Every ingest cache written by an earlier build is refused and re-indexed once, and every
 cached quality snapshot is recomputed. The session legend dictionary is `dictv=cbadf4aa6acda0c2 entries=787`.
 
 ### Fixed — a call the language resolves outside the tree no longer binds to a same-named in-repo definition
@@ -1401,7 +1416,8 @@ the result as a confident edge. Three shapes are now resolved the way the langua
 - a JavaScript/TypeScript call on a global object (`JSON.parse`, `Buffer.from`, `crypto.subtle.verify`) or to a global
   function (`fetch`) in a file that neither imports nor declares that name;
 - a call through `require( 'pkg' )`, `import * as ns from 'pkg'` or a name destructured from a global object, and a Go
-  call through an import whose path no go.mod in the tree contains.
+  call through an import whose path no go.mod in the tree contains (a go.mod path is read as its grammar spells it:
+  bare, quoted or a raw string, with a trailing comment dropped, so `replace "x" => "./x"` puts x in the tree).
 Such a call has no edge and is counted `external=` where the language proves the target is outside the tree (a
 builtin, a global, an outside package or `use`, a Go predeclared function, a C library name), `unresolved=` otherwise. A
 name an import binds from inside the tree, and every implicit-receiver language (Java, C#, C++, Kotlin, Swift, Ruby,

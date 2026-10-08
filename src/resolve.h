@@ -923,6 +923,25 @@ inline std::string_view trimWs( std::string_view s ) noexcept
     return s;
 }
 
+// The first token of a go.mod directive operand — a module path or a directory — as the go.mod grammar spells it: bare
+// (up to whitespace), an interpreted string ("example.com/x") or a raw string (`example.com/x`), the quotes removed. ""
+// when the operand is empty or its quote never closes. Both go.mod readers (this file's replace aliases, graph.h's module
+// census) read a path through it, so a quoted spelling names the same module as the bare one.
+inline std::string_view goModToken( std::string_view s ) noexcept
+{
+    s = trimWs( s );
+    if( s.empty() )
+    {
+        return {};
+    }
+    if( s.front() == '"' || s.front() == '`' )
+    {
+        const std::size_t close = s.find( s.front(), 1 );
+        return close == std::string_view::npos ? std::string_view() : s.substr( 1, close - 1 );
+    }
+    return s.substr( 0, s.find_first_of( " \t" ) );
+}
+
 // Parse go.mod `replace OLD [ver] => NEW [ver]` directives (both single-line and grouped `replace ( … )`).
 // A filesystem NEW target (`./…`, `../…`, or absolute) is resolved relative to the go.mod's root dir; when it
 // ESCAPES `rootReal` (points at a sibling root) we mint a Go alias: module-path `OLD` → the on-disk dir.
@@ -930,11 +949,6 @@ inline std::string_view trimWs( std::string_view s ) noexcept
 inline void parseGoModReplaces( const std::string& bytes, std::uint32_t fromRoot, const std::string& rootReal,
                                 std::vector<ConfigAlias>& out )
 {
-    const auto firstTok = []( std::string_view s ) noexcept
-    {
-        const std::size_t sp = s.find_first_of( " \t" );
-        return sp == std::string_view::npos ? s : s.substr( 0, sp );
-    };
     bool        inGroup = false;
     std::size_t i       = 0;
     while( i < bytes.size() )
@@ -984,8 +998,8 @@ inline void parseGoModReplaces( const std::string& bytes, std::uint32_t fromRoot
         {
             continue;
         }
-        const std::string_view mod = firstTok( trimWs( body.substr( 0, arrow ) ) );
-        const std::string_view tgt = firstTok( trimWs( body.substr( arrow + 2 ) ) );
+        const std::string_view mod = goModToken( body.substr( 0, arrow ) );   // `"example.com/x" => "../x"` is x => ../x
+        const std::string_view tgt = goModToken( body.substr( arrow + 2 ) );
         if( mod.empty() || tgt.empty() )
         {
             continue;

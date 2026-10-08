@@ -310,7 +310,7 @@ constexpr std::uint32_t kParserVer    = 156;          // bump on any grammar/.sc
                                                       //   vrClean key slots); their notes are below. Branch builds in flight have
                                                       //   used numbers up to 154 (rich file tag 155). 156 (rich file tag 157) is
                                                       //   above every one of them, so no cache another build wrote is read as this
-                                                      //   build's. kCacheVersion stays 28.
+                                                      //   build's. kCacheVersion stays 28; kQSnapCacheScheme 18 (cr2-followup).
                                                       // 148 = 2026-10-04 (train 26a: PR #373, Ruby method lookup, merged onto main's 143):
                                                       //   cache-key hygiene. The branch's Ruby extraction steps ran as 130–137,
                                                       //   142 and 145 (its notes below); main used 130–143 for other lanes, and
@@ -323,6 +323,14 @@ constexpr std::uint32_t kParserVer    = 156;          // bump on any grammar/.sc
                                                       //   Go named types get their kind from the type_spec's form (t="type" /
                                                       //   "functype"), and `type A = B` is now indexed (t="alias") — new defs and
                                                       //   new kind bytes. 145, not 144: 143's RICH file tag is 144.
+                                                      // 145 = lane train25-cr2-followup (lane-local; the train renumbers): three extraction changes —
+                                                      //   a parameter of a prototype, function-pointer typedef, Go func type or TS
+                                                      //   function type no longer declares its name in the enclosing scope; a file
+                                                      //   whose value walk stops at kVrMaxDepth gains ONE depth-cut Value record;
+                                                      //   the remaining written key slots (a C `[expr]` designator, a numeric or
+                                                      //   identifier key) go through vrClean. 145, not 144: 143's RICH file tag is
+                                                      //   144 (parserVerFor below adds 1). The train renumbers if another lane
+                                                      //   takes 145/146.
                                                       // 143 = 2026-10-04 (train 25 review fixes): two extraction changes —
                                                       //   a declaration named like the global object (`var self = this`, a
                                                       //   parameter `window`) is now a JsShadow binding, and a value-reference

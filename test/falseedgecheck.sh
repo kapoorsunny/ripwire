@@ -35,7 +35,9 @@
 #            (`lib.Shape()` via example.com/vendored); a function passed as a value. Root gonomod/ has NO go.mod: its
 #            full-path import of an in-tree package keeps its edge (an unknown module path proves nothing outside).
 #            Root gomodcomment/: a `module x // c` line and a nested `module "y" // c` are x and y (near miss: cmx is
-#            not under cm); root goreplace/: a module only a local `replace` names (its directory has no go.mod).
+#            not under cm); root goreplace/: a module only a local `replace` names (its directory has no go.mod), also
+#            spelled quoted (goreplace/quoted/: `"x" => "./x"`, a raw-string path; near miss: a quoted module replaced by
+#            another quoted MODULE stays outside).
 #   (B) JS:  JSON.stringify, `const { stringify } = JSON`, `new URL()`, Buffer.from, `globalThis.fetch`, console/Math/
 #            Object/Array/Promise members, require('destroy'), require('supertest'), a receiver from require('qs')
 #            and a name destructured from require('cookie') never reach an in-repo function, getter, method or object
@@ -70,7 +72,8 @@
 #   (F) propagation: --callers and --impact of the in-repo decoys no longer list the false callers.
 #   (G) disclosure: every call the arms above unbind is a `C external` census row (empty targets) — except a Python bare
 #            name nothing binds and no builtin table holds (run_all's `process`, siblings.py's `helper`), which has no
-#            in-repo target and no proof of an outside one: it is unresolved=, no census row at all; each root's map
+#            in-repo target and no proof of an outside one: it is unresolved=, no census row at all, and the py and c
+#            roots pin their census unresolved= to exactly the sites named (an omitted call cannot pass); each root's map
 #            header external= equals its census `# dispositions external=` and is at least the number of expected
 #            external rows; every root's dispositions still sum to calls= with unaccounted=0.
 #   (H) MCP twins (fresh TMPDIR cache): find_referencing_symbols / find_symbol name exactly the rows the CLI's
@@ -251,6 +254,21 @@ lacks gomodcomment callees app/near.go:Near "Shape lib/lib.go"
 # goreplace/ keeps the replace-only shape the go/ root had before it became buildable Go: legacy/ has no go.mod, so
 # the replace line is the only source of example.com/legacy (twin of the old UseVendored arm)
 exactly goreplace callees app/app.go:UseLegacy "fn Shape legacy/lib/lib.go"
+# goreplace/quoted/: the go.mod grammar lets either side of a replace be quoted — an interpreted string or a raw
+# (backquoted) one, single-line or grouped. Each is the same local replace as the bare spelling. Near miss: a quoted
+# module replaced by another quoted MODULE (not a directory) stays outside the tree — reading the quote itself as the
+# start of a local path would put it in.
+exactly goreplace callees quoted/app/app.go:UseQuoted "fn Quote quoted/qlegacy/lib/lib.go"
+exactly goreplace callees quoted/app/raw.go:UseRaw "fn Raw quoted/qraw/lib/lib.go"
+lacks goreplace callees quoted/app/remote.go:UseRemote "Quote quoted/qlegacy/lib/lib.go"
+# goworkspace/: two roots indexed together; a's go.mod replaces example.com/wb by the SIBLING root ../b, quoted. The
+# cross-root alias (resolve.h parseGoModReplaces) reads the path with the same goModToken, so the call keeps its edge.
+wsf="$TMP/goworkspace.callees.xml"
+( cd "$CORPUS/goworkspace" && "$BIN" a b --no-cache --callees=app/app.go:Use >"$wsf" 2>/dev/null ); wsrc=$?
+wsgot="$( rows "$wsf" | tr '\n' ';' | sed 's/;$//' )"
+if [ "$wsrc" -ne 0 ]; then no "(goworkspace) --callees=app/app.go:Use over roots a b exited rc=$wsrc"
+elif [ "$wsgot" = "fn Far b/lib/lib.go" ]; then ok "(goworkspace) a quoted replace into a sibling root keeps the cross-root edge [fn Far b/lib/lib.go]"
+else no "(goworkspace) --callees=app/app.go:Use over roots a b: rows [${wsgot:-none}], want [fn Far b/lib/lib.go]"; fi
 
 echo "=== (B) JS: globals, required packages, accessors ==="
 lacks js callees lib/response.js:length "stringify lib/query.js"
@@ -372,11 +390,13 @@ externals tsimport src/remote.ts pull fetch
 externals js lib/selfalias.js onMessage process
 externals ts src/selfalias.ts onTick process
 externals gomodcomment app/near.go Near Shape
+externals goreplace quoted/app/remote.go UseRemote Quote
 # a Python name no import, local or module def binds and that is no builtin: no in-repo target, but nothing proves it is
 # outside the tree either (a closure variable, a star import of an unresolved module) — so it is no census row at all
 # (counted unresolved=), never a C external row and never a bound one
 unresolved_site(){
     local r="$1" file="$2" caller="$3" callee="$4"
+    printf '%s %s %s\n' "$file" "$caller" "$callee" >>"$TMP/$r.nunres"   # the pin below counts the sites named per root
     if python3 - "$TMP/$r.tsv" "$file" "$caller" "$callee" <<'PY'
 import sys
 census, path, caller, callee = sys.argv[ 1: ]
@@ -395,6 +415,20 @@ unresolved_site py src/ui/widget.py run_all process
 unresolved_site py src/ui/siblings.py run helper
 externals py src/ui/widget.py read_config open
 unresolved_site c copy.c classify find_type
+# unresolved_site reads an ABSENT census row, so a call extraction dropped would pass it too (CodeRabbit on #372). Each
+# root that names unresolved sites therefore pins its census `unresolved=` to exactly the number it names: a dropped call
+# lowers the count (red), and a new unresolved call in the fixture raises it (red until an arm names that site too).
+unresolved_pinned(){
+    local r="$1" want got
+    want="$( sort -u "$TMP/$r.nunres" 2>/dev/null | wc -l | tr -d ' ' )"
+    got="$( grep -m1 '^# dispositions ' "$TMP/$r.tsv" 2>/dev/null | grep -oE ' unresolved=[0-9]+' | grep -oE '[0-9]+$' )"
+    if [ -z "$got" ]; then no "(G) ($r) the census dispositions carry no unresolved= count — the pin cannot be read"
+    elif [ "$want" -lt 1 ]; then no "(G) ($r) no unresolved site is named for this root — the pin would be vacuous"
+    elif [ "$got" -ne "$want" ]; then no "(G) ($r) census unresolved=$got, but this gate names $want unresolved site(s): $( tr '\n' ';' <"$TMP/$r.nunres" )"
+    else ok "(G) ($r) census unresolved=$got == the $want site(s) named above: each was extracted and left unresolved"; fi
+}
+unresolved_pinned py
+unresolved_pinned c
 externals c window.c elapsed clock
 externals rs src/lib.rs draw render
 for r in $ROOTS; do

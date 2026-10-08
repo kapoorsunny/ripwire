@@ -505,11 +505,11 @@ Discloses: **none**
 
 ### `src/ingest_valuerefs.h`
 
-Discloses: **none**
+Discloses: `value_refs_depth_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
-| `kVrMaxDepth` | `512` | — | the value-uses pass's own depth guard (ingest_sidecap.h kSideDepthUses) |
+| `kVrMaxDepth` | `512` | INDEXING | the value-uses pass's own depth guard (ingest_sidecap.h kSideDepthUses); a cut is disclosed as value_refs_depth_capped= (valuerefs.h) |
 | `kVrTextCap` | `96` | — | a written slot / callee longer than this is cut with "…" |
 
 ### `src/jsrunner.h`
@@ -939,7 +939,7 @@ Discloses: `name_ladder_capped`
 
 ### `src/valuerefs.h`
 
-Discloses: `capped`
+Discloses: `capped`, `value_refs_depth_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |

@@ -2186,6 +2186,7 @@ constexpr std::uint32_t kIngestParserVerMirror    = 156;  // MUST equal ingest.c
                                                           // 148 = 2026-10-04 (train 26a: PR #373 merged; above the branch's 145 and the 145–147
                                                           //   lanes in flight, see kParserVer note; kIngestCacheVersionMirror stays main's 28)
                                                           // 145 = lane honesty-small-068 (lane-local; the train renumbered it)
+                                                          // 145 = lane train25-cr2-followup (train 25 re-review fixes; lane-local, the train renumbered it)
                                                           // 141 = 2026-10-04 (train 25: above FE-A's 134/135 and refval-edges' 140, see kParserVer
                                                           //   note; kIngestCacheVersionMirror 28 from FE-A, kQSnapCacheScheme 17 from refval-edges)
                                                           // 140 = lane refval-edges (reference-as-value rows; see kParserVer note)
@@ -3396,7 +3397,10 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // argument holds as a VALUE (valuerefindex.h ValueRefIndex::isValueReferenced, checked after every other exemption,
 // counted as value-ref-excluded= like --dead-code): the dead SET moved, as in v9/v12/v15. kParserVer moved with
 // the extraction (the Value/Through rows) and its mirror moved with it. Bumped 16 -> 17.
-constexpr std::uint32_t kQSnapCacheScheme = 17;
+// v18 (2026-10-04, train 25 re-review fixes) — isValueReferenced ignores a value reference made inside the function
+// itself (`timer_set( tick )` in tick), as the CSR drops a recursive self-call: the dead SET moved, as in v9/v12/v15/v17.
+// kParserVer moved too (145: prototype parameters, the depth-cut record). Bumped 17 -> 18.
+constexpr std::uint32_t kQSnapCacheScheme = 18;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
 // The qsnap EXCLUDES-config key folds the qsnap SCHEME (independent of the ingest cache's kHeadSnapCacheScheme)
