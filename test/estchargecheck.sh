@@ -31,6 +31,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
+echo "estchargecheck: BIN=$BIN"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){   printf '  FAIL  %s\n' "$*"; fail=1; }
@@ -38,7 +39,6 @@ skip(){ printf '  SKIP  %s\n' "$*"; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 cd "$ROOT"
-echo "estchargecheck: BIN=$BIN"
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 

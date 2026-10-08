@@ -29,14 +29,16 @@
 #   (6) shown= on a capped <sigs> equals the number of <d> rows printed; two runs are byte-identical;
 #       full and compact bundles are xmllint-clean.
 #
-# Usage:  bash test/forrankordercheck.sh   |   RIPWIRE_BIN=asan/ripwire bash test/forrankordercheck.sh
+# Usage:  bash test/forrankordercheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/forrankordercheck.sh
+# BIN is $1, else RIPWIRE_BIN, else build/ripwire; the first output line names the binary used (knob-honesty-068 N7).
 # Exits non-zero on any failure.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
-BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
+echo "forrankordercheck: BIN=$BIN"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
@@ -45,7 +47,6 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "git required"; exit 2; }
 cd "$ROOT"
-echo "forrankordercheck: BIN=$BIN"
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 

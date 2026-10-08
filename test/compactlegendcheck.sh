@@ -44,13 +44,17 @@
 # the map header, and every absence-marked row field of the map legend, read from source, has a compact reading — so the
 # next one cannot land undefined.
 #
-# Usage:  RIPWIRE_BIN=build/ripwire bash test/compactlegendcheck.sh
+# Usage:  bash test/compactlegendcheck.sh [BIN]   |   RIPWIRE_BIN=build/ripwire bash test/compactlegendcheck.sh
+# BIN is $1, else RIPWIRE_BIN, else build/ripwire; the first output line names the binary used (a mutant run against the
+# wrong binary gave false greens when this gate read RIPWIRE_BIN only — knob-honesty-068 delta review N7).
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
-BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
+echo "compactlegendcheck: BIN=$BIN"
+[ -x "$BIN" ] || { echo "compactlegendcheck: no ripwire binary at $BIN — build first"; exit 2; }
 FIX="$ROOT/test/fixture"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 # HERMETIC HOME (0.6.6 review M2): the (U)/(UG) probe runs bare --scan-skills, which walks the skill homes under $HOME
