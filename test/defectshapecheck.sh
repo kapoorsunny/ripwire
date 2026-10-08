@@ -1256,9 +1256,10 @@ gating_split "$L" 0
 L="surfaces"
 PHRASE='new-symbol rows never gate, except defect-shape format-arity'
 phrase_ok(){  # LABEL TEXT — the text states the exception, and every "new-symbol rows never gate" in it carries it
-    local all qual
-    all="$( printf '%s' "$2" | grep -o 'new-symbol rows never gate' | wc -l | tr -d ' ' )"
-    qual="$( printf '%s' "$2" | grep -o "$PHRASE" | wc -l | tr -d ' ' )"
+    local all qual flat   # whitespace-normalized first: a sentence may wrap anywhere in a document
+    flat="$( printf '%s' "$2" | tr '\n' ' ' | tr -s ' ' )"
+    all="$( printf '%s' "$flat" | grep -o 'new-symbol rows never gate' | wc -l | tr -d ' ' )"
+    qual="$( printf '%s' "$flat" | grep -o "$PHRASE" | wc -l | tr -d ' ' )"
     if [ "$qual" -ge 1 ] && [ "$all" = "$qual" ]; then ok "$1: states '$PHRASE' ($qual), no unqualified 'new-symbol rows never gate'"
     else no "$1: '$PHRASE' x$qual, 'new-symbol rows never gate' x$all — the exception is missing or a sentence still reads unqualified"; fi
 }
