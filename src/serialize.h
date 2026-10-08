@@ -5843,12 +5843,12 @@ inline void emitCalleeCallsBlock( std::string& out, NodeId id, const std::vector
             continue;
         }
         const Symbol& cs = ing.symbols[cid];
-        const bool    via = calleeRowVia( outOff, outTargets, id, cid, used, sink );   // FE-B
+        const std::string_view viaAttr = viaNameAttr( calleeRowVia( outOff, outTargets, id, cid, used, sink ) );   // FE-B: via="name" or ""
 
         // COMPACT: the names-only rendering — see collectCalleeNameRow above for what it does and does not do.
         if( sink.namesOnly )
         {
-            collectCalleeNameRow( nameRows, cs, used, sink, via );
+            collectCalleeNameRow( nameRows, cs, used, sink, !viaAttr.empty() );
             ++shown;
             continue;
         }
@@ -5863,10 +5863,10 @@ inline void emitCalleeCallsBlock( std::string& out, NodeId id, const std::vector
         {
             continue;
         }
-        char hb[ 48 ];  rw::formatTo( hb, sizeof( hb ), "\" l=\"{}\"{}>", cs.line, viaNameAttr( via ) );   // FE-B: via="name"
+        char hb[ 48 ];  rw::formatTo( hb, sizeof( hb ), "\" l=\"{}\"{}>", cs.line, viaAttr );
         callsBody += "<c n=\"";  callsBody += escapeXml( cs.name, esc );  callsBody += hb;
         callsBody += escapeXml( sig, esc );  callsBody += "</c>";
-        used += sig.size() + 24 + ( via ? 11u : 0u );
+        used += sig.size() + 24 + viaAttr.size();
         ++shown;
         if( sink.recorded )
         {
