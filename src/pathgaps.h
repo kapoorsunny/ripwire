@@ -35,6 +35,7 @@
 #include "sarif.h"            // rootRelativeUri — p= relative to root=, as every other row
 #include "serialize.h"        // escapeXml
 #include "valuerefindex.h"    // ValueRefIndex::targetsOf — what a value reference may hand off
+#include "infra/sortutil.h"   // svLess: the explicit byte order every string_view sort here takes (portablebuildcheck #6)
 
 #include <algorithm>
 #include <array>
@@ -86,8 +87,22 @@ inline void countUnlistedNamesakes( const IngestResult& ing, const Graph& g, std
         Lang             lang;
         SymKind          kind;
         std::string_view name;
-        auto operator<=>( const Key& ) const = default;
     };
+    // explicit byte order on the name (never string_view's operator< / <=>: libstdc++'s compare wraps n1 - n2 under
+    // -fsanitize=integer, portablebuildcheck #6/#6b); == needs no order
+    const auto keyLess = []( const Key& a, const Key& b )
+    {
+        if( a.lang != b.lang )
+        {
+            return a.lang < b.lang;
+        }
+        if( a.kind != b.kind )
+        {
+            return a.kind < b.kind;
+        }
+        return sortutil::svLess( a.name, b.name );
+    };
+    const auto keyEq = []( const Key& a, const Key& b ) { return a.lang == b.lang && a.kind == b.kind && a.name == b.name; };
     const auto keyOf    = [ & ]( NodeId t ) { const Symbol& s = ing.symbols[t]; return Key{ s.lang, s.kind, s.name }; };
     const auto hasHedge = [ & ]( NodeId u ) { return std::any_of( g.outNameOnly.begin() + g.outOff[u], g.outNameOnly.begin() + g.outOff[u + 1], []( std::uint8_t b ) { return b != 0; } ); };
     const auto isSym    = [ & ]( std::uint32_t k ) { return g.outTargets[k] < ing.symbols.size(); };
@@ -106,17 +121,17 @@ inline void countUnlistedNamesakes( const IngestResult& ing, const Graph& g, std
     {
         return;
     }
-    std::ranges::sort( names );
+    std::ranges::sort( names, sortutil::svLess );
     names.erase( std::ranges::unique( names ).begin(), names.end() );
     std::vector<Key> defs;   // the tree's definitions of exactly those names
     for( const Symbol& s : ing.symbols )
     {
-        if( isDefinitionNotDeclaration( s ) && std::ranges::binary_search( names, std::string_view( s.name ) ) )
+        if( isDefinitionNotDeclaration( s ) && std::ranges::binary_search( names, std::string_view( s.name ), sortutil::svLess ) )
         {
             defs.push_back( Key{ s.lang, s.kind, s.name } );
         }
     }
-    std::ranges::sort( defs );
+    std::ranges::sort( defs, keyLess );
     for( const NodeId u : cone )
     {
         if( !hasHedge( u ) )
@@ -136,12 +151,12 @@ inline void countUnlistedNamesakes( const IngestResult& ing, const Graph& g, std
                 hedged.push_back( keyOf( g.outTargets[k] ) );
             }
         }
-        std::ranges::sort( listed );
-        std::ranges::sort( hedged );
-        hedged.erase( std::ranges::unique( hedged ).begin(), hedged.end() );
+        std::ranges::sort( listed, keyLess );
+        std::ranges::sort( hedged, keyLess );
+        hedged.erase( std::ranges::unique( hedged, keyEq ).begin(), hedged.end() );
         for( const Key& key : hedged )
         {
-            const bool unlisted = std::ranges::equal_range( defs, key ).size() > std::ranges::equal_range( listed, key ).size();
+            const bool unlisted = std::ranges::equal_range( defs, key, keyLess ).size() > std::ranges::equal_range( listed, key, keyLess ).size();
             per[u][ std::size_t( PathGapKind::Name ) ] += unlisted ? 1u : 0u;
         }
     }
