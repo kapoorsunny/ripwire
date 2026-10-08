@@ -1031,9 +1031,16 @@ inline std::uint64_t defectSiteValue( defectshape::Facet f, std::string_view tex
 
 // A defect-shape ROW's identity — the ack key: the anchor AND the facet, so a format-arity ack and a utf8-cut
 // ack on one definition are two acks (checklist 16: a facet is part of the finding, not a label on it).
-inline std::uint64_t defectRowKey( std::uint64_t anchor, defectshape::Facet f ) noexcept
+// fnv1a64 over the anchor's bytes and the facet name: no wrapping multiply of our own (-fsanitize=integer).
+inline std::uint64_t defectRowKey( std::uint64_t anchor, defectshape::Facet f )
 {
-    return anchor ^ ( 0x9E3779B97F4A7C15ull * ( static_cast<std::uint64_t>( f ) + 1 ) );
+    std::string id( defectshape::facetName( f ) );
+    id.push_back( '\0' );
+    for( int b = 0; b < 8; ++b )
+    {
+        id.push_back( static_cast<char>( ( anchor >> ( 8 * b ) ) & 0xFFu ) );
+    }
+    return fnv1a64( id );
 }
 
 // One current-side site with what the delta needs to print it: the anchoring definition (kNoNode for a file

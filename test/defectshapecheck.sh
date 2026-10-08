@@ -676,6 +676,7 @@ std::string replaced( const std::string& s, std::size_t n ) { return s; }
 std::string packname( const std::string& text, bool pack ) { return text; }
 std::string wordloop( const std::vector<std::string>& words ) { std::string out; return out; }
 std::string capminus( std::string s ) { return s; }
+std::string guardanywhere( std::string s ) { return s; }
 std::u32string wide( std::u32string s, std::size_t n ) { return s; }
 std::string legacy( std::string s ) { if( s.size() > 40 ) { s.resize( 40 ); s += "..."; } return s; }
 int drive() { return 0; }
@@ -778,6 +779,20 @@ std::u32string wide( std::u32string s, std::size_t n )
     }
     return s;
 }
+std::string guardanywhere( std::string s )
+{
+    if( s.size() > 117 )
+    {
+        std::size_t n = 117;
+        while( n > 0 && ( static_cast<unsigned char>( s[n] ) & 0xC0 ) == 0x80 )
+        {
+            --n;
+        }
+        s.resize( 117 );
+        s += "...";
+    }
+    return s;
+}
 std::string capminus( std::string s )
 {
     if( s.size() > 120 )
@@ -803,6 +818,7 @@ ds_has  "$L" utf8-cut freshcut new-symbol
 ds_wasnow "$L" utf8-cut excerpt 0 1
 ds_none "$L" guarded    "the cut backs off continuation bytes (0xC0/0x80)"
 ds_none "$L" helper     "a utf8 truncation helper does the cut"
+ds_none "$L" guardanywhere "a back-off anywhere in the function exempts it, even one that does not cover the cut (a precision choice, stated in the legend)"
 ds_none "$L" noellipsis "a cut with no ellipsis is not judged display text (stated floor)"
 ds_none "$L" othervar   "the ellipsis goes on a different string than the one cut"
 ds_none "$L" replaced   "the ellipsis replaces the value, nothing is cut"
@@ -984,7 +1000,7 @@ EOF
 )"
 VHDR="$VHDR
 "
-for f in t_var t_pipe t_pipefail t_if t_cont t_neg t_names t_fn t_setelocal t_setepipe t_derived n_rc n_orno n_presence n_positive n_polarity n_literal n_comment n_legacy n_ifok n_posafter n_nestif n_case n_sete n_seteuo n_filepipe n_wrapper n_derivedguard n_bracegroup n_elif; do
+for f in t_var t_pipe t_pipefail t_if t_cont t_neg t_names t_fn t_setelocal t_setepipe t_derived n_rc n_orno n_presence n_positive n_polarity n_literal n_comment n_legacy n_ifok n_posafter n_nestif n_case n_casealone n_sete n_seteuo n_filepipe n_wrapper n_derivedguard n_bracegroup n_elif; do
     printf '%s' "$VHDR" >"$WORK/vac/test/$f.sh"
 done
 for f in t_setepipe n_sete; do printf 'set -e\n' >>"$WORK/vac/test/$f.sh"; done
@@ -1151,6 +1167,15 @@ case "$OUT" in
     *) no "no list root" ;;
 esac
 EOF
+cat >>"$WORK/vac/test/n_casealone.sh" <<'EOF'
+OUT="$( "$BIN" --list 2>/dev/null )"
+case "$OUT" in
+    '<list '*)
+        printf '%s' "$OUT" | grep -q 'bad' && no "bad present" || ok "bad absent" ;;
+    *)
+        no "no list root" ;;
+esac
+EOF
 for f in n_sete n_seteuo; do
     cat >>"$WORK/vac/test/$f.sh" <<'EOF'
 OUT="$( "$BIN" --list 2>/dev/null )"
@@ -1215,6 +1240,7 @@ ds_none  "$L" absent_checked      "a NEW function whose capture failure is handl
 ds_none_p "$L" test/n_posafter.sh "a positive assertion on the same capture AFTER the absence fails on a crash"
 ds_none_p "$L" test/n_nestif.sh   "the absence is nested in an if that requires content of the same capture"
 ds_none_p "$L" test/n_case.sh     "the absence is nested in a case arm that requires content of the same capture"
+ds_none_p "$L" test/n_casealone.sh "a case pattern alone on its line (the scanner must not read past it), the absence on the next line"
 ds_none_p "$L" test/n_sete.sh     "set -e: a failed plain capture aborts the script"
 ds_none_p "$L" test/n_seteuo.sh   "set -euo pipefail: a failed plain capture aborts the script"
 ds_none_p "$L" test/n_filepipe.sh "a text utility over a file is not a run under test (its input's provenance is not on the line)"

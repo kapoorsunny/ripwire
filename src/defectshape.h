@@ -2035,6 +2035,10 @@ inline std::vector<ShAssert> shAssertions( const ShLineToks& lt, const std::vect
         {
             from = 1;
         }
+        if( from >= t.size() )
+        {
+            continue;   // a case pattern alone on its line: no list to read
+        }
         if( !t[from].op && ( t[from].text == "elif" || t[from].text == "while" ) )
         {
             continue;   // an elif / while condition is not judged (a stated floor)
@@ -2148,8 +2152,9 @@ inline std::size_t scopeOf( const std::vector<Span>& spans, std::uint32_t byte )
 inline std::size_t assignmentOf( const ShLineToks& lt, const std::vector<std::size_t>& scope, std::size_t li, std::string_view v )
 {
     const std::string eq = std::string( v ) + "=";
-    for( std::size_t k = li; k-- > 0; )
+    for( std::size_t back = li; back > 0; --back )
     {
+        const std::size_t k = back - 1;   // walk upward without an unsigned wrap at line 0
         if( scope[k] != scope[li] )
         {
             continue;
@@ -2287,7 +2292,11 @@ inline bool captureGuarded( const std::vector<ShLine>& lines, const ShLineToks& 
         }
         const std::string_view rhs = std::string_view( w0 ).substr( eqAt + 1 );
         const std::size_t      cap = rhs.find( "$(" );
-        const std::string_view in  = rhs.substr( cap + 2 );
+        if( cap == std::string_view::npos )
+        {
+            continue;
+        }
+        const std::string_view in = rhs.substr( cap + 2 );
         std::size_t            b   = 0;
         while( b < in.size() && isSpace( in[b] ) )
         {
