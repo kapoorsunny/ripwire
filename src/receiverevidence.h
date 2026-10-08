@@ -58,15 +58,19 @@ struct GoPackagePaths
     std::vector<std::string>   replaced;   // fileId → "" when no local replace maps the file's directory
     HashMap<std::string, char> known;      // every non-empty path in either table
 
+    // file `f`'s entry in `table` ("" when none)
+    static std::string_view pathIn( const std::vector<std::string>& table, std::uint32_t f ) noexcept
+    {
+        return f < table.size() ? std::string_view( table[ f ] ) : std::string_view{};
+    }
     bool hasPath( std::uint32_t f ) const noexcept
     {
-        return ( f < nearest.size() && !nearest[ f ].empty() ) || ( f < replaced.size() && !replaced[ f ].empty() );
+        return !pathIn( nearest, f ).empty() || !pathIn( replaced, f ).empty();
     }
     // does `path` name file `f`'s package exactly
     bool names( std::uint32_t f, std::string_view path ) const noexcept
     {
-        return ( f < nearest.size() && !nearest[ f ].empty() && nearest[ f ] == path )
-            || ( f < replaced.size() && !replaced[ f ].empty() && replaced[ f ] == path );
+        return !path.empty() && ( pathIn( nearest, f ) == path || pathIn( replaced, f ) == path );
     }
     void note( std::vector<std::string>& table, std::uint32_t f, std::string path )
     {

@@ -4365,16 +4365,18 @@ inline TSNode ancestorOfKind( TSNode n, std::initializer_list<std::string_view> 
     return TSNode{};
 }
 
-// a name recorded at `at`, visible over the whole of `scope` ({0,0} when there is none: the whole definition)
-inline BindSite siteIn( std::uint32_t at, TSNode scope ) noexcept
+// a name recorded at `at` and visible over `scope` ({0,0} when there is none: the whole definition) — the whole of it, or
+// (`fromHere`, a block's declaration) from `at` to its end
+inline BindSite siteOver( std::uint32_t at, TSNode scope, bool fromHere ) noexcept
 {
-    return ts_node_is_null( scope ) ? BindSite{ at, 0u, 0u } : BindSite{ at, ts_node_start_byte( scope ), ts_node_end_byte( scope ) };
+    if( ts_node_is_null( scope ) )
+    {
+        return { at, 0u, 0u };
+    }
+    return { at, fromHere ? at : ts_node_start_byte( scope ), ts_node_end_byte( scope ) };
 }
-// a name declared at `at`, visible from there to the end of `scope` (a block's declaration)
-inline BindSite siteFrom( std::uint32_t at, TSNode scope ) noexcept
-{
-    return ts_node_is_null( scope ) ? BindSite{ at, 0u, 0u } : BindSite{ at, at, ts_node_end_byte( scope ) };
-}
+inline BindSite siteIn( std::uint32_t at, TSNode scope ) noexcept { return siteOver( at, scope, false ); }
+inline BindSite siteFrom( std::uint32_t at, TSNode scope ) noexcept { return siteOver( at, scope, true ); }
 
 // one local binding of `var`, naming class `cls` ("" = unknown), visible over `site`'s span. `flag`: Go's method receiver.
 inline void pushLocalEvidence( BindCtx& cx, std::string_view var, std::string_view cls, BindSite site, bool flag = false )
