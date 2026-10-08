@@ -5821,18 +5821,6 @@ inline void emitCalleeCallsBlock( std::string& out, NodeId id, const std::vector
     std::string                      callsBody;
     std::vector<MergedCalleeNameRow> nameRows;   // names-only rendering: collected, merged by name, written after the walk
     int                              shown = 0;
-    // FE-B: the edge id → cid's hedge bit (the walk reorders, so the bit is found by the target, ascending in the row)
-    const auto viaOf = [ & ]( NodeId cid ) -> bool
-    {
-        if( sink.nameOnly == nullptr || sink.nameOnly->empty() )
-        {
-            return false;
-        }
-        const auto b  = outTargets.begin() + outOff[ id ];
-        const auto e  = outTargets.begin() + outOff[ id + 1 ];
-        const auto it = std::lower_bound( b, e, cid );
-        return it != e && *it == cid && ( *sink.nameOnly )[ std::size_t( it - outTargets.begin() ) ] != 0;
-    };
     for( std::uint32_t k = outOff[id]; k < outOff[id + 1] && shown < 16 && used < budgetBytes; ++k )
     {
         const NodeId cid = walk[ k - outOff[id] ];
@@ -5841,7 +5829,7 @@ inline void emitCalleeCallsBlock( std::string& out, NodeId id, const std::vector
             continue;
         }
         const Symbol& cs = ing.symbols[cid];
-        const bool    via = viaOf( cid );
+        const bool    via = sink.nameOnly != nullptr && edgeNameOnly( outOff, outTargets, *sink.nameOnly, id, cid );   // FE-B: the walk reorders, so by target
         if( via && sink.viaLegendCharged != nullptr && !*sink.viaLegendCharged )
         {
             used += viaNameLegendComment().size();   // the legend this row pulls in, charged before the row

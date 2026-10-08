@@ -177,19 +177,25 @@ struct Graph
                                               // emits nothing — the map is byte-identical either way.
 };
 
-// FE-B: is the call edge from → to NAME-ONLY (Graph::outNameOnly) — bound by name alone at every site that bound it, so every
-// surface renders it via="name". false for an edge that does not exist and on a graph with no name-only edge at all.
-inline bool edgeNameOnly( const Graph& g, NodeId from, NodeId to ) noexcept
+// FE-B: is the call edge from → to NAME-ONLY, over the raw out-CSR and its parallel hedge bits — bound by name alone at
+// every site that bound it, so every surface renders it via="name". false for an edge that does not exist and for empty
+// hedge bits (a graph with no name-only edge at all). The Graph overload below and serialize.h's <calls> block share it.
+inline bool edgeNameOnly( const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
+                          const std::vector<std::uint8_t>& nameOnly, NodeId from, NodeId to ) noexcept
 {
-    if( g.outNameOnly.empty() || std::size_t( from ) + 1 >= g.outOff.size() )
+    if( nameOnly.empty() || std::size_t( from ) + 1 >= outOff.size() )
     {
         return false;
     }
-    EXPECTS( g.outNameOnly.size() == g.outTargets.size(), "the hedge bit is parallel to outTargets (buildGraph allocates it per edge)" );
-    const auto b  = g.outTargets.begin() + g.outOff[ from ];
-    const auto e  = g.outTargets.begin() + g.outOff[ std::size_t( from ) + 1 ];
+    EXPECTS( nameOnly.size() == outTargets.size(), "the hedge bit is parallel to outTargets (buildGraph allocates it per edge)" );
+    const auto b  = outTargets.begin() + outOff[ from ];
+    const auto e  = outTargets.begin() + outOff[ std::size_t( from ) + 1 ];
     const auto it = std::lower_bound( b, e, to );   // ascending within a source (buildGraph sorts by (from, to))
-    return it != e && *it == to && g.outNameOnly[ std::size_t( it - g.outTargets.begin() ) ] != 0;
+    return it != e && *it == to && nameOnly[ std::size_t( it - outTargets.begin() ) ] != 0;
+}
+inline bool edgeNameOnly( const Graph& g, NodeId from, NodeId to ) noexcept
+{
+    return edgeNameOnly( g.outOff, g.outTargets, g.outNameOnly, from, to );
 }
 
 // FE-B: does the call edge from → to exist at all (the out-CSR is ascending within a source)

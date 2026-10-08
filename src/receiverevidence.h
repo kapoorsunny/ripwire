@@ -377,51 +377,64 @@ struct ReceiverEvidence
     // ── queries ───────────────────────────────────────────────────────────────────────────────────────────────────────
     // the innermost function/method of the same file whose span strictly holds `id`; kNoNode when none
     NodeId enclosingFn( NodeId id ) const { return innermostEnclosingFn( ing, fnsByFile, id ); }
+    // visit `from`, then each function enclosing it, innermost first (at most 8 scopes): `visit( scope )` returns true
+    // to stop there. Returns the scope it stopped at, kNoNode when no visit stopped the walk.
+    template <class Visit>
+    NodeId walkScopes( NodeId from, Visit&& visit ) const
+    {
+        NodeId cur = from;
+        for( int depth = 0; depth < 8 && cur != kNoNode; ++depth )
+        {
+            if( visit( cur ) )
+            {
+                return cur;
+            }
+            cur = enclosingFn( cur );
+        }
+        return kNoNode;
+    }
     // the class a typed local names in `from` or a function enclosing it; nullptr when untyped (or tombstoned)
     const std::string* typedLocal( NodeId from, std::string_view var ) const
     {
-        NodeId cur = from;
-        for( int depth = 0; depth < 8 && cur != kNoNode; ++depth )
+        const std::string* hit = nullptr;
+        walkScopes( from, [ & ]( NodeId scope )
         {
-            if( const auto it = localType.find( keyOf( cur, '#', var ) ); it != localType.end() )
+            const auto it = localType.find( keyOf( scope, '#', var ) );
+            if( it == localType.end() )
             {
-                return it->second.empty() ? nullptr : &it->second;
+                return false;
             }
-            cur = enclosingFn( cur );
-        }
-        return nullptr;
+            hit = it->second.empty() ? nullptr : &it->second;
+            return true;
+        } );
+        return hit;
     }
+    // the ( object var, method ) a method alias `var` names in `from` or a function enclosing it; `scope` = where it is bound
     const std::pair<std::string, std::string>* aliasedMethod( NodeId from, std::string_view var, NodeId& scope ) const
     {
-        NodeId cur = from;
-        for( int depth = 0; depth < 8 && cur != kNoNode; ++depth )
-        {
-            if( const auto it = methodAlias.find( keyOf( cur, '#', var ) ); it != methodAlias.end() )
+        const std::pair<std::string, std::string>* hit = nullptr;
+        if( const NodeId at = walkScopes( from, [ & ]( NodeId s )
             {
-                scope = cur;
-                return it->second.first.empty() ? nullptr : &it->second;
-            }
-            cur = enclosingFn( cur );
+                const auto it = methodAlias.find( keyOf( s, '#', var ) );
+                if( it == methodAlias.end() )
+                {
+                    return false;
+                }
+                hit = it->second.first.empty() ? nullptr : &it->second;
+                return true;
+            } ); at != kNoNode )
+        {
+            scope = at;
         }
-        return nullptr;
+        return hit;
     }
     // is `name` a parameter or local of `from` or of a function enclosing it (any binding the extractor recorded)
     bool isLocalName( NodeId from, std::string_view name ) const
     {
-        if( localNames == nullptr )
+        return localNames != nullptr && walkScopes( from, [ & ]( NodeId s )
         {
-            return false;
-        }
-        NodeId cur = from;
-        for( int depth = 0; depth < 8 && cur != kNoNode; ++depth )
-        {
-            if( localNames->contains( keyOf( cur, '#', name ) ) || localType.contains( keyOf( cur, '#', name ) ) )
-            {
-                return true;
-            }
-            cur = enclosingFn( cur );
-        }
-        return false;
+            return localNames->contains( keyOf( s, '#', name ) ) || localType.contains( keyOf( s, '#', name ) );
+        } ) != kNoNode;
     }
     // a receiver root that names a CLASS at this site: a class-name receiver language, a class of that name, and no local
     // of the caller hiding it (`Interval = make(); Interval.validate( v )`)
@@ -432,16 +445,8 @@ struct ReceiverEvidence
     // the class owning the caller — the caller's own owner, else the nearest enclosing function's (a closure in a method)
     std::string_view callerClass( NodeId from ) const
     {
-        NodeId cur = from;
-        for( int depth = 0; depth < 8 && cur != kNoNode; ++depth )
-        {
-            if( !ownerClass[ cur ].empty() )
-            {
-                return ownerClass[ cur ];
-            }
-            cur = enclosingFn( cur );
-        }
-        return {};
+        const NodeId at = walkScopes( from, [ & ]( NodeId s ) { return !ownerClass[ s ].empty(); } );
+        return at == kNoNode ? std::string_view{} : std::string_view( ownerClass[ at ] );
     }
     // `type`'s direct bases: the inheritance names, then (Go) its embedded classes
     template <class Fn>
@@ -478,33 +483,18 @@ struct ReceiverEvidence
         }
         return false;
     }
-    // `type`'s own `name`, else the shallowest base level defining it (several bases at one level: their union). The
-    // answer is in `found`; false when nothing in the cone defines it. superOnly skips `type` itself (`super.m()`).
-    bool methodOf( std::string_view type, std::string_view name, bool superOnly ) const
+    // visit `type`'s level (depth 0), then its base levels shallowest first, each class once: `visit( level, depth )`
+    // returns true to stop. Returns whether a visit stopped the walk.
+    template <class Visit>
+    bool walkBaseLevels( std::string_view type, Visit&& visit ) const
     {
-        EXPECTS( active, "methodOf reads the tables build() fills" );
-        found.clear();
-        if( type.empty() )
-        {
-            return false;
-        }
         std::vector<std::string_view> level{ type };
         std::vector<std::string_view> seen{ type };
         for( std::size_t depth = 0; depth < kWalkCap && !level.empty(); ++depth )
         {
-            if( !( superOnly && depth == 0 ) )
+            if( visit( level, depth ) )
             {
-                for( std::string_view t : level )
-                {
-                    if( const auto it = methodsByType.find( typeKey( t, "::", name ) ); it != methodsByType.end() )
-                    {
-                        for( NodeId c : it->second ) { found.push_back( c ); }
-                    }
-                }
-                if( !found.empty() )
-                {
-                    return true;
-                }
+                return true;
             }
             std::vector<std::string_view> next;
             for( std::string_view t : level )
@@ -518,31 +508,49 @@ struct ReceiverEvidence
         }
         return false;
     }
+    // `type`'s own `name`, else the shallowest base level defining it (several bases at one level: their union). The
+    // answer is in `found`; false when nothing in the cone defines it. superOnly skips `type` itself (`super.m()`).
+    bool methodOf( std::string_view type, std::string_view name, bool superOnly ) const
+    {
+        EXPECTS( active, "methodOf reads the tables build() fills" );
+        found.clear();
+        if( type.empty() )
+        {
+            return false;
+        }
+        return walkBaseLevels( type, [ & ]( const std::vector<std::string_view>& level, std::size_t depth )
+        {
+            if( superOnly && depth == 0 )
+            {
+                return false;
+            }
+            for( std::string_view t : level )
+            {
+                if( const auto it = methodsByType.find( typeKey( t, "::", name ) ); it != methodsByType.end() )
+                {
+                    for( NodeId c : it->second ) { found.push_back( c ); }
+                }
+            }
+            return !found.empty();
+        } );
+    }
     // the class of field `field` on `type` (or the shallowest base declaring it); "" unknown
     std::string_view fieldOf( std::string_view type, std::string_view field ) const
     {
-        std::vector<std::string_view> level{ type };
-        std::vector<std::string_view> seen{ type };
-        for( std::size_t depth = 0; depth < kWalkCap && !level.empty(); ++depth )
+        std::string_view fieldType;
+        walkBaseLevels( type, [ & ]( const std::vector<std::string_view>& level, std::size_t )
         {
             for( std::string_view t : level )
             {
                 if( const auto it = memberType.find( typeKey( t, "#", field ) ); it != memberType.end() )
                 {
-                    return it->second;   // "" = tombstone: unknown
+                    fieldType = it->second;   // "" = tombstone: unknown
+                    return true;
                 }
             }
-            std::vector<std::string_view> next;
-            for( std::string_view t : level )
-            {
-                forEachBase( t, [ & ]( std::string_view b )
-                {
-                    if( std::find( seen.begin(), seen.end(), b ) == seen.end() ) { seen.push_back( b ); next.push_back( b ); }
-                } );
-            }
-            level.swap( next );
-        }
-        return {};
+            return false;
+        } );
+        return fieldType;
     }
 
     // The receiver chain of a member call as ( root, path, constructed class ), in every language's spelling.
