@@ -53,6 +53,13 @@
 #        --token-budget that cuts <sigs> (a demotion would evict docs there: red on the score-demotion build), and a
 #        question whose topic ("dropped after the response") only a docs row names keeps that row. Twin: "Where do the
 #        docs describe the context lifecycle?" keeps a docs row in its top five.
+#   (T)  a TIGHT explicit ceiling (--token-budget / MCP budget_tokens below the default signature share) gets neither the
+#        reorder nor its uncharged note: the answer is byte-equal to the RIPWIRE_NO_DOCS_AFTER_CODE=1 twin (which is the
+#        pre-reorder answer), XML, JSON and MCP, at 700 and 1200 on the TS fixture; at 1200 the XML/JSON est_tokens stay
+#        within the budget with no over_ceiling the twin lacks (RED at 9d0ad7aa: est 1277 > 1200, over_ceiling="1").
+#        MCP est_tokens is the twin's (already above 1200 on base; not this rule's to fix). Near misses: no ceiling and
+#        --token-budget=8000 still reorder and carry docs_after_code= with its reading, XML, JSON and MCP; a question that
+#        names docs keeps score order at 1200 too.
 #   (J)  dialect parity: --for --json "sigs" entries carry "e" equal to the XML rows' e= (and none where XML has none).
 #   (M)  the MCP `for` twin: the same e= on the C rows, none on the extent_suspect rows, and a legend clause for e=.
 #   (L)  legend: --legend=full defines e= and says what it does NOT mean (absent = unknown, not 0; l= is the name's
@@ -365,7 +372,7 @@ offr(){ local r="$1" t="$2" q="$3"; shift 3; local f="$TMP/$r.$t.off.xml"; ( cd 
 onr(){ local r="$1" t="$2" q="$3"; shift 3; local f="$TMP/$r.$t.on.xml"; run "$r" "$f" "--for=$q" "$@"; printf '%s' "$f"; }
 Q1='How is a per-request context created?'
 Q2='How is a per-request context created and dropped after the response?'   # only the docs lifecycle section names "dropped after the response"
-for spec in "r1|$Q1|" "r1b|$Q1|--token-budget=700" "r2|$Q2|" "r2b|$Q2|--token-budget=700"; do
+for spec in "r1|$Q1|" "r2|$Q2|"; do
     tag="${spec%%|*}"; rest="${spec#*|}"; q="${rest%%|*}"; extra="${rest#*|}"
     if [ -n "$extra" ]; then ON="$( onr ts "$tag" "$q" "$extra" )"; OFF="$( offr ts "$tag" "$q" "$extra" )"; else ON="$( onr ts "$tag" "$q" )"; OFF="$( offr ts "$tag" "$q" )"; fi
     if ran_ok "$ON" "R/$tag" && ran_ok "$OFF" "R/$tag (plain order)"; then
@@ -375,8 +382,93 @@ for spec in "r1|$Q1|" "r1b|$Q1|--token-budget=700" "r2|$Q2|" "r2b|$Q2|--token-bu
         esac
     fi
 done
-# the cut premise: the tight budget really cuts (else the arm above proves nothing about eviction)
-if grep -q '<sigs [^>]*capped="1"' "$TMP/ts.r1b.on.xml" 2>/dev/null; then ok "R/r1b premise: --token-budget=700 cuts the <sigs> block"; else no "R/r1b premise: --token-budget=700 does not cut <sigs> — pick a tighter budget"; fi
+# (T) a tight explicit ceiling: neither the reorder nor its uncharged note (B1 of the review of 9d0ad7aa)
+echo "(T) a tight explicit ceiling carries no reorder and no note; the near misses still reorder"
+cat >"$TMP/tight.py" <<'PY'
+import json, re, sys
+exec( open( sys.argv[ 1 ] ).read() )
+# tight.py ROWS.PY LABEL MODE ON OFF [BUDGET]  — MODE: tight | reorders
+label, mode, on, off = sys.argv[ 2: 6 ]
+budget = int( sys.argv[ 6 ] ) if len( sys.argv ) > 6 and sys.argv[ 6 ].isdigit() else 0
+def body( path ):
+    t = load( path )
+    if path.endswith( ".mcp.json" ):
+        ls = [ l for l in t.splitlines() if l.strip() ]
+        t = json.loads( ls[ -1 ] )[ "result" ][ "content" ][ 0 ][ "text" ]
+    return t
+A, B = body( on ), body( off )
+isjson = A.lstrip().startswith( "{" )
+if isjson:
+    try:
+        nrows = len( json.loads( A ).get( "sigs", [] ) ) if B.lstrip().startswith( "{" ) else 0
+    except ValueError:
+        nrows = 0
+else:
+    nrows = len( drows( A ) ) if ctx_ok( A ) and ctx_ok( B ) else 0
+if nrows == 0:
+    print( "  FAIL  %s: no shown rows (premise)" % label ); sys.exit( 1 )
+bad = []
+moved = re.search( r'docs_after_code="[0-9]+"|"docs_after_code":[0-9]+', A ) is not None
+note = "docs_after_code=N:" in A
+if mode == "tight":
+    if open( on, "rb" ).read() != open( off, "rb" ).read():
+        bad.append( "differs from the NO_DOCS_AFTER_CODE=1 twin (the pre-reorder answer)" )
+    if moved or note:
+        bad.append( "carries docs_after_code= or its reading" )
+    m = re.search( r'<ctx [^>]*\best_tokens="([0-9]+)"', A ) or re.search( r'"est_tokens":([0-9]+)', A )
+    if budget and not on.endswith( ".mcp.json" ):
+        if not m: bad.append( "no est_tokens to compare with the budget (premise)" )
+        elif int( m.group( 1 ) ) > budget: bad.append( "est_tokens %s > budget %d" % ( m.group( 1 ), budget ) )
+        if "over_ceiling" in A and "over_ceiling" not in B: bad.append( "over_ceiling the twin lacks" )
+else:
+    if not moved: bad.append( "no docs_after_code= (the reorder did not apply)" )
+    if not note and not isjson: bad.append( "no reading for docs_after_code=" )   # the JSON twin carries the count only
+    if open( on, "rb" ).read() == open( off, "rb" ).read(): bad.append( "equals the plain score-order twin (nothing moved)" )
+if bad:
+    for b in bad: print( "  FAIL  %s: %s" % ( label, b ) )
+    sys.exit( 1 )
+print( "  PASS  %s" % label )
+PY
+tcheck(){ python3 "$TMP/tight.py" "$TMP/rows.py" "$@"; [ $? -eq 0 ] || { fail=1; return 1; }; }
+# mcpfor OUT TWIN(0|1) TASK [EXTRA_ARGS_JSON] — the MCP `for` answer; TWIN=1 sets RIPWIRE_NO_DOCS_AFTER_CODE=1
+mcpfor(){ local out="$1" twin="$2" task="$3" extra="${4:-}"; mkdir -p "$TMP/mcphome"
+    printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+                   '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"for","arguments":{"path":"'"$CORPUS/ts"'","task":"'"$task"'"'"$extra"'}}}' \
+      | ( cd "$CORPUS/ts" && if [ "$twin" = 1 ]; then TMPDIR="$TMP/mcphome" RIPWIRE_NO_DOCS_AFTER_CODE=1 "$BIN" --mcp; else TMPDIR="$TMP/mcphome" env -u RIPWIRE_NO_DOCS_AFTER_CODE "$BIN" --mcp; fi >"$out" 2>/dev/null ); printf '%s' "$?" >"$out.rc"; }
+for b in 700 1200; do
+    for spec in "xml|" "json|--json"; do
+        tag="${spec%%|*}"; extra="${spec#*|}"
+        if [ -n "$extra" ]; then ON="$( onr ts "t$b$tag" "$Q1" "--token-budget=$b" "$extra" )"; OFF="$( offr ts "t$b$tag" "$Q1" "--token-budget=$b" "$extra" )"
+        else ON="$( onr ts "t$b$tag" "$Q1" "--token-budget=$b" )"; OFF="$( offr ts "t$b$tag" "$Q1" "--token-budget=$b" )"; fi
+        if ran_ok "$ON" "T/$b/$tag" && ran_ok "$OFF" "T/$b/$tag (twin)"; then
+            tcheck "T/$tag --token-budget=$b: byte-equal to the plain-order twin, no docs_after_code=$([ "$b" = 1200 ] && echo ", est_tokens <= 1200")" tight "$ON" "$OFF" "$([ "$b" = 1200 ] && echo 1200 || echo 0)"
+        fi
+    done
+    mcpfor "$TMP/t$b.on.mcp.json" 0 "$Q1" ",\"budget_tokens\":$b"; mcpfor "$TMP/t$b.off.mcp.json" 1 "$Q1" ",\"budget_tokens\":$b"
+    if ran_ok "$TMP/t$b.on.mcp.json" "T/$b/mcp" && ran_ok "$TMP/t$b.off.mcp.json" "T/$b/mcp (twin)"; then
+        tcheck "T/mcp budget_tokens=$b: byte-equal to the plain-order twin, no docs_after_code= (est_tokens not gated: base MCP is already over)" tight "$TMP/t$b.on.mcp.json" "$TMP/t$b.off.mcp.json"
+    fi
+done
+# near misses: the SAME question with no explicit ceiling, and a ceiling at/above the default share, still reorder
+for b in 0 8000; do
+    for spec in "xml|" "json|--json"; do
+        tag="${spec%%|*}"; extra="${spec#*|}"; set -- "$Q1"; [ "$b" != 0 ] && set -- "$@" "--token-budget=$b"; [ -n "$extra" ] && set -- "$@" "$extra"
+        ON="$( onr ts "n$b$tag" "$@" )"; OFF="$( offr ts "n$b$tag" "$@" )"
+        if ran_ok "$ON" "T/near/$b/$tag" && ran_ok "$OFF" "T/near/$b/$tag (twin)"; then
+            tcheck "T/near $tag $([ "$b" = 0 ] && echo "no ceiling" || echo "--token-budget=$b"): the reorder and its note still apply" reorders "$ON" "$OFF"
+        fi
+    done
+    if [ "$b" = 0 ]; then ex=""; else ex=",\"budget_tokens\":$b"; fi
+    mcpfor "$TMP/n$b.on.mcp.json" 0 "$Q1" "$ex"; mcpfor "$TMP/n$b.off.mcp.json" 1 "$Q1" "$ex"
+    if ran_ok "$TMP/n$b.on.mcp.json" "T/near/$b/mcp" && ran_ok "$TMP/n$b.off.mcp.json" "T/near/$b/mcp (twin)"; then
+        tcheck "T/near mcp $([ "$b" = 0 ] && echo "no ceiling" || echo "budget_tokens=$b"): the reorder and its note still apply" reorders "$TMP/n$b.on.mcp.json" "$TMP/n$b.off.mcp.json"
+    fi
+done
+# a question naming docs keeps score order at 1200 as well (the existing rule is untouched by the tight-ceiling one)
+ON="$( onr ts d1200 "Where do the docs describe the context lifecycle?" --token-budget=1200 )"; OFF="$( offr ts d1200 "Where do the docs describe the context lifecycle?" --token-budget=1200 )"
+if ran_ok "$ON" "T/docsq" && ran_ok "$OFF" "T/docsq (twin)"; then
+    if cmp -s "$ON" "$OFF"; then ok "T/docsq: a question naming docs is byte-equal to the plain-order twin at 1200"; else no "T/docsq: a docs question differs from the plain-order twin"; fi
+fi
 TD="$( ask ts docs 'Where do the docs describe the context lifecycle?' )"
 if ran_ok "$TD" "R twin"; then
     python3 - "$TMP/rows.py" "$TD" <<'PY'

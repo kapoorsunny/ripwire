@@ -887,7 +887,9 @@ inline std::vector<float> docNoiseSymbolMultipliers( const IngestResult& ing, st
 // reordered: the score order and the byte ladder still choose which rows are shown, so the reorder never evicts a doc
 // row. A question that ASKS about docs keeps the plain score order: a docs cue (kDocsQuestionCues), a change or
 // translation cue (the doc-noise lists above: those questions are about prose too), or a named doc file. A false cue
-// is the cheap side to be wrong on — it restores the old order. RIPWIRE_NO_DOCS_AFTER_CODE=1 is the A/B handle (the
+// is the cheap side to be wrong on — it restores the old order. Under an explicit ceiling TIGHTER than the default signature
+// share (serialize.h explicitCeilingTighterThanDefault) the reorder and its uncharged note do not apply: the answer is the plain
+// score-order one, so est_tokens <= the budget keeps holding. RIPWIRE_NO_DOCS_AFTER_CODE=1 is the A/B handle (the
 // RIPWIRE_NO_DOC_MENTION precedent): the same answer in plain score order, which the gate compares the row SET against.
 inline constexpr DocNoiseCue kDocsQuestionCues[] = { { "doc", true },      { "readme", true }, { "guide", true }, { "tutorial", true },
                                                      { "manual", true },   { "markdown", false }, { "wiki", false }, { "faq", false },

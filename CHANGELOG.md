@@ -27,7 +27,7 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
   signature-row byte budget, so the default ceiling admits the same rows it admitted before; it costs about 8 bytes
   per row. An answer whose explicit ceiling is TIGHTER than the default signature budget (`--token-budget` below it, a
   body ceiling, MCP `budget_tokens` likewise) carries no `e=`: its est_tokens promise and its rows stay exactly what they
-  were. A ceiling at or above the default serves the default's `<sigs>`, `e=` included. For measurement only, the
+  were. A ceiling at or above the default carries `e=` exactly as the default does. For measurement only, the
   experimental environment switch `RIPWIRE_FOR_ENDLINES=always|auto|never` moves that one decision (CLI `--for` in both
   dialects and MCP `for`): `auto`, the default, is the rule above; `always` adds `e=` under every ceiling with the same
   rows, so est_tokens may then exceed a tight budget; `never` drops it everywhere. Any other value falls back to `auto`
@@ -35,11 +35,14 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
   `--pack-signatures`, `--pack-task`, `--from-trace` and the map keep their bytes.
 - **Code above docs.** On a question that does not ask about docs, the code rows of the SHOWN signature set now come
   first and its markdown rows after them. It is a reorder of the same rows: the score order and the byte budget still
-  choose which rows are shown, so no doc row is ever evicted by it; the shown rows keep their own `r=` values,
-  reassigned in the new order, and `<sigs docs_after_code="N">` (JSON `"docs_after_code"`) says how many doc rows moved.
+  choose which rows are shown, so no doc row is ever evicted by it; the shown rows' `r=` values are kept as a set and
+  reassigned in the new order (so for a moved row `r=` is no longer its score rank), and `<sigs docs_after_code="N">` (JSON `"docs_after_code"`) says how many doc rows moved.
   A question that names docs (`doc…`, `readme`, `guide`, `tutorial`, `manual`, `markdown`, `wiki`, `faq`, `howto`, a
   change or translation cue, or a named `.md`/`.rst` file) keeps the plain score order, and so does `--no-route`;
-  `RIPWIRE_NO_DOCS_AFTER_CODE=1` turns the reorder off everywhere (CLI and MCP `for`).
+  An answer under an explicit ceiling TIGHTER than the default signature budget
+  (`--token-budget` below it, MCP `budget_tokens` likewise) is not reordered and carries no `docs_after_code`: it is the answer
+  it was before the reorder, so its est_tokens promise stays what it was (the reading would be uncharged bytes).
+  `RIPWIRE_NO_DOCS_AFTER_CODE`, set to any value (even empty or `0`), turns the reorder off everywhere (CLI and MCP `for`).
 
 Gate: `forsigspancheck` (fixture `test/forcompletefix`, C/JS/Python/TS).
 

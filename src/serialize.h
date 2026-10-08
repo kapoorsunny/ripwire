@@ -4280,7 +4280,7 @@ inline constexpr std::string_view kForCompactEndLineLegend =
     "; d e= its last line (absent=unknown, never 0; l= the name's line)";
 inline constexpr std::string_view kForEndLineLegend =
     "; e= on a d row: the 1-based line where that definition ends, body-inclusive; absent when the extent is not known "
-    "(extent_suspect, docs, config), never 0; l= is the line of the definition's name, so a definition can start above l=";
+    "(extent_suspect, docs, config, module-scope), never 0; l= is the line of the definition's name, so a definition can start above l=";
 
 // The " e=\"N\"" run, spliced into a rendered <d …> head right after its l= value (the head always opens `<d l="N"`,
 // sigRowHead). Kept OUT of the head the budget ledger measures, so the ranked set a row budget admits is the one it
@@ -4397,6 +4397,21 @@ inline ForEndLinesMode forEndLinesMode()
     }();
     return mode;
 }
+// THE tight-explicit-ceiling predicate (--token-budget / MCP budget_tokens set, and below the default signature share
+// kForPayloadBudgetBytes). One definition for the two decisions that must not add an uncharged byte there: e= (above) and the
+// code-above-docs reorder with its reading (docsAfterCodeFitsCeiling). 0 = no explicit ceiling.
+inline constexpr bool explicitCeilingTighterThanDefault( std::size_t budgetTokens ) noexcept
+{
+    return budgetTokens != 0 && budgetBytesForTokens( budgetTokens ) < kForPayloadBudgetBytes;
+}
+// May the code-above-docs reorder (reorderDocsAfterCode) apply? Its `docs_after_code=` attribute and reading are UNCHARGED
+// (a disclosure never costs a row), so under a tight explicit ceiling — where the answer promises est_tokens <= the budget
+// and every row — neither the reorder nor its note applies: the answer is the one it was before the reorder existed. At or
+// above the default share, or with no explicit ceiling, it applies. Independent of RIPWIRE_FOR_ENDLINES (that switch moves e= only).
+inline constexpr bool docsAfterCodeFitsCeiling( std::size_t budgetTokens ) noexcept
+{
+    return !explicitCeilingTighterThanDefault( budgetTokens );
+}
 inline constexpr bool endLinesFitCeilingFor( ForEndLinesMode mode, std::size_t budgetTokens, bool bodyCeiling ) noexcept
 {
     switch( mode )
@@ -4405,9 +4420,10 @@ inline constexpr bool endLinesFitCeilingFor( ForEndLinesMode mode, std::size_t b
     case ForEndLinesMode::Never:  return false;
     case ForEndLinesMode::Auto:   break;
     }
-    return !bodyCeiling && ( budgetTokens == 0 || budgetBytesForTokens( budgetTokens ) >= kForPayloadBudgetBytes );
+    return !bodyCeiling && !explicitCeilingTighterThanDefault( budgetTokens );
 }
 static_assert( endLinesFitCeilingFor( ForEndLinesMode::Auto, 0, false ) && !endLinesFitCeilingFor( ForEndLinesMode::Auto, 0, true ) );
+static_assert( docsAfterCodeFitsCeiling( 0 ) && !docsAfterCodeFitsCeiling( 1200 ) && docsAfterCodeFitsCeiling( 8000 ) );
 static_assert( endLinesFitCeilingFor( ForEndLinesMode::Always, 1, true ) && !endLinesFitCeilingFor( ForEndLinesMode::Never, 0, false ) );
 inline bool endLinesFitCeiling( std::size_t budgetTokens, bool bodyCeiling )
 {

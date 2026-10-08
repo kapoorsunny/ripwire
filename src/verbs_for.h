@@ -2296,7 +2296,8 @@ std::optional<int> runForLens( const MainDispatch& d )
                                                            /*fullDistribution=*/!cfg.candidates );   // deep-tail: the bundle serves the file-grain tail; candidates has no tail and keeps the H2 pruning
         std::vector<float> lensRank  = std::move( lr.rank );
         // code above docs (filter.h): the routed path on a question that does not ask about docs — the shown set's REORDER
-        const bool         forDocsAfterCode = !cfg.noRoute && !taskAsksAboutDocs( cfg.forTask ) && !std::getenv( "RIPWIRE_NO_DOCS_AFTER_CODE" );
+        const bool         forDocsAfterCode = !cfg.noRoute && !taskAsksAboutDocs( cfg.forTask ) && !std::getenv( "RIPWIRE_NO_DOCS_AFTER_CODE" )
+                                              && rw::docsAfterCodeFitsCeiling( cfg.tokenBudget > 0 ? std::size_t( cfg.tokenBudget ) : 0u );   // not under a tight explicit ceiling (uncharged note)
         const std::string  routeNoteRaw = std::move( lr.routeNote ); // verbatim; lands ONLY in route= (attribute-escaped) + the JSON twin — L1: the comment no longer echoes it
         const std::string  mentionNote( std::move( lr.mentionNote ) );
         const std::string  boostNote( std::move( lr.boostNote ) );
