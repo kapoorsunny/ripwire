@@ -21,6 +21,9 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"   # BOTH seams: positional and RIPWIRE_BIN
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+# Every fixture repo below is built in a hermetic git environment (gitenvhermeticcheck (D): a gate that initialises a
+# repository sources the shared helper, so an inherited GIT_DIR/GIT_WORK_TREE or agent home cannot leak into it).
+. "$ROOT/test/lib/clean-env.sh"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
