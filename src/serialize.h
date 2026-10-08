@@ -5792,6 +5792,20 @@ inline void appendMergedCalleeNameRows( std::string& callsBody, std::vector<Merg
     }
 }
 
+// FE-B: is the <calls> row id → cid name-only (the walk reorders, so the hedge bit is found by the target). The first
+// hedged row of an answer charges the via legend it pulls in to `used`, before the row.
+inline bool calleeRowVia( const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets, NodeId id, NodeId cid,
+                          std::size_t& used, const CalleeCallsSink& sink )
+{
+    const bool via = sink.nameOnly != nullptr && edgeNameOnly( outOff, outTargets, *sink.nameOnly, id, cid );
+    if( via && sink.viaLegendCharged != nullptr && !*sink.viaLegendCharged )
+    {
+        used += viaNameLegendComment().size();
+        *sink.viaLegendCharged = true;
+    }
+    return via;
+}
+
 // §P10.1: the disclosed <calls total=... [shown=... capped="1"]> block
 // for one body's 1-hop callee signatures — extracted out of packBodies so the disclosure logic doesn't
 // inflate packBodies' own complexity/LOC. `total` is outOff[id+1]-outOff[id] — outTargets is deduped-per-
@@ -5829,12 +5843,7 @@ inline void emitCalleeCallsBlock( std::string& out, NodeId id, const std::vector
             continue;
         }
         const Symbol& cs = ing.symbols[cid];
-        const bool    via = sink.nameOnly != nullptr && edgeNameOnly( outOff, outTargets, *sink.nameOnly, id, cid );   // FE-B: the walk reorders, so by target
-        if( via && sink.viaLegendCharged != nullptr && !*sink.viaLegendCharged )
-        {
-            used += viaNameLegendComment().size();   // the legend this row pulls in, charged before the row
-            *sink.viaLegendCharged = true;
-        }
+        const bool    via = calleeRowVia( outOff, outTargets, id, cid, used, sink );   // FE-B
 
         // COMPACT: the names-only rendering — see collectCalleeNameRow above for what it does and does not do.
         if( sink.namesOnly )

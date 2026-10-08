@@ -124,21 +124,28 @@ inline void emitPathTable( std::FILE* out, const IngestResult& ing,
     std::fputs( "</paths>", out );
 }
 
-// A6: the optional dense 0/1 `<tested>` column, split out of emitColumnarSymbolRows so that function's own
-// branch count does not grow for a column three of its four callers never ask for.
-inline void emitColumnarTestedColumn( std::FILE* out, const IngestResult& ing, const std::vector<NodeId>& rows,
-                                      const std::vector<char>& testReach )
+// A dense 0/1 column `<TAG>1,0,..</TAG>`, one value per row in row order: `flagAt( i )` is row i's flag.
+template <class FlagAt>
+inline void emitColumnarFlagColumn( std::FILE* out, std::string_view tag, std::size_t rowCount, FlagAt&& flagAt )
 {
-    std::fputs( "<tested>", out );
-    for( std::size_t i = 0; i < rows.size(); ++i )
+    rw::emitTo( out, "<{}>", tag );
+    for( std::size_t i = 0; i < rowCount; ++i )
     {
         if( i )
         {
             std::fputc( ',', out );
         }
-        std::fputc( isTestedByReach( ing, testReach, rows[i] ) ? '1' : '0', out );
+        std::fputc( flagAt( i ) ? '1' : '0', out );
     }
-    std::fputs( "</tested>", out );
+    rw::emitTo( out, "</{}>", tag );
+}
+
+// A6: the optional dense 0/1 `<tested>` column, split out of emitColumnarSymbolRows so that function's own
+// branch count does not grow for a column three of its four callers never ask for.
+inline void emitColumnarTestedColumn( std::FILE* out, const IngestResult& ing, const std::vector<NodeId>& rows,
+                                      const std::vector<char>& testReach )
+{
+    emitColumnarFlagColumn( out, "tested", rows.size(), [ & ]( std::size_t i ) { return isTestedByReach( ing, testReach, rows[i] ); } );
 }
 
 // 0.6.5: the optional dense `<depth>` column — --impact's hop depth per row (graph.h transitiveCallersDepth), one value
@@ -161,29 +168,22 @@ inline void emitColumnarDepthColumn( std::FILE* out, const std::vector<NodeId>& 
 }
 
 // FE-B: the optional dense `<via>` column — 1 where the row's edge is name-only (via="name"), one value per row in row
-// order. Present only when some row carries it (columnarViaPresent), so an answer with no hedged row pays 0 bytes.
+// order. Present only when some row carries it, so an answer with no hedged row pays 0 bytes; columnarViaField is its
+// fields= suffix.
 inline bool columnarViaPresent( const std::vector<char>* viaName ) noexcept
 {
     return viaName != nullptr && std::any_of( viaName->begin(), viaName->end(), []( char c ) { return c != 0; } );
 }
-inline void emitColumnarViaColumn( std::FILE* out, std::size_t rowCount, const std::vector<char>& viaName )
+inline std::string_view columnarViaField( const std::vector<char>* viaName ) noexcept
 {
-    std::fputs( "<via>", out );
-    for( std::size_t i = 0; i < rowCount; ++i )
-    {
-        std::fputs( i ? "," : "", out );
-        std::fputc( i < viaName.size() && viaName[ i ] != 0 ? '1' : '0', out );
-    }
-    std::fputs( "</via>", out );
+    return columnarViaPresent( viaName ) ? ",via" : "";
 }
 
 // The optional columns a caller asked for, and the fields= suffix naming them, in ONE place: emitColumnarSymbolRows
 // reads each through these, so its own branch count does not grow per optional column.
-inline std::string_view columnarOptionalFields( bool hasTested, bool hasDepth, bool hasVia ) noexcept
+inline std::string_view columnarOptionalFields( bool hasTested, bool hasDepth ) noexcept
 {
-    static constexpr std::string_view kFields[ 8 ] = { "", ",via", ",depth", ",depth,via", ",tested", ",tested,via", ",tested,depth",
-                                                       ",tested,depth,via" };
-    return kFields[ ( hasTested ? 4 : 0 ) | ( hasDepth ? 2 : 0 ) | ( hasVia ? 1 : 0 ) ];
+    return hasTested ? ( hasDepth ? ",tested,depth" : ",tested" ) : ( hasDepth ? ",depth" : "" );
 }
 inline void emitColumnarOptionalColumns( std::FILE* out, const IngestResult& ing, const std::vector<NodeId>& rows,
                                          const std::vector<char>* testReach, const std::vector<std::uint32_t>* depth,
@@ -199,7 +199,7 @@ inline void emitColumnarOptionalColumns( std::FILE* out, const IngestResult& ing
     }
     if( columnarViaPresent( viaName ) )
     {
-        emitColumnarViaColumn( out, rows.size(), *viaName );
+        emitColumnarFlagColumn( out, "via", rows.size(), [ & ]( std::size_t i ) { return i < viaName->size() && ( *viaName )[ i ] != 0; } );
     }
 }
 
@@ -213,7 +213,7 @@ inline void emitColumnarOptionalColumns( std::FILE* out, const IngestResult& ing
 // column itself is present only when a caller passed the lens, so a caller with no test data pays 0 bytes).
 // 0.6.5: `depth` (optional, --impact only) adds a dense `<depth>` column — transitiveCallersDepth's hop per row — and
 // names it in fields=; a caller that passes none pays 0 bytes, like the tested column.
-// FE-B: `viaName` (optional, one flag per row) adds the dense `<via>` column (emitColumnarViaColumn) when a row is hedged.
+// FE-B: `viaName` (optional, one flag per row) adds the dense `<via>` column (columnarViaPresent) when a row is hedged.
 inline void emitColumnarSymbolRows( std::FILE* out, const IngestResult& ing,
                                     const char* wrapperTag, const std::string& wrapperAttrs,
                                     const std::vector<NodeId>& rows, std::string_view rootPrefix = {},
@@ -234,8 +234,8 @@ inline void emitColumnarSymbolRows( std::FILE* out, const IngestResult& ing,
     std::fputs( kColumnarLegend, out );   // §B1.5: once per output, before the element it describes
     rw::emitTo( out, "<{} {} format=\"columnar\">", wrapperTag, wrapperAttrs.c_str() );
     emitPathTable( out, ing, uniqueFiles, esc, rootPrefix );
-    rw::emitTo( out, "<cols n=\"{}\" fields=\"path,name,line,kind{}\">", rows.size(),
-                columnarOptionalFields( testReach != nullptr, depth != nullptr, columnarViaPresent( viaName ) ) );
+    rw::emitTo( out, "<cols n=\"{}\" fields=\"path,name,line,kind{}{}\">", rows.size(), columnarOptionalFields( testReach != nullptr, depth != nullptr ),
+                columnarViaField( viaName ) );
 
     // path index array
     std::fputs( "<path>", out );
