@@ -203,14 +203,7 @@ inline bool edgeNameOnly( const Graph& g, NodeId from, NodeId to ) noexcept
 // path_between ask it once to decide their via="name" legend sentence (one spelling for both transports).
 inline bool pathHasNameOnlyHop( const Graph& g, std::span<const NodeId> path ) noexcept
 {
-    for( std::size_t i = 1; i < path.size(); ++i )
-    {
-        if( edgeNameOnly( g, path[ i - 1 ], path[ i ] ) )
-        {
-            return true;
-        }
-    }
-    return false;
+    return std::adjacent_find( path.begin(), path.end(), [ & ]( NodeId from, NodeId to ) { return edgeNameOnly( g, from, to ); } ) != path.end();
 }
 
 // FE-B: does the call edge from → to exist at all (the out-CSR is ascending within a source)
