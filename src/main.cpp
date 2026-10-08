@@ -16,6 +16,7 @@
 #include "serialize.h"
 #include "pageview.h"              // §P8: the ONE --limit/--offset window + root-element shown=/capped= disclosure
 #include "graphlegend.h"           // §H4 §3.4: the ONE counts_floor= marker + the shared graph-count legend wording
+#include "pathgaps.h"              // PATH-GAP: --path's gap analysis + clause, shared with MCP path_between
 #include "columnar.h"              // RESEARCH lever 1: opt-in columnar re-serialization for the flat list verbs (--format=columnar)
 #include "redact.h"                // RedactCounts + reportRedactions for the emitted-body secret redaction
 #include "filter.h"

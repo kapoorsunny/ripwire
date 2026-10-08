@@ -2155,10 +2155,18 @@ std::optional<int> runPath( const MainDispatch& d )
         // same brief sentence, on both transports (mcpverbs.h path_between mirrors this line).
         // Reference-as-value round: with no directed call path, how often to= is used as a VALUE — a run through such a
         // slot is not a hop the graph can show, so the count is the clue (the callers verb lists the binding sites).
-        const std::size_t pthToValueRefs = rw::toValueRefsCount( ing, path.empty(), dstDefs );
+        // PATH-GAP (src/pathgaps.h): an unreached to= is "no path" only when the search met no call the graph holds no edge
+        // for; otherwise the answer says the search was incomplete and names where. One ValueRefIndex serves both counts.
+        std::optional<rw::ValueRefIndex> pthValueIdx;
+        if( path.empty() )
+        {
+            pthValueIdx.emplace( ing );
+        }
+        const std::size_t pthToValueRefs = path.empty() ? rw::toValueRefsCount( ing, true, dstDefs, &*pthValueIdx ) : 0;
+        const rw::PathSearchGaps pthGaps = path.empty() ? rw::pathSearchGaps( ing, g, srcDefs, *pthValueIdx ) : rw::PathSearchGaps{};
         rw::emitTo( stdout, "<!-- ripwire path: one DIRECTED call path from= to to= (each <s> a hop); reachable= is 0 and hops= 0 when the "
-                     "graph holds none. {}{}{}-->{}", rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::Path, pthUnprovenDefs > 0 ).c_str(),
-                     rw::toValueRefsLegend( pthToValueRefs > 0 ),
+                     "graph holds none. {}{}{}{}-->{}", rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::Path, pthUnprovenDefs > 0 ).c_str(),
+                     rw::toValueRefsLegend( pthToValueRefs > 0 ), rw::pathGapsLegend( pthGaps.any() ),
                      rw::graphCountFloorBrief( rw::graphGaugeClauses( g ) ).c_str(), rw::rootRelPathsLegend( pthSingleRoot ) );
         rw::emitTo( stdout, "<path from=\"{}\" to=\"{}\" from_p=\"{}\" to_p=\"{}\" from_defs=\"{}\" to_defs=\"{}\"{} reachable=\"{}\" hops=\"{}\"{}{}",
                      ex( srcN ).c_str(), ex( dstN ).c_str(), loc( srcUsed ).c_str(), loc( dstUsed ).c_str(),
@@ -2168,13 +2176,12 @@ std::optional<int> runPath( const MainDispatch& d )
         rw::emitTo( stdout, "{}", rw::countAttrXmlOrEmpty( "to_value_refs", pthToValueRefs ) );   // absent at zero: byte-identical otherwise
         // P2.10: a dead end is exactly the moment to name the next verb. --path is DIRECTED; --connect searches
         // undirected and finds the shared-caller join a directed walk can never see.
-        if( path.empty() )
-        {
-            rw::emitTo( stdout, " hint=\"no directed call path — try --connect={},{} (undirected: finds a shared caller), or --uses/--impact for non-call references{}\"",
-                         ex( srcN ).c_str(), ex( dstN ).c_str(),
-                         ( srcDefs.size() > 1 || dstDefs.size() > 1 ) ? "; several defs share these names — qualify as file:name to pick one" : "" );
-        }
-        rw::emitTo( stdout, ">" );
+        const rw::PathGapsXml pthUnreached = path.empty()
+            ? rw::pathUnreachedXml( ing, pthGaps, pthSingleRoot, pthRootPrefix,
+                                    { "--connect=" + std::string( srcN ) + "," + std::string( dstN ), "--uses/--impact",
+                                      ( srcDefs.size() > 1 || dstDefs.size() > 1 ) ? "; several defs share these names — qualify as file:name to pick one" : "" } )
+            : rw::PathGapsXml{};
+        rw::emitTo( stdout, "{}>{}", pthUnreached.rootAttrs, pthUnreached.rows );
         for( NodeId n : path )
         {
             const Symbol&           s  = ing.symbols[n];

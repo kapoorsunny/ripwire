@@ -43,7 +43,7 @@ template<class K, class V> using HashMap = ankerl::unordered_dense::map<K, V>;
 using NodeId = std::uint32_t;
 inline constexpr NodeId kNoNode = 0xFFFFFFFFu;
 
-// symbol kind → the terse XML attribute (t="fn|method|cls|struct|iface|var|sec|macro|modscope").
+// symbol kind → the terse XML attribute (t="fn|method|cls|struct|iface|var|sec|macro|modscope|type|alias|functype").
 // Macro (the macro-edges round) is APPENDED before Other so no existing kind renumbers: a preprocessor
 // `#define` definition (@definition.macro — C/C++ preproc_def/preproc_function_def, Rust macro_definition).
 // Previously the C/Rust captures mapped to Function, which read as a lie on every t= surface; the kind now
@@ -65,12 +65,22 @@ inline constexpr NodeId kNoNode = 0xFFFFFFFFu;
 // mintModuleScopeOwners() appends one per file that has a file-scope call, AFTER the parse cache is released,
 // so it is the owner a top-level statement or an anonymous callback body attributes to. It is a CALLER, never a
 // callee: nothing in any language can name `<file-scope>`, so it takes no in-edge and cannot become a rank hub.
-enum class SymKind : std::uint8_t { Function, Method, Class, Struct, Interface, Var, Section, Macro, Field, Other, ModuleScope };
+// NamedType / Alias / FuncType (honesty-small-068) are APPENDED after ModuleScope so no existing kind renumbers. They
+// split the old `@definition.type` → Struct bucket where a grammar's syntax PROVES the type's form, which today is Go
+// alone: `type N string` / `type L[T any] []T` (a defined type over a non-struct, non-interface, non-func form, or over
+// another named type) is t="type", `type F func(...)` is t="functype", `type A = B` is t="alias". A Go struct or
+// interface keeps t="struct"/t="iface". Every other language's @definition.type capture still maps to Struct (C/C++
+// typedef and enum, TS/Swift/Dart aliases, Java/C#/PHP/GDScript enums, Elixir @type) — a disclosed floor, not a claim
+// that those are structs. The three kinds BEHAVE as Struct did everywhere a predicate reads the kind
+// (isStructOrNamedType below), so only the label changes: a label-normalised base-vs-head sample over Go fixtures and
+// 26 argv found no other byte moved (2026-10-04, this lane). Dropping the helper moved nothing on
+// those probes either, so it is a guard for predicates no Go fixture reaches today, not a proven behaviour.
+enum class SymKind : std::uint8_t { Function, Method, Class, Struct, Interface, Var, Section, Macro, Field, Other, ModuleScope, NamedType, Alias, FuncType };
 // The number of SymKind enumerators, and the bound a cached def's kind byte is VALIDATED against on the way
 // back in (ingest_cache.h ByteR::enumU8). The static_assert is not a restatement: enumCountIsExact asks the
 // compiler whether the last enumerator is the last NAMED value, so appending a kind without moving this is a
 // build error rather than a validator that silently refuses the new kind's every cached record.
-inline constexpr std::size_t kSymKindCount = static_cast<std::size_t>( SymKind::ModuleScope ) + 1;
+inline constexpr std::size_t kSymKindCount = static_cast<std::size_t>( SymKind::FuncType ) + 1;
 static_assert( enumCountIsExact<SymKind, kSymKindCount>(), "kSymKindCount must name the LAST SymKind enumerator — move it with the append" );
 
 inline const char* symTag( SymKind k ) noexcept
@@ -88,8 +98,23 @@ inline const char* symTag( SymKind k ) noexcept
         case SymKind::Field:     return "field";  // member variable (id=path::Owner::field; use-sites via --uses=Owner.field)
         case SymKind::Other:     return "other";
         case SymKind::ModuleScope: return "modscope";   // the file's module scope: n="<file-scope>", no body to expand
+        case SymKind::NamedType: return "type";     // Go `type N string`: a defined type whose WRITTEN form is not a struct/iface/func literal
+        case SymKind::Alias:     return "alias";    // Go `type A = B`: another name for B
+        case SymKind::FuncType:  return "functype"; // Go `type F func(...)`: a named function type
     }
     return "other";   // a byte past the enum; a NEW SymKind is a -Werror=switch error above, never a silent "other"
+}
+
+// The kinds the `@definition.type` bucket mapped to Struct before honesty-small-068 split Go's: every predicate that
+// admitted Struct as "a named type" (callable as a conversion, a method owner, a type-like row) admits these too, so
+// the split changes the t= LABEL and nothing else. Read this, not `== SymKind::Struct`, wherever the question is
+// "is this a struct-or-named-type definition".
+// The three split kinds are the LAST three enumerators, so they are one range; the asserts pin that.
+static_assert( SymKind::Alias == SymKind( unsigned( SymKind::NamedType ) + 1 ) && SymKind::FuncType == SymKind( unsigned( SymKind::NamedType ) + 2 )
+               && kSymKindCount == unsigned( SymKind::FuncType ) + 1, "NamedType..FuncType are the last, contiguous kinds" );
+inline bool isStructOrNamedType( SymKind k ) noexcept
+{
+    return k == SymKind::Struct || k >= SymKind::NamedType;
 }
 
 // #324: a ModuleScope owner is SYNTHETIC (comment above the enum) — a CALLER minted after the tags.scm pass,
@@ -648,7 +673,7 @@ struct FnLocalScope
 // an unrelated Join#aliases. Gate: test/rubybarecallcheck.sh ("Ruby has no declarations").
 inline bool isDefinitionNotDeclaration( const Symbol& s ) noexcept
 {
-    const bool kotlinType = s.lang == Lang::Kotlin && ( s.kind == SymKind::Class || s.kind == SymKind::Struct || s.kind == SymKind::Interface );
+    const bool kotlinType = s.lang == Lang::Kotlin && ( s.kind == SymKind::Class || isStructOrNamedType( s.kind ) || s.kind == SymKind::Interface );
     return s.endByte > s.sigEndByte || kotlinType || s.lang == Lang::Ruby;
 }
 

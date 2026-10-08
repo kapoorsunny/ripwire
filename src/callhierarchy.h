@@ -97,7 +97,7 @@ struct CallHierarchyRows
 // absent) whenever every definition shares one kind, so a same-kind overload set keeps its bytes.
 inline std::string crossKindValue( const IngestResult& ing, const std::vector<NodeId>& matches )
 {
-    constexpr std::size_t kKinds = std::size_t( SymKind::ModuleScope ) + 1;
+    constexpr std::size_t kKinds = kSymKindCount;   // model.h's compile-time-proven count (was ModuleScope+1: an appended kind tripped the EXPECTS)
     std::size_t           perKind[kKinds] = {};
     std::size_t           distinct        = 0;
     for( const NodeId m : matches )
@@ -107,7 +107,7 @@ inline std::string crossKindValue( const IngestResult& ing, const std::vector<No
             continue;
         }
         const std::size_t k = std::size_t( ing.symbols[m].kind );
-        EXPECTS( k < kKinds, "SymKind's last enumerator is ModuleScope" );
+        EXPECTS( k < kKinds, "a symbol's kind is a SymKind enumerator (kSymKindCount bounds them)" );
         distinct += perKind[k] == 0 ? 1 : 0;
         ++perKind[k];
     }
@@ -154,7 +154,7 @@ inline std::vector<NodeId> tsContractSignatures( const IngestResult& ing )
         {
             methods.push_back( id );
         }
-        else if( s.kind == SymKind::Class || s.kind == SymKind::Interface || s.kind == SymKind::Struct )
+        else if( s.kind == SymKind::Class || s.kind == SymKind::Interface || isStructOrNamedType( s.kind ) )
         {
             owners.push_back( Span{ s.fileId, s.sigStartByte, s.endByte, id } );
         }

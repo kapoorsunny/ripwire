@@ -302,7 +302,15 @@ constexpr std::uint32_t kCacheVersion = 28;           // 28: FE-A (test/falseedg
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 148;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 156;          // bump on any grammar/.scm/extraction change
+                                                      // 156 = 2026-10-08 (train 26b: signed lanes merged onto main's 148): cache-key hygiene.
+                                                      //   Two merged lanes changed extraction under lane-local numbers, both 145:
+                                                      //   honesty-small-068 (Go named-type kinds, `type A = B` aliases) and
+                                                      //   train25-cr2-followup (prototype-parameter scope, the depth-cut record,
+                                                      //   vrClean key slots); their notes are below. Branch builds in flight have
+                                                      //   used numbers up to 154 (rich file tag 155). 156 (rich file tag 157) is
+                                                      //   above every one of them, so no cache another build wrote is read as this
+                                                      //   build's. kCacheVersion stays 28.
                                                       // 148 = 2026-10-04 (train 26a: PR #373, Ruby method lookup, merged onto main's 143):
                                                       //   cache-key hygiene. The branch's Ruby extraction steps ran as 130–137,
                                                       //   142 and 145 (its notes below); main used 130–143 for other lanes, and
@@ -311,6 +319,10 @@ constexpr std::uint32_t kParserVer    = 148;          // bump on any grammar/.sc
                                                       //   kCacheVersion stays main's 28 (the branch said 27: its appended
                                                       //   LocalBindKind values follow ModuleAlias here, and the parser number
                                                       //   already keys every blob); kQSnapCacheScheme stays main's 17.
+                                                      // 145 = lane honesty-small-068 (a lane-local number; the train renumbers):
+                                                      //   Go named types get their kind from the type_spec's form (t="type" /
+                                                      //   "functype"), and `type A = B` is now indexed (t="alias") — new defs and
+                                                      //   new kind bytes. 145, not 144: 143's RICH file tag is 144.
                                                       // 143 = 2026-10-04 (train 25 review fixes): two extraction changes —
                                                       //   a declaration named like the global object (`var self = this`, a
                                                       //   parameter `window`) is now a JsShadow binding, and a value-reference

@@ -2258,7 +2258,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             // holds an error (fileHasError, one O(1) flag test per file) — see parseRecoveredBits.
             d.recovered = fileHasError ? parseRecoveredBits( defNode, kind, le.lang, d.scope.empty() ) : std::uint8_t( 0 );
             defs.push_back( std::move( d ) );
-            if( kind == SymKind::Class || kind == SymKind::Struct || kind == SymKind::Interface )
+            if( kind == SymKind::Class || isStructOrNamedType( kind ) || kind == SymKind::Interface )
             {
                 captureBases( defNode, fileId, le.lang, src, refs );    // IS-A: inheritance edges (derived → base)
                 captureFields( defNode, fileId, le.lang, src, refs );   // HAS-A: member-variable type edges (S5-E)

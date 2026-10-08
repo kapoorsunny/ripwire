@@ -2365,6 +2365,17 @@ inline constexpr std::string_view kModScopeMapLegend =
     "-and-an-anonymous-callback-body's-calls-live;a-CALLER-never-a-callee(nothing-in-the-source-can-name-it)-with-no-body-to-expand;"
     "a-file-with-no-such-call-has-no-such-row -->";
 
+// honesty-small-068: the three Go named-type kinds' reading, appended ONLY when the corpus has one (the modscope clause's
+// byte-identity rule: a corpus without such a row keeps every byte of this legend). What it does NOT mean: t=type is not
+// "a struct" by what it IS: the kind says how the type is WRITTEN, so `type W Pair` and `type H pkg.HandlerFunc` are t=type
+// even when the type underneath is a struct or a func (the parse cannot see into another named type),
+// and only Go is split — another language's typedef/alias/enum still reads t=struct (said in model.h and the gate's
+// arm F, not in every Go answer: the clause rides each Go map, so it carries only what a Go row needs).
+inline constexpr std::string_view kNamedTypeMapLegend =
+    "<!-- t=type|alias|functype=a-Go-named-type-by-its-written-form:type=a-defined-type-whose-WRITTEN-form-is-not-a-struct/iface/func-literal"
+    "(type-N-string;type-W-Pair-too,whatever-Pair-is-underneath),"
+    "alias=type-A=B,functype=type-F-func(...) -->";
+
 // EXTENT HONESTY (src/extentsuspect.h, gate test/extentcheck.sh) — the ONE reading of extent_suspect= on every ROW
 // surface: the map's <s>, a bundle's <d> and <b>. Written only into a document that carries the attribute, right
 // where the reader meets it, so a corpus with nothing flagged stays byte-identical. The map adds the header count
@@ -2783,6 +2794,12 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     if( hasModuleScope )
     {
         legend += kModScopeMapLegend;
+    }
+    // honesty-small-068: the Go named-type kinds' clause, under the same absent-at-zero rule as modscope's above.
+    if( std::any_of( ing.symbols.begin(), ing.symbols.end(), []( const Symbol& sym )
+                     { return sym.kind == SymKind::NamedType || sym.kind == SymKind::Alias || sym.kind == SymKind::FuncType; } ) )
+    {
+        legend += kNamedTypeMapLegend;
     }
 
     std::size_t extentSuspectTotal = 0;
@@ -5639,6 +5656,8 @@ inline std::vector<NodeId> calleeWalkOrder( NodeId id, const std::vector<std::ui
 // the callable kinds as one declarative bit table over SymKind (the house's table-over-switch rule)
 inline constexpr std::uint32_t kCallableKindBits = ( 1u << unsigned( SymKind::Function ) ) | ( 1u << unsigned( SymKind::Method ) )
                                                  | ( 1u << unsigned( SymKind::Class ) ) | ( 1u << unsigned( SymKind::Struct ) )
+                                                 | ( 1u << unsigned( SymKind::NamedType ) ) | ( 1u << unsigned( SymKind::Alias ) )   // a Go conversion
+                                                 | ( 1u << unsigned( SymKind::FuncType ) )                                            // `N( x )`, as Struct
                                                  | ( 1u << unsigned( SymKind::Macro ) );
 static_assert( kSymKindCount <= 32, "kCallableKindBits holds one bit per SymKind" );
 inline bool isCallableKind( SymKind k ) noexcept

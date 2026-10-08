@@ -40,6 +40,10 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   kIngestParserVerMirror moves with it. kCacheVersion stays main's 28 (the branch side said 27). kQSnapCacheScheme
 #   stays 17: what a Snapshot means is unchanged — with kParserVer set back to 143, the merged tree hashes to main's pin
 #   32240f4552…2dafcc. The two feat/ruby-method-lookup entries below are the branch's own history.
+# 2026-10-04, lane honesty-small-068: RE-DERIVED with UPDATE_GOLDEN=1 (hash a4e37a094b…735858). kParserVer 143 -> 145 (Go named
+#   types get their kind from the type_spec form and `type A = B` is indexed; 145 because 143's full-use file tag is 144)
+#   with quality.h's mirror; one hashed quality.h predicate reads isStructOrNamedType (behaviour-identical: the new kinds
+#   admit exactly what Struct did). kQSnapCacheScheme stays 17. A lane-local number: the train renumbers.
 # 2026-10-04, train 25 review fixes: RE-DERIVED with UPDATE_GOLDEN=1 (hash 32240f4552…2dafcc). kParserVer 141 -> 143 (two
 #   extraction changes: a declaration named like the JS global object is a JsShadow binding; value-reference slot text
 #   is cut on a UTF-8 boundary and JS string keys are capped) with quality.h's mirror; 143 because 141's full-use file

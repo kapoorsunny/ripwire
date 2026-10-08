@@ -435,7 +435,7 @@ private:
         }
         const Symbol& f      = m_ing.symbols[ r.fromSymbol ];
         const bool    fIsFn  = f.kind == SymKind::Function || f.kind == SymKind::Method;
-        const bool    fClass = ( f.kind == SymKind::Class || f.kind == SymKind::Struct ) && f.name == m.scope;
+        const bool    fClass = ( f.kind == SymKind::Class || isStructOrNamedType( f.kind ) ) && f.name == m.scope;
         // a statement of the class body (owned by the class, or by an annotated attribute of it); a Python NESTED class's
         // body does not see the outer class's names, a C++ one does
         const bool    inBody = !fIsFn && f.fileId == m.fileId

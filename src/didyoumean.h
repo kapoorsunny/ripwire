@@ -216,7 +216,7 @@ inline std::string nearestAggregateName( const IngestResult& ing, std::string_vi
 {
     const std::string_view best = nearestSymbolNameWhere( ing, typed, []( const Symbol& s )
                                                           {
-                                                              return s.kind == SymKind::Struct || s.kind == SymKind::Class
+                                                              return isStructOrNamedType( s.kind ) || s.kind == SymKind::Class
                                                                   || s.kind == SymKind::Interface;
                                                           } );
     return best.empty() || best == typed ? std::string() : ( " (did you mean '" + std::string( best ) + "'?)" );

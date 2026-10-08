@@ -400,7 +400,20 @@ SymKind defKind( std::string_view tail ) noexcept
     }
     if( tail == "type" )
     {
-        return SymKind::Struct; // typedef/alias/enum bucket
+        return SymKind::Struct; // typedef/alias/enum bucket (every grammar but Go's; model.h NamedType note)
+    }
+    // honesty-small-068: the Go type_spec split — the grammar's `type:` field PROVES the form, so the kind says it.
+    if( tail == "definedtype" )    // `type N string`, `type L[T any] []T`, `type W Other` — a defined type, not a struct
+    {
+        return SymKind::NamedType;
+    }
+    if( tail == "functype" )       // `type F func(...)`
+    {
+        return SymKind::FuncType;
+    }
+    if( tail == "alias" )          // `type A = B`
+    {
+        return SymKind::Alias;
     }
     if( tail == "section" )
     {
