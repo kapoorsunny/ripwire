@@ -3176,8 +3176,10 @@ inline ListedHits whereisServedListing( const WhereResult& res, std::size_t maxH
         return std::size_t( std::count_if( l.rows.begin(), l.rows.begin() + std::ptrdiff_t( n ),
                                            [ & ]( std::size_t i ) { return res.hits[ i ].isDef; } ) );
     };
-    ENSURES( defsShown( defs ) >= defsShown( all ), "the All page's shown definitions are a prefix of the Defs page's" );
-    if( defsShown( defs ) > defsShown( all ) )
+    const std::size_t defsOnDefsPage = defsShown( defs );
+    const std::size_t defsOnAllPage  = defsShown( all );
+    ENSURES( defsOnDefsPage >= defsOnAllPage, "the All page's shown definitions are a prefix of the Defs page's" );
+    if( defsOnDefsPage > defsOnAllPage )
     {
         return defs;
     }
