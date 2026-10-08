@@ -32,9 +32,11 @@ ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write th
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 . "$ROOT/scripts/cxxstd.sh"
+. "$ROOT/scripts/asanprobe.sh"
 CXXSTD="$( ripwire_cxx_std_flag "$CXX" )"
 SRC="$ROOT/test/verify_os_win32_logic.cpp"
-WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
+WORK="$( mktemp -d )"; trap 'gate_bounded_reap; rm -rf "$WORK"' EXIT; gate_bounded_arm
+ASAN_SKIPPED=""
 MIN_ASSERTIONS=4000000   # the full-range UTF round trip alone is 3.3 M assertions; far below this, something did not run
 CM_ARGS=()
 if [ "${OS:-}" = Windows_NT ]; then
@@ -75,8 +77,14 @@ SAN="-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-poin
 if "$CXX" -fsanitize=integer -x c++ -o /dev/null - <<<'int main(){}' >/dev/null 2>&1; then
     SAN="-fsanitize=address,undefined,integer -fno-sanitize-recover=all -fno-omit-frame-pointer"
 fi
-if "$CXX" "$CXXSTD" -O1 -g $SAN -I"$ROOT/src" -I"$ROOT/third_party/deps/doctest" "$SRC" -o "$WORK/san" > "$WORK/san.log" 2>&1; then
-    ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 "$WORK/san" > "$WORK/san.out" 2>&1
+# Deliberately NOT switched to llvm@22 (unlike connectcorecheck): its libc++ 22 trips an -fsanitize=integer report in
+# <string> itself (CONTRIBUTING.md, Sanitizer build), which would turn a hang into a red that is not ripwire's. Probe the
+# compiler the caller chose; a start-up hang is a named missing premise, so this arm SKIPs and (A) and (C) still gate.
+if ! ripwire_asan_probe "$CXX" "$WORK"; then
+    echo "  SKIP  (B) sanitizer run: $RIPWIRE_ASAN_PROBE_WHY. Set CXX to a toolchain whose ASan runtime starts, or update the Command Line Tools/Xcode (CONTRIBUTING.md, Sanitizer build)."
+    ASAN_SKIPPED=1
+elif "$CXX" "$CXXSTD" -O1 -g $SAN -I"$ROOT/src" -I"$ROOT/third_party/deps/doctest" "$SRC" -o "$WORK/san" > "$WORK/san.log" 2>&1; then
+    ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 gate_bounded 300 "$WORK/san" > "$WORK/san.out" 2>&1
     rc=$?
     read_counts "$WORK/san.out"
     if [ "$rc" -eq 0 ] && [ "$FAILED" = 0 ] && ! grep -qE 'runtime error|AddressSanitizer' "$WORK/san.out"; then
@@ -102,7 +110,9 @@ else
     no "(C) the mutant build failed to compile"; head -20 "$WORK/mut.log" | sed 's/^/    /'
 fi
 
-if [ "$fail" = 0 ]; then
+if [ "$fail" = 0 ] && [ -n "$ASAN_SKIPPED" ]; then
+    echo "PASS (arms A and C; arm B was skipped above)"
+elif [ "$fail" = 0 ]; then
     echo "ALL PASS"
 else
     echo "SOME CHECKS FAILED"

@@ -1015,13 +1015,78 @@ if(WIN32)
 endif()
 
 if(RIPWIRE_ASAN)
-  # AppleClang 17's ASan runtime hangs in its own start-up on macOS 26 (Darwin 25), before main, so every
-  # sanitizer run times out. CI's Xcode 26.6 AppleClang 21 is unaffected. A warning, not an error: the
-  # tree still builds, and CONTRIBUTING's sanitizer section has the Homebrew LLVM 22 recipe.
-  if(APPLE AND CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 21
-     AND CMAKE_HOST_SYSTEM_VERSION VERSION_GREATER_EQUAL 25)
-    message(WARNING "RIPWIRE_ASAN: AppleClang ${CMAKE_CXX_COMPILER_VERSION} on macOS 26 is known to hang in "
-      "ASan start-up before main. Configure this tree with Homebrew LLVM 22 (CONTRIBUTING.md, Sanitizer build).")
+  # Some macOS toolchains ship an ASan runtime that deadlocks in its own start-up, before main (Apple clang 17.0.0 /
+  # Command Line Tools 26.3 on macOS 26.7: libSystem's malloc init enters AsanInitFromRtl, whose shadow-memory
+  # set-up allocates through dyld and re-enters it). Every sanitizer binary and every ASan gate then just hangs, and
+  # the contributor sees only timeouts. So on Apple, with ASan on, run an empty -fsanitize=address program once, under
+  # a timeout, and stop with the fix if it does not finish. Nothing here runs without RIPWIRE_ASAN or off Apple, and a
+  # pass is cached per (compiler, version, host OS) so a reconfigure does not pay for it again and prints nothing new.
+  if(APPLE AND CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND NOT CMAKE_CROSSCOMPILING
+     AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    set(RIPWIRE_ASAN_PROBE_TIMEOUT 10 CACHE STRING "seconds the configure-time ASan start-up probe may take (macOS)")
+    # CMake never re-detects CMAKE_CXX_COMPILER_VERSION (or the host OS version) in an existing build tree, and a Command
+    # Line Tools/Xcode update replaces the compiler behind the same /usr/bin/c++. So the key also carries the ASan
+    # runtime the compiler links today (its path and modification time): an in-place toolchain update re-runs the probe.
+    execute_process(COMMAND ${CMAKE_CXX_COMPILER} ${CMAKE_CXX_COMPILER_ARG1} -print-file-name=libclang_rt.asan_osx_dynamic.dylib
+      OUTPUT_VARIABLE _ripwire_asan_rt OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    set(_ripwire_asan_rt_stamp "")
+    if(EXISTS "${_ripwire_asan_rt}")
+      file(TIMESTAMP "${_ripwire_asan_rt}" _ripwire_asan_rt_stamp "%s" UTC)
+    endif()
+    set(_ripwire_asan_probe_key
+      "${CMAKE_CXX_COMPILER}|${CMAKE_CXX_COMPILER_VERSION}|${CMAKE_HOST_SYSTEM_VERSION}|${CMAKE_OSX_SYSROOT}|${CMAKE_EXE_LINKER_FLAGS}|${_ripwire_asan_rt}@${_ripwire_asan_rt_stamp}")
+    if(NOT "${_ripwire_asan_probe_key}" STREQUAL "${_RIPWIRE_ASAN_PROBE_PASSED}")
+      set(_ripwire_asan_probe_dir "${CMAKE_BINARY_DIR}/CMakeFiles/ripwire_asan_probe")
+      file(MAKE_DIRECTORY "${_ripwire_asan_probe_dir}")
+      file(WRITE "${_ripwire_asan_probe_dir}/probe.cpp" "int main() { return 0; }\n")
+      set(_ripwire_asan_probe_cmd ${CMAKE_CXX_COMPILER} ${CMAKE_CXX_COMPILER_ARG1})
+      if(CMAKE_OSX_SYSROOT)
+        list(APPEND _ripwire_asan_probe_cmd -isysroot "${CMAKE_OSX_SYSROOT}")
+      endif()
+      if(CMAKE_OSX_ARCHITECTURES)
+        foreach(_ripwire_asan_probe_arch IN LISTS CMAKE_OSX_ARCHITECTURES)
+          list(APPEND _ripwire_asan_probe_cmd -arch "${_ripwire_asan_probe_arch}")
+        endforeach()
+      endif()
+      separate_arguments(_ripwire_asan_probe_ldflags NATIVE_COMMAND "${CMAKE_EXE_LINKER_FLAGS}")
+      execute_process(
+        COMMAND ${_ripwire_asan_probe_cmd} ${_ripwire_asan_probe_ldflags} -fsanitize=address
+                "${_ripwire_asan_probe_dir}/probe.cpp" -o "${_ripwire_asan_probe_dir}/probe"
+        RESULT_VARIABLE _ripwire_asan_probe_build_rc
+        OUTPUT_VARIABLE _ripwire_asan_probe_build_out ERROR_VARIABLE _ripwire_asan_probe_build_out)
+      if(NOT _ripwire_asan_probe_build_rc EQUAL 0)
+        message(FATAL_ERROR "RIPWIRE_ASAN: ${CMAKE_CXX_COMPILER} could not build an empty -fsanitize=address program "
+          "(${_ripwire_asan_probe_build_rc}):\n${_ripwire_asan_probe_build_out}\n"
+          "This toolchain has no usable AddressSanitizer runtime. Install the Command Line Tools/Xcode that ship one, or "
+          "configure with Homebrew LLVM (CONTRIBUTING.md, Sanitizer build):\n"
+          "  cmake -S . -B asan -DRIPWIRE_ASAN=ON -DCMAKE_C_COMPILER=$(brew --prefix llvm@22)/bin/clang "
+          "-DCMAKE_CXX_COMPILER=$(brew --prefix llvm@22)/bin/clang++")
+      endif()
+      execute_process(
+        COMMAND ${CMAKE_COMMAND} -E env ASAN_OPTIONS=detect_leaks=0 "${_ripwire_asan_probe_dir}/probe"
+        TIMEOUT ${RIPWIRE_ASAN_PROBE_TIMEOUT}
+        RESULT_VARIABLE _ripwire_asan_probe_run_rc
+        OUTPUT_QUIET ERROR_QUIET)
+      if(NOT _ripwire_asan_probe_run_rc EQUAL 0 AND NOT _ripwire_asan_probe_run_rc MATCHES "timeout")
+        message(FATAL_ERROR "RIPWIRE_ASAN: an empty program built with ${CMAKE_CXX_COMPILER} -fsanitize=address exited "
+          "(${_ripwire_asan_probe_run_rc}) instead of returning 0: this toolchain's AddressSanitizer runtime fails at "
+          "start-up. Update the Command Line Tools / Xcode, or configure with Homebrew LLVM (CONTRIBUTING.md, Sanitizer "
+          "build).")
+      elseif(NOT _ripwire_asan_probe_run_rc EQUAL 0)
+        message(FATAL_ERROR "RIPWIRE_ASAN: an empty program built with ${CMAKE_CXX_COMPILER} -fsanitize=address did not "
+          "run to completion within ${RIPWIRE_ASAN_PROBE_TIMEOUT} s (${_ripwire_asan_probe_run_rc}). This toolchain's "
+          "AddressSanitizer runtime deadlocks in its own start-up, before main, on this macOS (seen with Apple clang "
+          "17.0.0 / Command Line Tools 26.3 on macOS 26.7), so every sanitizer binary and gate would hang. Either "
+          "update the Command Line Tools / Xcode (softwareupdate, or Xcode's Settings > Components), or configure with "
+          "Homebrew LLVM, which carries a runtime that starts:\n"
+          "  brew install llvm@22\n"
+          "  cmake --fresh -S . -B asan -DRIPWIRE_ASAN=ON -DCMAKE_C_COMPILER=$(brew --prefix llvm@22)/bin/clang "
+          "-DCMAKE_CXX_COMPILER=$(brew --prefix llvm@22)/bin/clang++\n"
+          "(CONTRIBUTING.md, Sanitizer build, has the matching linker flags.) Raise RIPWIRE_ASAN_PROBE_TIMEOUT only if "
+          "this host is simply very busy.")
+      endif()
+      set(_RIPWIRE_ASAN_PROBE_PASSED "${_ripwire_asan_probe_key}" CACHE INTERNAL "ASan start-up probe passed for this toolchain")
+    endif()
   endif()
   set(_ripwire_windows_clangcl_asan OFF)
   set(_ripwire_no_omit_frame_pointer -fno-omit-frame-pointer)

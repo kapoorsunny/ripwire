@@ -23,16 +23,26 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-CXX="${CXX:-c++}"
+# The whole gate is an ASan harness: an explicit CXX is respected, else Homebrew llvm@22 when installed, else c++
+# (scripts/asanprobe.sh: Apple clang 17 / Command Line Tools 26.3 on macOS 26.7 deadlocks every ASan binary before main).
+. "$ROOT/scripts/asanprobe.sh"
+CXX="$( ripwire_asan_pick_cxx "${CXX:-}" )"
 
 # ask THIS front end how it spells C++23 (see scripts/cxxstd.sh — AppleClang 15 rejects -std=c++23)
 . "$ROOT/scripts/cxxstd.sh"
 CXXSTD="$( ripwire_cxx_std_flag "$CXX" )"
 HARNESS="$ROOT/test/radixsimd_harness.cpp"
-WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
+WORK="$( mktemp -d )"; trap 'gate_bounded_reap; rm -rf "$WORK"' EXIT; gate_bounded_arm
 ARCH="$( uname -m )"
 
 echo "radixsimdcheck: CXX=$CXX arch=$ARCH"
+
+# A named, expected missing premise (checklist 14/17): a toolchain whose ASan runtime cannot start a program. The harness
+# and every assertion below are unchanged; on such a host they cannot run, so the gate says so and stops.
+if ! ripwire_asan_probe "$CXX" "$WORK"; then
+    echo "radixsimdcheck: SKIP — $RIPWIRE_ASAN_PROBE_WHY. Use a toolchain whose ASan runtime starts: set CXX to Homebrew llvm@22's clang++, or update the Command Line Tools/Xcode (CONTRIBUTING.md, Sanitizer build)."
+    exit 0
+fi
 
 # G1's 'integer' / float-cast groups are Clang spellings; GCC only has the address,undefined core.
 # Probe THIS front end rather than guessing from its name (same posture as scripts/cxxstd.sh).
@@ -90,7 +100,7 @@ run_pass baseline "$WANT"
 if [ "$( uname -s )" = "Darwin" ] && [ "$ARCH" = "arm64" ]; then
     printf 'int main(){return 0;}\n' > "$WORK/rosetta_probe.cpp"
     if "$CXX" "$CXXSTD" -arch x86_64 $SAN -fno-sanitize-recover=all "$WORK/rosetta_probe.cpp" -o "$WORK/rosetta_probe" 2>/dev/null \
-            && "$WORK/rosetta_probe" 2>/dev/null; then
+            && gate_bounded 10 "$WORK/rosetta_probe" 2>/dev/null; then
         run_pass rosetta-x86_64 "SSE" -arch x86_64
     else
         echo "  SKIP  [rosetta-x86_64] Rosetta or the x86_64 sanitizer runtime is unavailable — SSE2 kernels NOT gated on this machine"
