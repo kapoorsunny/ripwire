@@ -1024,8 +1024,9 @@ inline std::uint64_t defectSiteValue( defectshape::Facet f, std::string_view tex
     {
         h = 4;
     }
-    const std::uint64_t v = h | static_cast<std::uint64_t>( f );
-    ENSURES( v != kDefectFilePresent && v != kDefectFileUnreadable && defectFacetOf( v ) == f, "a site value is never a reserved file record and carries its facet" );
+    const std::uint64_t v        = h | static_cast<std::uint64_t>( f );
+    const bool          keepsFacet = ( v & 3u ) == static_cast<std::uint64_t>( f );
+    ENSURES( v != kDefectFilePresent && v != kDefectFileUnreadable && keepsFacet, "a site value is never a reserved file record and carries its facet" );
     return v;
 }
 

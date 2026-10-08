@@ -36,6 +36,8 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <charconv>
+#include <system_error>
 
 #include <cctype>
 
@@ -212,9 +214,10 @@ inline std::vector<Tok> lexCpp( std::string_view s )
         }
         if( c == '#' && lineStart )
         {
-            while( i < s.size() && s[i] != '\n' )
+            // the directive runs to the first newline a backslash does not continue
+            while( i < s.size() && !( s[i] == '\n' && ( i == 0 || s[i - 1] != '\\' ) ) )
             {
-                i += ( s[i] == '\\' && i + 1 < s.size() ) ? 2 : 1;
+                ++i;
             }
             continue;
         }
@@ -1061,13 +1064,17 @@ inline bool lengthIsSizeBound( std::string_view src, const std::vector<Tok>& tok
             {
                 return true;
             }
-            if( m.kind != TokKind::Number || n.empty() || !std::all_of( n.begin(), n.end(), isDigit ) || n.size() > 9
-                || !std::all_of( mt.begin(), mt.end(), isDigit ) || mt.size() > 9 )
+            long nv = 0;
+            long mv = 0;
+            const auto plain = []( std::string_view d, long& out )
             {
-                return false;
+                const auto r = std::from_chars( d.data(), d.data() + d.size(), out );
+                return !d.empty() && d.size() <= 9 && r.ec == std::errc() && r.ptr == d.data() + d.size();
+            };
+            if( m.kind != TokKind::Number || !plain( n, nv ) || !plain( mt, mv ) )
+            {
+                return false;   // not two plain decimal lengths
             }
-            const long nv = std::stol( n );
-            const long mv = std::stol( std::string( mt ) );
             return mv >= nv && mv - nv <= 3;
         };
         if( k + 6 < to && isCompareOp( src, toks[k + 5] ) && boundMatches( toks[k + 6] ) )
