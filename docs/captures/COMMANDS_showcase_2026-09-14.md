@@ -3945,9 +3945,9 @@ ripwire 0.6.1 (dev, AppleClang 21.0.0.21000101, emit=std::print, built_from=f8d4
 <s t="fn" n="rankGraph" p="src/graph.h:7438"/>
 <s t="fn" n="anchoredLexicalRank" p="src/graph.h:8084"/>
 <s t="fn" n="runEval" p="src/eval.h:171"/>
-<s t="fn" n="churnDecayRanking" p="src/main.cpp:1380"/>
-<s t="fn" n="churnRankedGraph" p="src/main.cpp:1419"/>
-<s t="fn" n="runDefaultMap" p="src/main.cpp:1629"/>
+<s t="fn" n="churnDecayRanking" p="src/main.cpp:1381"/>
+<s t="fn" n="churnRankedGraph" p="src/main.cpp:1420"/>
+<s t="fn" n="runDefaultMap" p="src/main.cpp:1630"/>
 </callers>
 `````
 

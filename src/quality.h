@@ -4424,29 +4424,25 @@ inline bool deserializeRawCommitStream( const std::string& blob, const std::stri
     return true;
 }
 
-// The memoized drop-in for gitCoChangeAndChurn: same signature, same return contract, but the expensive
-// `git log --name-only` walk is skipped on a warm hit (blob self-validates against `keyMat`; any mismatch —
-// wrong headSha, wrong coSince, drifted boundary, or a corrupt/foreign blob — is a clean miss that falls
-// through to a full recompute, never a wrong answer). No git repo / no resolvable HEAD degrades straight to
-// the uncached walk (which itself degrades to an empty stream — gitLogNameOnlyRaw's own contract).
-inline std::vector<std::vector<std::uint32_t>> gitCoChangeAndChurnCached(
-    const std::string& root, const IngestResult& ing, const char* coSince, std::size_t maxFiles,
-    unsigned churnMonths = 0, std::vector<std::uint32_t>* outChurn = nullptr,
-    std::uint32_t onlyRoot = UINT32_MAX )
+// The memoized raw stream, WITHOUT any ingest: the git probes, the qchurn blob and, on a miss, the walk — everything
+// the amp=/churn= computation needs before it resolves paths against an `ing`. It reads nothing but the repo's committed
+// history and the blob, so a caller that wants the walk's wall time hidden behind its own ingest starts it first
+// (main.cpp does, for --for/--metrics/--exemplar) and resolves the result once `ing` exists. A cache hit skips the walk
+// (blob self-validates against `keyMat`; any mismatch — wrong headSha, wrong coSince, drifted boundary, or a
+// corrupt/foreign blob — is a clean miss that falls through to a full recompute, never a wrong answer). No git repo
+// degrades to an empty stream; no resolvable HEAD to the uncached walk (which itself degrades to an empty stream —
+// gitLogNameOnlyRaw's contract). Thread-safe: every memo it reaches (the HEAD anchor, the toplevel) takes its own
+// mutex, and the blob write is an atomic rename.
+inline RawCommitStream gitRawCommitStreamCached( const std::string& root, const char* coSince )
 {
     if( !hasEnclosingGitRepo( root ) )
     {
-        return resolveCommitStream( RawCommitStream{}, ing, maxFiles, /*churnCutoff=*/0, outChurn, onlyRoot );
+        return RawCommitStream{};
     }
-    // F1: the churn sub-window's cutoff, resolved ONCE from HEAD's own committer epoch — the same anchor the
-    // co-change window (inside gitLogNameOnlyRaw) uses, so the two horizons this one walk yields agree.
-    // AFTER the no-repo check, so a non-git root never reaches the anchor read at all.
-    const std::int64_t churnCutoff = rw::defaultWindowCutoffEpoch( root, churnMonths );
-
     const std::string headSha = gitHeadSha( root );
     if( headSha.empty() )
     {
-        return resolveCommitStream( gitLogNameOnlyRaw( root, coSince ), ing, maxFiles, churnCutoff, outChurn, onlyRoot );
+        return gitLogNameOnlyRaw( root, coSince );
     }
 
     const std::string repoHex  = cacheRootKeyHex( root );
@@ -4461,13 +4457,43 @@ inline std::vector<std::vector<std::uint32_t>> gitCoChangeAndChurnCached(
     const std::optional<std::string> blob = readQSnapBlob( cachePath );
     if( blob && deserializeRawCommitStream( *blob, keyMat, raw ) )
     {
-        return resolveCommitStream( raw, ing, maxFiles, churnCutoff, outChurn, onlyRoot );   // warm hit — no walk
+        return raw;                                                                // warm hit — no walk
     }
 
     raw = gitLogNameOnlyRaw( root, coSince );                                      // cold — the 431 ms walk
     atomicWriteFile( cachePath, serializeRawCommitStream( raw, keyMat ) );         // best-effort; a failed
                                                                                      // write just recomputes next time
-    return resolveCommitStream( raw, ing, maxFiles, churnCutoff, outChurn, onlyRoot );
+    return raw;
+}
+
+// One root's amp=/churn= history, fetched without an ingest: the root it was walked for and its raw 18-month stream.
+// main.cpp starts one per root beside the ingest and resolves each against `ing` afterwards.
+struct HistoryWalk
+{
+    std::string     root;
+    RawCommitStream raw;
+};
+
+inline HistoryWalk gitHistoryWalk( std::string root )
+{
+    RawCommitStream raw = gitRawCommitStreamCached( root, "18 months ago" );
+    return HistoryWalk{ std::move( root ), std::move( raw ) };
+}
+
+// The resolve half, the memoized drop-in for gitCoChangeAndChurn on the 18-month window main.cpp's amp=/churn= block
+// reads (commits with more than 30 files dropped from the sets): `walk` resolved against the CALLER's current `ing`.
+// Pure in-memory work except the HEAD anchor's memo (one `git log -1` the first time a root asks); a root with no
+// enclosing repo never reaches that anchor at all.
+inline std::vector<std::vector<std::uint32_t>> resolveHistoryWalk(
+    const HistoryWalk& walk, const IngestResult& ing, unsigned churnMonths = 0,
+    std::vector<std::uint32_t>* outChurn = nullptr, std::uint32_t onlyRoot = UINT32_MAX )
+{
+    constexpr std::size_t kMaxFilesPerCommit = 30;
+    // F1: the churn sub-window's cutoff, resolved ONCE from HEAD's own committer epoch — the same anchor the
+    // co-change window (inside gitLogNameOnlyRaw) uses, so the two horizons this one walk yields agree.
+    // AFTER the no-repo check, so a non-git root never reaches the anchor read at all.
+    const std::int64_t churnCutoff = hasEnclosingGitRepo( walk.root ) ? rw::defaultWindowCutoffEpoch( walk.root, churnMonths ) : 0;
+    return resolveCommitStream( walk.raw, ing, kMaxFilesPerCommit, churnCutoff, outChurn, onlyRoot );
 }
 
 // `root` = the ingest root exactly as invoked (cfg.rootPath). It is folded into every baseline key via

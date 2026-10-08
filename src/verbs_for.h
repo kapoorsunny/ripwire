@@ -2508,7 +2508,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // where budget_bytes= goes and for its reason (see there).
 
         // M10: --for reads git for the per-file churn= column (folded onto the bundle below, mined once in
-        // main.cpp's gitCoChangeAndChurnCached pass) and, before this fix, carried no anchor — an agent
+        // main.cpp's resolveHistoryWalk pass) and, before this fix, carried no anchor — an agent
         // quoting churn= into a handoff had nothing checkable to pin it to. Single-root only (same gate
         // flRootArg itself uses): "" on multi-root or a non-git root, same silence-means-omitted convention
         // every other stamped verb follows. ALWAYS present when non-empty, like confidence= — a root fact,

@@ -111,7 +111,7 @@ inline std::string stampAt( const std::string& root )
     // retrieval path is contractually git-free on a git-less corpus (test/nongitqmetricscheck.sh: "rich
     // retrieval on a non-git root must not spawn git merely to degrade"), and stampAt then paid TWO popens to
     // learn there was no repo. hasEnclosingGitRepo is the same filesystem probe (stat for .git, walking up)
-    // that quality::gitCoChangeAndChurnCached already gates its own walk on: it costs no subprocess, changes
+    // that quality::gitRawCommitStreamCached already gates its own walk on: it costs no subprocess, changes
     // no answer — on a non-git root the result was always "" — and makes the property hold for EVERY stamped
     // verb rather than for whichever one a gate happened to be watching.
     if( !rw::hasEnclosingGitRepo( root ) )

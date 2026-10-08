@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qchurncheck.sh — gate for Y2 (P2): quality::gitCoChangeAndChurnCached memoizes gitmine's
+# qchurncheck.sh — gate for Y2 (P2): quality::gitRawCommitStreamCached memoizes gitmine's
 # `git log --name-only` walk (431 ms on a large private C++ corpus; every rich verb — --for, --metrics,
 # --exemplar — pays it once per invocation, main.cpp:5392/5404 call it via gitmine::gitCoChangeAndChurn).
 #
@@ -43,7 +43,7 @@ echo "qchurncheck: BIN=$BIN"
 qchurnfiles(){ find "$QCACHE" -maxdepth 2 -type f -name 'ripwire-qchurn-*.bin' 2>/dev/null; }
 nqchurn(){ qchurnfiles | wc -l | tr -d ' '; }
 # name_only_count TRACEFILE — how many git child processes in this run's trace invoked --name-only (the
-# expensive walk gitCoChangeAndChurnCached guards). Any OTHER git call this run makes (rev-parse, HEAD
+# expensive walk gitRawCommitStreamCached guards). Any OTHER git call this run makes (rev-parse, HEAD
 # resolution, etc.) never contains "name-only", so this is a clean, argv-based signal — not a timing guess.
 name_only_count(){ grep -c "name-only" "$1" 2>/dev/null || true; }
 # run TRACEFILE ARGS... — invokes ripwire against $REPO with our private TMPDIR + a fresh GIT_TRACE file.
