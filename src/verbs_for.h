@@ -3076,7 +3076,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, bo
         // grows past the bytes the cut alone left it. THE COMPACT DIALECT ALSO PAYS FROM FULL'S ROOM: its sig ledger charges
         // less header than it emits and leans on the header rungs to land inside the ceiling, so a charged one also reserves
         // the room the compact charge was given beyond full's (compactLedgerGapBytes) — in the plan, so only a block the ladder
-        // already trims pays it: a capped compact answer serves the rows the full one does and lands no further over its
+        // already trims pays it: a PAID capped compact answer serves the rows the full one does and lands no further over its
         // ceiling (compactlegendcheck P4). An uncapped answer is untouched. AT THE FLOOR (rank 1..4, nothing left to shed) the
         // handle still ships and an overshoot is labelled (rootFinish.sigsUnpaidOver below; orchestrator ruling 2026-10-07).
         // AND ONLY WHERE PAYING IS WHAT MAKES IT FIT (ruling C3, completed 2026-10-08): runForLens renders unpaid first

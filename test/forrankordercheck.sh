@@ -581,5 +581,35 @@ else
     no "(10) MCP budget_tokens=3800: shown/capped/handle/over/est = ${*:-<no output>} — want a paid handle inside the budget"
 fi
 
+# ── (11) C3 COMPLETED: PAY FOR next= ONLY WHEN PAYING IS WHAT MAKES THE ANSWER FIT (orchestrator ruling 2026-10-08) ─────────────
+# The answer with every row the cut leaves PLUS the unpaid handle is the first candidate; it is served whenever it fits, and only
+# when it lands past its ceiling are rows dropped to pay (and served only if THAT fits — (10)'s @3800). 45a2eeba paid first and
+# kept the paid answer whenever it fit, so it dropped rows the unpaid answer had room for: the served answer had fewer rows than
+# an alternative that also fit. Same fixture and relative path as (10). Pins are 255dc199's own rows at each budget (the cut's
+# rows; re-pin from a pre-continuation binary if row bytes or the header change), budgets chosen with room on both sides:
+#   CLI XML @2160: 255dc199 17 rows (est 2046); 45a2eeba 16 (est 1998) — RED there; head 17 + next= (est 2078 <= 2160).
+#   --json  @2000: 255dc199 16 rows (est 1657); 45a2eeba 15 — RED there; head 16 + "sigs_next" (est 1691).
+#   MCP     @4340: 255dc199 40 rows (est 4257); 45a2eeba 39 — RED there; head 40 + next_budget_tokens= (est 4308 <= 4340).
+# Each: rows >= the cut's own, the handle rides, est_tokens <= the budget, no over_ceiling. A binary that always pays when it
+# can fit (the 45a2eeba order) is red on all three.
+c11row(){ printf '%s' "$1" | python3 -c 'import json,sys; d=json.load(sys.stdin); h=d["next"] or d["next_budget_tokens"]; print(d["shown"], d["capped"], bool(h), d["over"], d["est_tokens"])' 2>/dev/null; }
+c11check(){   # LABEL BUDGET WANT ROWS CAPPED HANDLE OVER EST
+    local label="$1" bt="$2" want="$3"; shift 3
+    if [ "$#" -eq 5 ] && [ "$1" -ge "$want" ] && [ "$2" = True ] && [ "$3" = True ] && [ "$4" = False ] && [ "$5" -le "$bt" ]; then
+        ok "(11) $label @$bt fits with every row the cut leaves: $1 rows (>= $want, none dropped to pay), the handle unpaid, est $5 <= $bt, no over_ceiling="
+    else
+        no "(11) $label @$bt: shown/capped/handle/over/est = ${*:-<no output>} — want >= $want rows, the handle, est <= $bt, no over_ceiling= (paid where it already fit?)"
+    fi
+}
+c11check "CLI --for" 2160 17 $( c11row "$( cd "$TMP" && "$BIN" fxcut --for="gadget assembler" --token-budget=2160 --no-cache 2>/dev/null | cut_arm )" )
+c11check "MCP for" 4340 40 $( c11row "$( mcprel 4340 )" )
+set -- $( cd "$TMP" && "$BIN" fxcut --for="gadget assembler" --token-budget=2000 --json --no-cache 2>/dev/null \
+          | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d["sigs"]), "sigs_next" in d, bool(d.get("over_ceiling")), d["est_tokens"])' 2>/dev/null )
+if [ "$#" -eq 4 ] && [ "$1" -ge 16 ] && [ "$2" = True ] && [ "$3" = False ] && [ "$4" -le 2000 ]; then
+    ok "(11) --for --json @2000 fits with every row the cut leaves: $1 rows (>= 16), \"sigs_next\" unpaid, est $4 <= 2000, no over_ceiling"
+else
+    no "(11) --for --json @2000: rows/sigs_next/over/est = ${*:-<no output>} — want >= 16 rows, \"sigs_next\", est <= 2000, no over_ceiling"
+fi
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit "$fail"
