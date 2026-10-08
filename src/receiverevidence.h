@@ -83,12 +83,6 @@ inline bool implicitReceiverLang( Lang l ) noexcept
     return l == Lang::Java || l == Lang::Kotlin || l == Lang::CSharp || l == Lang::Swift || l == Lang::Cpp || l == Lang::Ruby;
 }
 
-// FE-B (review B3): the languages where a bare name inside a method may be a field of the enclosing class (implicit this)
-inline bool implicitFieldLang( Lang l ) noexcept
-{
-    return l == Lang::Java || l == Lang::CSharp || l == Lang::Kotlin || l == Lang::Swift;
-}
-
 // the languages where a call written on a receiver reaches a function only as a METHOD (or through a module alias): a
 // free function is never what `x.f()` calls. JS/TS (an object property may hold one), Kotlin (an extension function is a
 // top-level `fun T.f()`) and C (a function-pointer field) are left out.
@@ -642,10 +636,11 @@ struct ReceiverEvidence
         {
             return unalias( r.fileId, *t );
         }
-        if( implicitFieldLang( r.lang ) && !declaresLocal( r.fromSymbol, root ) )
+        // Java/C#/Kotlin/Swift (the implicit-receiver languages but C++, whose Rule 2b reads fields, and Ruby, whose fields
+        // are @ivars): a bare `field.m()` inside a method is `this.field.m()` — the field the caller's class (or a base)
+        // declares, when no parameter or local of that name hides it
+        if( implicitReceiverLang( r.lang ) && r.lang != Lang::Cpp && r.lang != Lang::Ruby && !declaresLocal( r.fromSymbol, root ) )
         {
-            // Java/C#/Kotlin/Swift: a bare `field.m()` inside a method is `this.field.m()` — the field the caller's class (or a
-            // base) declares, when no parameter or local of that name hides it
             const std::string_view owner = callerClass( r.fromSymbol );
             if( const std::string_view ft = owner.empty() ? std::string_view{} : fieldOf( owner, root ); !ft.empty() )
             {
