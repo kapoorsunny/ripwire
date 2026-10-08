@@ -1721,7 +1721,7 @@ inline constexpr char kHelpHead[] =
         "                               construction, so it never gates. Counted per enclosing symbol, like error-masking: a file-level TODO outside every definition is not counted.\n"
         "                               defect-shape = a known defect shape the change ADDED, named by defect=: format-arity (a literal std::format/print/format_to, fmt::, rw::emitTo/formatTo or\n"
         "                               Python \"literal\".format whose fields do not match its arguments — GATES on any origin, a defect not debt), utf8-cut and dedup-first (C++) and\n"
-        "                               vacuous-assert (Bash test scripts) — report-only, always sev=\"minor\". A site is new only when its text is not in the baseline: a moved one is not.\n"
+        "                               vacuous-assert (Bash test scripts) — report-only, always sev=\"minor\". A site is new only when its text occurs more often than in the baseline: a moved one is not.\n"
         "                               Test-fixture dirs + doc sections are exempt from dead-code/churn; churn needs COMMITTED thrash evidence (rewritten across recent commits AND again by this diff), never the current edit alone\n"
         // §B7.2 (CA4): the strict-sha staleness rule and — the part that matters — the fact that this verb
         // can DELETE a file in the user's tree were disclosed nowhere a user reads before running it. The

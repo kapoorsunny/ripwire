@@ -724,14 +724,17 @@ inline constexpr const char* kQdDefectShapeLegend =
     "with no UTF-8 boundary back-off in the function), dedup-first (C++ std::unique keeping the first of a "
     "run over a type with a severity field that neither the predicate nor the sort before it reads) and "
     "vacuous-assert (a Bash test script's absence assertion read off a command whose failure is never "
-    "checked, so a crash reads as PASS). A site is new only when its normalized text is not among the "
-    "baseline's sites of that shape, so a moved or renamed one is not; was= and now= count the shape's sites "
+    "checked, so a crash reads as PASS). A site is new only when its normalized text occurs more often than "
+    "at the baseline (repo-wide, per shape), so a moved or renamed one is not; was= and now= count the shape's sites "
     "in the anchor, the innermost definition or, for top-level code, the file (then sym= is the path). "
     "format-arity gates on any origin: a placeholder/argument mismatch is a defect, not debt. utf8-cut, "
     "dedup-first and vacuous-assert are always sev=\"minor\": report-only by facet, not by size. Python "
     "percent-formatting and f-strings are not checked, nor a format held in a named constant, a macro or a "
-    "runtime wrapper, a pack expansion, an unqualified format() call, a named dedup predicate, or a utf8 cut "
-    "in a function that backs off a continuation byte anywhere: no row there is no verdict. ";
+    "runtime wrapper, a pack expansion, an argument that may be a macro (a name the file or tree #defines, or "
+    "an ALL_CAPS name called), a call with a preprocessor directive inside it or under #if 0, an escape that "
+    "spells a brace, an unqualified format() call, a named dedup predicate, a utf8 cut in a function that "
+    "backs off a continuation byte anywhere, or a vacuous-assert absence read off a FILE a run redirected "
+    "into: no row there is no verdict. ";
 
 // Emitted only when a placeholder row is in the document: why every one of them carries origin="new-symbol",
 // including one that landed in a symbol that existed at the baseline.
@@ -1739,9 +1742,10 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                                 : r.kind == "nesting"    ? " bar=\"4\""  : r.kind == "params"    ? " bar=\"5\""  : "";
             // P3 (L7, nextverb.h): a GATING row hands the agent the body to fix — --expand=FILE:NAME (the file-qualified
             // selector, so a same-named symbol elsewhere cannot answer). The name is the sym key's last :: segment;
-            // duplication rows name a SET (members=) and carry no single body to open.
+            // duplication rows name a SET (members=) and carry no single body to open, nor does a FILE-anchored
+            // defect-shape row (top-level code: sym= is the path, and --expand=FILE:FILE matches no symbol).
             std::string nextAttr;
-            if( *gatingAttr && !r.path.empty() && r.kind != "duplication" )
+            if( *gatingAttr && !r.path.empty() && r.kind != "duplication" && !( r.kind == "defect-shape" && r.sym == r.path ) )
             {
                 const std::size_t    sep  = r.sym.rfind( "::" );
                 const std::string    bare = sep == std::string::npos ? r.sym : r.sym.substr( sep + 2 );

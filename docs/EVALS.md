@@ -6181,7 +6181,11 @@ code review kept finding; only `format-arity` gates, and on any origin (new-symb
 defect-shape format-arity). Measured (2026-10-07): recall 7/8 on the eight review findings it was built
 from; with every site treated as new, 0 format-arity false positives on this tree (1,330 literal-format calls),
 on the Python 3.13 standard library (405 calls) and on libc++'s std::format tests (80 calls; the 24 hits are its
-deliberately ill-formed `.verify.cpp` calls); vacuous-assert sample precision 30/30 on this tree's gates.
+deliberately ill-formed `.verify.cpp` calls); vacuous-assert sample precision 30/30 on this tree's gates
+(46 rows, Wilson 95% lower bound 0.89) after fix round 1 (2026-10-08) taught the guard the positive on the same
+capture spelled as an `if`/`elif` `&&` condition or through a script-defined function — before it, 3 of 49 rows were
+such false positives and the seeded sample read 28/30 (lower bound 0.79), not the 30/30 first published. Floor: an
+absence read off a file a run redirected into is not judged (`redactcheck.sh:81`, `namingcalibrationcheck.sh:292`).
 
 Note that some user-facing summaries abbreviate four of these (`dup`, `dead`, `churn`,
 `clone-of-reused-helper` / `reuse-decline`). **Match against the strings above** when grepping real

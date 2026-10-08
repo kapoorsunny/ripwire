@@ -17,7 +17,7 @@
 #                    branch) read off a command whose failure is never checked, so a crash reads as PASS.
 #                    REPORT-ONLY.
 # Like every kind, a row fires only on what THIS change introduced, never on pre-existing debt: a site is new
-# when its normalized text is not among the baseline's sites of that facet (repo-wide), so an untouched,
+# when its normalized text occurs more often than among the baseline's sites of that facet (repo-wide), so an untouched,
 # MOVED or RENAMED mismatch gives no row and a swap (one fixed, one added in the same function) still does.
 # was/now count the anchor's offending sites. Each facet has near-miss negatives the new code could plausibly
 # mis-handle.
@@ -27,9 +27,11 @@
 # exit predicate (XML gating=, --json and MCP "gating", --ack-only=gating) must agree on it (§1 ackgating, §5).
 #
 # Stated floors (no row is not a verdict on these): Python %-formatting and f-strings; a format held in a
-# named constant, a macro, a pack expansion or a runtime/vformat wrapper; an unqualified format()/print();
+# named constant, a macro, a pack expansion or a runtime/vformat wrapper; an argument that may be a macro, a call
+# with a directive inside it or under #if 0, an escape that spells a brace (§1d); an unqualified format()/print();
 # the std::print ostream overload; a dedup whose sort reads severity in the MILD-first direction, or whose
-# predicate/comparator is a named function (skipped, never guessed); a utf8 cut with no ellipsis; and the
+# predicate/comparator is a named function (skipped, never guessed); a utf8 cut with no ellipsis; a
+# vacuous-assert absence read off a file a run redirected into (§4 n_fileredirect). And the
 # utf8/dedup fixtures cannot see an exit-only bug on their own (their clone near-misses gate duplication) —
 # §4 vac and §5 both carry the exit judgment for the report-only facets.
 #
@@ -637,6 +639,168 @@ ds_none  "$L" nestedauto "an auto nested width {:>{}} consumes a positional argu
 ds_none  "$L" fmtmap     ".format_map takes a mapping, not an argument list (skipped)"
 gating_split "$L" 9
 
+# ── 1d) FORMAT-ARITY precision: macros, directives, dead code (rv-cr-qd-kinds-068 §1b F1/F2/F3) ─────────
+#   The rule that lets format-arity gate: when the argument count cannot be known, SKIP, never guess. The
+#   reviewer's adversarial shapes (fixtures p2/fp/repo, repo2) as negatives, each beside a near-miss POSITIVE the
+#   skip must not swallow:
+#   F1 an argument that may be a macro expanding to an argument list: an identifier this file or the tree
+#      #defines (SRC_LOC(), a lower-case pq( p ) here, xy( p ) defined in ANOTHER file), or an ALL_CAPS name
+#      followed by '(' whose definition is not visible (PAIR_OF( a ), and OUT_IT( s ) BEFORE the format, which
+#      may shift its index). A real function call (twice( a )) and a qualified Foo::BAR( 1 ) are still counted.
+#   F2 a preprocessor directive inside the call's parentheses (#ifdef arms in the argument list, or around the
+#      format itself): every arm's tokens would be concatenated. A directive OUTSIDE the call does not skip it.
+#   F3 a call inside #if 0 … #endif (nested conditionals inside it too) is dead code; the #else arm is live.
+#   And the low-realism edges: other::std::format is not the family (::std::format is); "\x7b\x7d" spells "{}"
+#   by escapes (skipped), "\x1b[1m{}" does not (counted).
+fx_init fmt_pp
+mkdir -p "$WORK/fmt_pp/src"
+printf '#pragma once\n#define xy( p ) p.x, p.y\n#define INNER2() a, b\n' >"$WORK/fmt_pp/src/macros.h"
+printf '#include "macros.h"\nint drive() { return 0; }\n' >"$WORK/fmt_pp/src/pp.cpp"
+fx_commit fmt_pp
+cat >"$WORK/fmt_pp/src/pp.cpp" <<'EOF'
+#include <format>
+#include <print>
+#include <string>
+#include "macros.h"
+#define SRC_LOC() __FILE__, __LINE__
+#define VEC3( v ) ( v ).x, ( v ).y, ( v ).z
+#define pq( p ) p.first, p.second
+#define ARGS( ... ) __VA_ARGS__
+#define LOGV( fmt, ... ) std::print( fmt, __VA_ARGS__ )
+#define FMTOF( x ) "{} " x
+#define outer2() INNER2()
+struct Foo { static int BAR( int x ); };
+int twice( int a );
+std::string n_srcloc( const char* m ) { return std::format( "{}:{} {}", SRC_LOC(), m ); }
+std::string n_vec3( auto v ) { return std::format( "({}, {}, {})", VEC3( v ) ); }
+std::string n_lowersame( auto p ) { return std::format( "{} {}", pq( p ) ); }
+std::string n_lowertree( auto p ) { return std::format( "{} {}", xy( p ) ); }
+std::string n_capsundef( int a ) { return std::format( "{} {}", PAIR_OF( a ) ); }
+std::string n_beforefmt( std::string& s, int a, int b ) { std::format_to( OUT_IT( s ), "{}", a, b ); return s; }
+std::string n_variadic( int a, int b ) { return std::format( "{} {}", ARGS( a, b ) ); }
+void n_vawrapper( int a ) { LOGV( "{} {}\n", a ); }
+std::string n_fmtmacro( int a ) { return std::format( FMTOF( "{}" ), a ); }
+std::string n_nested( int a, int b ) { return std::format( "{} {}", outer2() ); }
+std::string n_ifdefargs( int a, int b, int c )
+{
+    return std::format( "{} {}", a
+#ifdef _WIN32
+                        , b
+#else
+                        , c
+#endif
+    );
+}
+void n_ifdeffmt( int a, int b, int c )
+{
+    std::print(
+#ifdef VERBOSE
+        "{} {} {}\n", a, b, c
+#else
+        "{}\n", a
+#endif
+    );
+}
+std::string n_ifzero( int a )
+{
+#if 0
+    return std::format( "{} {}", a );
+#ifdef NESTED
+    return std::format( "{}", a, a );
+#endif
+    return std::format( "{} {} {}", a );
+#endif
+    return {};
+}
+std::string n_qualified( int a, int b ) { return other::std::format( "{}", a, b ); }
+std::string n_hexesc( int a ) { return std::format( "\x7b\x7d", a ); }
+std::string p_lowerfn( int a ) { return std::format( "{} {}", twice( a ) ); }
+std::string p_qualcaps( int a ) { return std::format( "{}", a, Foo::BAR( 1 ) ); }
+#ifdef OUTSIDE
+int outsideDirective = 1;
+#endif
+std::string p_afterdirective( int a ) { return std::format( "{}", a, a ); }
+std::string p_ifzeroelse( int a )
+{
+#if 0
+    return {};
+#else
+    return std::format( "{}", a, a );
+#endif
+}
+std::string p_globalns( int a ) { return ::std::format( "{}", a, a ); }
+std::string p_hexother( int a ) { return std::format( "\x1b[1m{}\x1b[0m", a, a ); }
+int drive() { return 1; }
+EOF
+fx_run fmt_pp
+L="format-arity precision (c++)"
+for f in n_srcloc n_vec3 n_lowersame n_lowertree n_capsundef n_beforefmt n_variadic n_vawrapper n_fmtmacro n_nested; do
+    ds_none "$L" "$f" "F1: a macro that may expand to an argument list makes the count unknowable (skipped)"
+done
+ds_none "$L" n_ifdefargs "F2: #ifdef arms inside the argument list (skipped)"
+ds_none "$L" n_ifdeffmt  "F2: #ifdef arms around the format itself (skipped)"
+ds_none "$L" n_ifzero    "F3: calls inside #if 0 … #endif, nested conditionals included, are dead code"
+ds_none "$L" n_qualified "other::std::format is not the format family"
+ds_none "$L" n_hexesc    "a literal whose escapes spell a brace is skipped, never guessed"
+ds_none_p "$L" src/macros.h "a macro definition is not a call"
+ds_has "$L" format-arity p_lowerfn        gating-new
+ds_has "$L" format-arity p_qualcaps       gating-new
+ds_has "$L" format-arity p_afterdirective gating-new
+ds_has "$L" format-arity p_ifzeroelse     gating-new
+ds_has "$L" format-arity p_globalns       gating-new
+ds_has "$L" format-arity p_hexother       gating-new
+FA="$( ds_rows | grep -c 'defect="format-arity"' )"
+if [ "$QD_OK" = 1 ] && [ "$FA" = 6 ]; then ok "$L: exactly the 6 near-miss positives carry a format-arity row"
+else no "$L: $FA format-arity rows, want exactly the 6 positives: $( ds_rows | grep 'defect="format-arity"' | head -10 )"; fi
+
+#   Python: a raw literal has no escapes (r"\N{a}" holds the field {a}); "\x7b\x7d" spells "{}" (skipped); a
+#   newline outside brackets ends a statement, so X = "a {}" and a next-line "{}".format( 1 ) are not one concat.
+fx_init fmt_py2
+printf 'def drive():\n    return 0\n' >"$WORK/fmt_py2/p.py"
+fx_commit fmt_py2
+cat >"$WORK/fmt_py2/p.py" <<'EOF'
+def n_rawN(a):
+    return r"\N{a}".format(a=a)
+
+
+def n_hexesc(a):
+    return "\x7b\x7d".format(a)
+
+
+def n_namedesc(a):
+    return "\N{LEFT CURLY BRACKET}\N{RIGHT CURLY BRACKET}".format(a)
+
+
+def p_rawextra(a, b):
+    return r"\d {}".format(a, b)
+
+
+def p_escother(a, b):
+    return "\x1b[1m{}".format(a, b)
+
+
+def drive():
+    return 1
+EOF
+printf 'X = "a {}"\n"{}".format(1)\n' >"$WORK/fmt_py2/m.py"
+printf 'Y = 1\n"{} {}".format(1)\n' >"$WORK/fmt_py2/q.py"
+fx_run fmt_py2
+L="format-arity precision (python)"
+ds_none   "$L" n_rawN    "a raw literal's \\N is a backslash and an N; {a} is a field and a=a gives it"
+ds_none   "$L" n_hexesc  "a literal whose escapes spell a brace is skipped, never guessed"
+ds_none   "$L" n_namedesc "\\N{LEFT CURLY BRACKET} spells a brace: skipped"
+ds_none_p "$L" m.py      "a module-level statement's literal is not concatenated with the next line's receiver"
+ds_has    "$L" format-arity p_rawextra gating-new
+ds_has    "$L" format-arity p_escother gating-new
+ds_has_p  "$L" format-arity q.py       gating-new
+#   next= hands a gating row's body to open; a FILE-anchored row has no symbol to expand (rv N2), a function's row does
+if [ "$QD_OK" = 1 ]; then
+    if ds_row_p format-arity q.py | grep -q ' next='; then no "$L: the file-anchored q.py row carries a next= that matches no symbol: $( ds_row_p format-arity q.py )"
+    else ok "$L: the file-anchored q.py row carries no next="; fi
+    if ds_row format-arity p_rawextra | grep -q ' next="--expand=p.py:p_rawextra"'; then ok "$L: a function-anchored row keeps next=--expand=FILE:NAME"
+    else no "$L: the p_rawextra row lost its next=: $( ds_row format-arity p_rawextra )"; fi
+fi
+
 # ── 2) UTF8-CUT, C++ (report-only) ──────────────────────────────────────────────────────────────────────
 #   The corpus shapes: a cut (resize / substr(0,N) / erase(N)) plus an appended ellipsis on the SAME string
 #   with no UTF-8 back-off in the function, and an ellipsis appended once a byte-pushing loop reaches the
@@ -1000,7 +1164,7 @@ EOF
 )"
 VHDR="$VHDR
 "
-for f in t_var t_pipe t_pipefail t_if t_cont t_neg t_names t_fn t_setelocal t_setepipe t_derived n_rc n_orno n_presence n_positive n_polarity n_literal n_comment n_legacy n_ifok n_posafter n_nestif n_case n_casealone n_sete n_seteuo n_filepipe n_wrapper n_derivedguard n_bracegroup n_elif; do
+for f in t_var t_pipe t_pipefail t_if t_cont t_neg t_names t_fn t_setelocal t_setepipe t_derived n_rc n_orno n_presence n_positive n_polarity n_literal n_comment n_legacy n_ifok n_posafter n_nestif n_case n_casealone n_sete n_seteuo n_filepipe n_wrapper n_derivedguard n_bracegroup n_elif n_ifand n_elifpos n_helper n_fileredirect t_orcond t_undefhelper t_reassign; do
     printf '%s' "$VHDR" >"$WORK/vac/test/$f.sh"
 done
 for f in t_setepipe n_sete; do printf 'set -e\n' >>"$WORK/vac/test/$f.sh"; done
@@ -1217,6 +1381,72 @@ else
     no "no list root"
 fi
 EOF
+#   Fix round 1 (rv-cr-qd-kinds-068 §1c): a positive on the SAME capture guards the absence beside it, also when it is
+#   spelled as an if condition of &&-joined greps (wrapverbscheck:266), as an elif condition (ensemblecheck:366) or
+#   through a function the script defines (qddialscheck:320). Near-miss positives: a || condition (a crash can take
+#   the other branch's pass), a helper the script does not define, and a positive on an EARLIER capture of a
+#   reassigned variable. Stated floor: an absence read off a FILE a run redirected into (redactcheck:81).
+cat >>"$WORK/vac/test/n_ifand.sh" <<'EOF'
+C_OUT="$( "$BIN" --list 2>/dev/null )"
+if echo "$C_OUT" | grep -q '<list ' && echo "$C_OUT" | grep -qF '</list>'; then
+    ok "the list is whole"
+else
+    no "the list is cut"
+fi
+if echo "$C_OUT" | grep -q 'bad'; then
+    no "bad present"
+else
+    ok "bad absent"
+fi
+EOF
+cat >>"$WORK/vac/test/n_elifpos.sh" <<'EOF'
+page="$( "$BIN" --list 2>/dev/null | head -1 )"
+rows="$( "$BIN" --list 2>/dev/null | grep -c '<r ' )"
+if [ "$rows" != "1" ]; then
+    no "want one row"
+elif printf '%s' "$page" | grep -q 'total="1"'; then
+    ok "one row disclosed"
+else
+    no "no total"
+fi
+if printf '%s' "$page" | grep -qE ' shown="'; then
+    no "a bare shown="
+else
+    ok "no bare shown="
+fi
+EOF
+cat >>"$WORK/vac/test/n_helper.sh" <<'EOF'
+rows(){ printf '%s' "$1" | tr '>' '\n' | grep '<r ' ; }
+ODP2="$( "$BIN" --list 2>/dev/null )"
+rows "$ODP2" | grep 'kind="dup"' | grep -q 'alpha' \
+    && ok "the unrelated group survives" \
+    || no "the unrelated group is gone"
+printf '%s' "$ODP2" | grep -q 'config-warnings=' && no "a config warning" || ok "no config warning"
+EOF
+cat >>"$WORK/vac/test/t_orcond.sh" <<'EOF'
+OR_OUT="$( "$BIN" --list 2>/dev/null )"
+if echo "$OR_OUT" | grep -q '<list ' || echo "$OR_OUT" | grep -q '<empty'; then
+    ok "a root"
+fi
+printf '%s' "$OR_OUT" | grep -q 'bad' && no "bad present" || ok "bad absent"
+EOF
+cat >>"$WORK/vac/test/t_undefhelper.sh" <<'EOF'
+UH="$( "$BIN" --list 2>/dev/null )"
+rowsx "$UH" | grep -q 'alpha' && ok "alpha" || no "no alpha"
+printf '%s' "$UH" | grep -q 'bad' && no "bad present" || ok "bad absent"
+EOF
+cat >>"$WORK/vac/test/t_reassign.sh" <<'EOF'
+RA="$( "$BIN" --list 2>/dev/null )"
+if echo "$RA" | grep -q '<list ' && echo "$RA" | grep -q '</list>'; then
+    ok "the first list is whole"
+fi
+RA="$( "$BIN" --list --other 2>/dev/null )"
+printf '%s' "$RA" | grep -q 'bad' && no "bad present" || ok "bad absent"
+EOF
+cat >>"$WORK/vac/test/n_fileredirect.sh" <<'EOF'
+"$BIN" --list >"$TMPDIR/exp.xml" 2>/dev/null
+grep -q 'secret' "$TMPDIR/exp.xml" && no "the secret leaked" || ok "no secret"
+EOF
 fx_run vac
 L="vacuous-assert (bash)"
 for f in t_var t_pipe t_pipefail t_if t_cont t_neg t_names t_setepipe t_derived; do
@@ -1248,6 +1478,13 @@ ds_none_p "$L" test/n_wrapper.sh  "a capture through a script-defined wrapper is
 ds_none_p "$L" test/n_derivedguard.sh "a presence test on a variable DERIVED from the capture requires the capture's text"
 ds_none_p "$L" test/n_bracegroup.sh "a requirement inside a { …; } group on the same capture"
 ds_none_p "$L" test/n_elif.sh     "an elif chain: a crash takes the final else (a failure), not a pass"
+ds_none_p "$L" test/n_ifand.sh    "a positive on the same capture in an if condition of &&-joined greps guards it (rv §1c, wrapverbscheck:271)"
+ds_none_p "$L" test/n_elifpos.sh  "a positive on the same capture in an elif condition guards it (rv §1c, ensemblecheck:371)"
+ds_none_p "$L" test/n_helper.sh   "a positive on the same capture through a script-defined function guards it (rv §1c, qddialscheck:323)"
+ds_none_p "$L" test/n_fileredirect.sh "an absence read off a FILE a run redirected into is not judged (stated floor, redactcheck:81)"
+for f in t_orcond t_undefhelper t_reassign; do
+    ds_has_p "$L" vacuous-assert "test/$f.sh" minor
+done
 gating_split "$L" 0
 
 # ── 5) SURFACES: legend, help, MCP, skill and docs; JSON twin; MCP; the ack identity of a facet ───────────
@@ -1427,6 +1664,59 @@ if [ "$QD_OK" = 1 ]; then
     if [ "$left" = 0 ]; then ok "$L ack kind: both facets are suppressed by the kind token"; else no "$L ack kind: $left defect-shape rows survived --ack-only=defect-shape: $( ds_rows | head -2 )"; fi
 fi
 gating_split "$L ack kind" 0
+
+#   Ack identity, the next layer (checklist 16; rv-cr-qd-kinds-068 §3, fixture p2/ack): the ack key is the anchor,
+#   the facet AND the anchor's site set of that facet, so an ack covers exactly the defect it named. (a) swap: defect
+#   A is acked and committed with the ledger, then A is fixed and a DIFFERENT defect B lands in the same function →
+#   B's row stands and gates, and A's ack is listed stale (finding-gone). (b) beside: A is acked, then B is added
+#   NEXT to the untouched A → the row re-reports (now=2). (c) unchanged: A acked and left alone stays suppressed,
+#   and its ack is not stale.
+L="ack swap"
+fx_init swap
+cat >"$WORK/swap/a.cpp" <<'EOF'
+#include <format>
+#include <string>
+std::string legend( int a, int b, int c )
+{
+    std::string s = std::format( "a={} b={}", a, b );
+    return s + std::format( "c={}", c );
+}
+EOF
+fx_commit swap
+sed -i.bak 's|"a={} b={}", a, b )|"a={} b={}", a, b, c )|' "$WORK/swap/a.cpp" && rm -f "$WORK/swap/a.cpp.bak"
+fx_run swap
+ds_has "$L premise" format-arity legend gating
+( cd "$WORK/swap" && "$BIN" . --quality-delta --no-cache --ack-only=format-arity --quality-ack="defect A, accepted for this fixture" >/dev/null 2>&1 )
+ARC=$?
+if [ "$ARC" = 0 ]; then ok "$L: --ack-only=format-arity acked defect A (exit 0)"; else no "$L: --ack-only=format-arity exited $ARC"; fi
+fx_copy swap swap_beside
+fx_run swap
+if [ "$QD_OK" = 1 ]; then
+    if [ -z "$( ds_row format-arity legend )" ]; then ok "$L unchanged: the acked, unchanged defect A stays suppressed"; else no "$L unchanged: acked A re-reported: $( ds_row format-arity legend )"; fi
+    st="$( hdr_attr stale )"
+    if [ "$st" = 0 ]; then ok "$L unchanged: the ack of A is not stale while A stands"; else no "$L unchanged: stale=${st:-<none>} while the acked A stands"; fi
+fi
+( cd "$WORK/swap" && git add -A >/dev/null 2>&1 && git commit -qm "defect A + its ack" >/dev/null 2>&1 ) || no "$L: committing A and its ack failed"
+cat >"$WORK/swap/a.cpp" <<'EOF'
+#include <format>
+#include <string>
+std::string legend( int a, int b, int c )
+{
+    std::string s = std::format( "a={} b={}", a, b );
+    return s + std::format( "c={}", c, a );
+}
+EOF
+fx_run swap
+ds_has "$L swapped" format-arity legend gating
+if [ "$QD_OK" = 1 ]; then
+    if printf '%s' "$QD_OUT" | tr '>' '\n' | grep '<sa ' | grep 'kind="defect-shape"' | grep -q 'why="finding-gone"'; then ok "$L swapped: the ack of the fixed A is listed stale (finding-gone)"
+    else no "$L swapped: no finding-gone sa row for the ack of the fixed A"; fi
+    if [ "$( hdr_attr acked )" = 0 ]; then ok "$L swapped: nothing is acked (A's ack does not cover B)"; else no "$L swapped: acked=$( hdr_attr acked ) — A's ack covered B"; fi
+fi
+sed -i.bak 's|"c={}", c )|"c={}", c, a )|' "$WORK/swap_beside/a.cpp" && rm -f "$WORK/swap_beside/a.cpp.bak"
+fx_run swap_beside
+ds_has "$L beside" format-arity legend gating
+ds_wasnow "$L beside" format-arity legend 0 2
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

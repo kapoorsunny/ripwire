@@ -29,27 +29,37 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 - `vacuous-assert` (Bash test scripts): an absence assertion read off a run whose failure is never checked, so a
   crash reads as PASS.
 
-A site is new only when its normalized text is not among the baseline's sites of that shape, repo-wide: a moved or
-renamed defect is not new, an edited one is. **New-symbol rows never gate, except defect-shape format-arity**: a
+A site is new only when its normalized text occurs more often than among the baseline's sites of that shape,
+repo-wide: a moved or renamed defect is not new, an edited one is, and so is a second identical copy. **New-symbol rows never gate, except defect-shape format-arity**: a
 placeholder/argument mismatch is a defect, not debt, so it gates on new code too. The exit predicate lives in one
 place (`quality::rowGates`) and every surface asks it — `gating=` and the row's `gating`, `--json` / MCP `"gating"`,
 `--ack-only=gating`, the scoped-out and allow-dirty counts, the stderr line. `utf8-cut`, `dedup-first` and
 `vacuous-assert` are always `sev="minor"`: report-only by facet, not by size. `--ack-only=FACET` acks one shape; the
-ack key carries the facet, so acking one shape never suppresses another on the same definition.
+ack key carries the facet AND the definition's sites of that shape, so an ack covers exactly the defects it named:
+it never suppresses another shape, nor a different defect of the same shape swapped or added into the same definition
+(that row re-reports and the old ack is listed stale).
 
 Measured on the eight review findings it was built from: recall 7/8 (format-arity 2/2 on the train-25 keep-both merge,
 utf8-cut 1/1, dedup-first 1/1, vacuous-assert 3/4 — the fourth sits beside a later check on content derived from the
 same run, which already fails the script on a crash). With every site of a tree treated as new: format-arity 0 false
 positives on this tree (1,330 literal-format calls), on the Python 3.13 standard library (405 `"…".format(` calls)
-and on libc++'s std::format tests (80 calls; its 24 hits are the deliberately ill-formed `.verify.cpp` calls);
-vacuous-assert 49 rows on this tree's gates, every one an absence read off an unchecked run (sample 30/30, Wilson 95%
-lower bound 0.89). The `tools/list` manifest grows 46,732 → 46,793 B: the quality_delta description counts 12 kinds and
+and on libc++'s std::format tests (80 calls; its 24 hits are the deliberately ill-formed `.verify.cpp` calls), and 0
+false rows on a review's 76 adversarial candidate shapes plus the gate's 19 macro / preprocessor / escape near-misses
+(an argument that may be a macro expanding to an argument list, `#ifdef` arms inside the call, `#if 0`,
+`"\x7b\x7d"`): when the argument count cannot be known the call is skipped, never guessed. vacuous-assert: 46 rows (66 sites) on this tree's gates, each an absence read off an
+unchecked run; sample 30/30, Wilson 95% lower bound 0.89. An absence beside a positive on the same capture — an
+`if`/`elif` condition of `&&`-joined greps, or a grep through a function the script defines — is guarded (a crash
+fails the positive); before that guard the same tree gave 49 rows, of which 3 were such false positives (a seeded
+sample of 28/30, lower bound 0.79). The `tools/list` manifest grows 46,732 → 46,793 B: the quality_delta description counts 12 kinds and
 states the format-arity exception.
 
 Not checked, so no row there is no verdict: Python %-formatting and f-strings; a format in a named constant, a macro
 or a runtime wrapper; a pack expansion; an unqualified `format()`; the `std::print` ostream overload; a named dedup
 predicate; a utf8 cut in a function that backs off a continuation byte anywhere; a run behind a script-defined
-wrapper function or a text utility reading a file. The qsnap blob scheme moves 17 → 18; the legend dictionary gains
+wrapper function or a text utility reading a file; an absence read off a FILE a run redirected into (`"$BIN" … >"$TMP/f"`,
+then `grep -q PAT "$TMP/f"`) — the gates' most common output form, the next candidate; an argument that may be a macro
+(a name the file or tree `#define`s, or an ALL_CAPS name followed by `(`), a call with a preprocessor directive inside
+it or under `#if 0`, an escape that spells a brace. The qsnap blob scheme moves 17 → 18; the legend dictionary gains
 `r defect=` (785 entries).
 
 ### Changed — a Ruby call to self, or on an instance the code builds, answers from its own side: an instance never reaches `def self.m`

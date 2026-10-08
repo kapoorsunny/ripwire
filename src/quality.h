@@ -1030,18 +1030,48 @@ inline std::uint64_t defectSiteValue( defectshape::Facet f, std::string_view tex
     return v;
 }
 
-// A defect-shape ROW's identity — the ack key: the anchor AND the facet, so a format-arity ack and a utf8-cut
-// ack on one definition are two acks (checklist 16: a facet is part of the finding, not a label on it).
-// fnv1a64 over the anchor's bytes and the facet name: no wrapping multiply of our own (-fsanitize=integer).
-inline std::uint64_t defectRowKey( std::uint64_t anchor, defectshape::Facet f )
+// A defect-shape ROW's identity — the ack key: the anchor, the facet AND the identities of the anchor's sites of
+// that facet (each a defectSiteValue: facet + normalized offending text), so an ack covers exactly the defects it
+// named (checklist 16). A format-arity ack and a utf8-cut ack on one definition are two acks; and an ack of
+// defect A does not cover a different defect B swapped into the same definition, nor a second site added beside
+// A — any change to the anchor's site set of that facet re-reports. `siteVals` is that set, ascending, copies
+// included (a multiset). fnv1a64 over the bytes: no wrapping multiply of our own (-fsanitize=integer).
+// Ledgers: the line format is unchanged; an ack written by an earlier build of this lane (key = anchor + facet)
+// matches no row, so its row re-reports and the ack is listed stale (finding-gone). No released build wrote one.
+inline std::uint64_t defectRowKey( std::uint64_t anchor, defectshape::Facet f, const std::vector<std::uint64_t>& siteVals )
 {
     std::string id( defectshape::facetName( f ) );
     id.push_back( '\0' );
-    for( int b = 0; b < 8; ++b )
+    const auto put = [ &id ]( std::uint64_t v )
     {
-        id.push_back( static_cast<char>( ( anchor >> ( 8 * b ) ) & 0xFFu ) );
+        for( int b = 0; b < 8; ++b )
+        {
+            id.push_back( static_cast<char>( ( v >> ( 8 * b ) ) & 0xFFu ) );
+        }
+    };
+    put( anchor );
+    for( std::uint64_t v : siteVals )
+    {
+        put( v );
     }
     return fnv1a64( id );
+}
+
+// The anchor's real sites of facet `f` in a key-sorted record list (records of one anchor are contiguous and
+// their site values ascending), for defectRowKey.
+template<class Range, class KeyOf>
+inline std::vector<std::uint64_t> defectSiteValsOf( const Range& sorted, std::uint64_t anchor, defectshape::Facet f, KeyOf keyOf )
+{
+    std::vector<std::uint64_t> vals;
+    for( const auto& rec : sorted )
+    {
+        const DefectSiteKey& k = keyOf( rec );
+        if( k.anchor == anchor && k.site != kDefectFilePresent && k.site != kDefectFileUnreadable && defectFacetOf( k.site ) == f )
+        {
+            vals.push_back( k.site );
+        }
+    }
+    return vals;
 }
 
 // One current-side site with what the delta needs to print it: the anchoring definition (kNoNode for a file
@@ -3471,7 +3501,10 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // v18 (lane/cr-qd-kinds-068, the defect-shape kind) — the blob gained the defect-shape (anchor, site) records
 // after publicApi: a BLOB SHAPE change. A v17 blob has none, so served here it would read every format-arity
 // site in the tree as newly added. Bumped by the v4/v5 rule (the producer identity already keeps this build's
-// blobs apart; the bump keeps the history above complete).
+// blobs apart; the bump keeps the history above complete). Fix round 1 of the same lane, still scheme 18 (18 never
+// shipped): defectSitesOf passes the tree's macro names to the C++ scanner, and the scanners skip more calls (an
+// argument that may be a macro, a directive inside the call, #if 0, a brace-spelling escape) and guard more
+// vacuous-assert absences — fewer records, the same blob shape; the producer identity keeps the builds apart.
 constexpr std::uint32_t kQSnapCacheScheme = 18;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
@@ -4671,6 +4704,18 @@ inline std::vector<DefectSiteAt> defectSitesOf( const IngestResult& ing, std::st
 {
     std::vector<DefectSiteAt> out;
     const SymbolsByFile byFile = symbolsByFileInIdOrder( ing, []( const Symbol& s ) { return s.endByte > s.sigStartByte && s.kind != SymKind::ModuleScope; } );
+    // format-arity's F1 skip: every macro the index holds in a C-family file, tree-wide (a call in one file may use
+    // a macro another file defines). Sorted, unique: the scanner binary-searches it.
+    std::vector<std::string> treeMacros;
+    for( const Symbol& s : ing.symbols )
+    {
+        if( s.kind == SymKind::Macro && ( s.lang == Lang::Cpp || s.lang == Lang::C || s.lang == Lang::ObjC ) )
+        {
+            treeMacros.push_back( s.name );
+        }
+    }
+    std::sort( treeMacros.begin(), treeMacros.end() );
+    treeMacros.erase( std::unique( treeMacros.begin(), treeMacros.end() ), treeMacros.end() );
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
         if( !fileIsInBaseline( fileInBaseline, f ) )
@@ -4707,7 +4752,7 @@ inline std::vector<DefectSiteAt> defectSitesOf( const IngestResult& ing, std::st
         std::vector<defectshape::Site> sites;
         if( lang == Lang::Cpp && defectshape::cppMayHoldShapes( src ) )
         {
-            sites = defectshape::scanCpp( src, fnSpans );
+            sites = defectshape::scanCpp( src, fnSpans, &treeMacros );
         }
         else if( lang == Lang::Python && src.find( ".format" ) != std::string_view::npos )
         {
@@ -7889,18 +7934,29 @@ inline std::optional<StaleAckWhy> staleForChurn( std::uint64_t key, const Snapsh
     return ( snap.bodyHashBySym.find( key ) == snap.bodyHashBySym.end() ) ? std::optional<StaleAckWhy>( StaleAckWhy::TargetGone ) : std::nullopt;
 }
 
-// defect-shape: the ack key is defectRowKey( anchor, facet ), so the facet is part of the finding's identity
-// (one ack never suppresses a different shape on the same definition). A key no current site produces is
-// finding-gone; the anchor cannot be recovered from the mixed key, so target-gone is never claimed (the
-// clone kinds' rule).
+// defect-shape: the ack key is defectRowKey( anchor, facet, the anchor's site set of that facet ), so the facet
+// and the very sites are part of the finding's identity (one ack never suppresses a different shape, or a
+// different defect of the same shape, on the same definition). A key no current (anchor, facet) site set
+// produces is finding-gone — the acked defect was fixed, or another site of that facet joined or replaced it;
+// the anchor cannot be recovered from the mixed key, so target-gone is never claimed (the clone kinds' rule).
 inline std::optional<StaleAckWhy> staleForDefectShape( std::uint64_t key, const Snapshot& snap )
 {
-    for( const DefectSiteKey& d : snap.defectSites )
+    const std::vector<DefectSiteKey>& sites = snap.defectSites;   // sorted by (anchor, site): one anchor's records are contiguous
+    const auto                        self  = []( const DefectSiteKey& d ) -> const DefectSiteKey& { return d; };
+    for( auto it = sites.begin(); it != sites.end(); )
     {
-        if( d.site != kDefectFilePresent && d.site != kDefectFileUnreadable && defectRowKey( d.anchor, defectFacetOf( d.site ) ) == key )
+        const auto                         end = std::find_if( it, sites.end(), [ & ]( const DefectSiteKey& d ) { return d.anchor != it->anchor; } );
+        const std::span<const DefectSiteKey> one( it, end );
+        for( std::size_t f = 0; f < defectshape::kFacetCount; ++f )
         {
-            return std::nullopt;
+            const auto                       facet = static_cast<defectshape::Facet>( f );
+            const std::vector<std::uint64_t> vals  = defectSiteValsOf( one, it->anchor, facet, self );
+            if( !vals.empty() && defectRowKey( it->anchor, facet, vals ) == key )
+            {
+                return std::nullopt;
+            }
         }
+        it = end;
     }
     return StaleAckWhy::FindingGone;
 }
@@ -8361,7 +8417,8 @@ inline void appendDefectShapeRows( std::vector<Regression>& regs, const IngestRe
                                       ? !existedAtBaseline( c.anchor )
                                       : !std::binary_search( base.defectSites.begin(), base.defectSites.end(), DefectSiteKey{ c.anchor, kDefectFilePresent } );
         const std::string   sym = ( owner != kNoNode && owner < g.canonId.size() && !g.canonId[owner].empty() ) ? g.canonId[owner] : rel;
-        regs.push_back( { "defect-shape", sym, was, now, defectRowKey( c.anchor, c.facet ), !defectshape::facetGatesOnAnyOrigin( c.facet ),
+        const std::uint64_t rowKey = defectRowKey( c.anchor, c.facet, defectSiteValsOf( nowSites, c.anchor, c.facet, []( const DefectSiteAt& d ) -> const DefectSiteKey& { return d.key; } ) );
+        regs.push_back( { "defect-shape", sym, was, now, rowKey, !defectshape::facetGatesOnAnyOrigin( c.facet ),
                           std::string( defectshape::facetName( c.facet ) ), isNew } );
         if( owner != kNoNode )
         {

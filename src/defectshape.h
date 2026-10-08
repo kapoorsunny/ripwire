@@ -176,10 +176,94 @@ inline std::size_t skipQuoted( std::string_view s, std::size_t i, char q ) noexc
     return s.size();
 }
 
+// What lexCpp saw of the preprocessor, for the format-arity skips (rv-cr-qd-kinds-068 F1/F2): the byte each
+// live directive starts at, and the names this file #defines (function-like or object-like).
+struct CppPreproc
+{
+    std::vector<std::uint32_t> directives;   // the '#' byte of each directive outside an #if 0 region, ascending
+    std::vector<std::string>   macros;       // every name a #define in this file defines; sorted, unique
+};
+
+// The identifier at s[i..] after spaces and tabs; advances i past it (empty when there is none).
+inline std::string_view ppWord( std::string_view s, std::size_t& i ) noexcept
+{
+    while( i < s.size() && ( s[i] == ' ' || s[i] == '\t' ) )
+    {
+        ++i;
+    }
+    const std::size_t b = i;
+    while( i < s.size() && isIdentChar( s[i] ) )
+    {
+        ++i;
+    }
+    return s.substr( b, i - b );
+}
+
+// `#if 0` (nothing but a comment after the 0): the region up to its own #else / #elif / #endif is dead code,
+// never compiled, so nothing in it is judged (F3). Returns the start of the line holding the directive that
+// ends the region (the caller lexes that directive as usual), or s.size() when the region never closes.
+inline std::size_t skipIfZeroRegion( std::string_view s, std::size_t lineEnd ) noexcept
+{
+    int depth = 0;
+    for( std::size_t ls = lineEnd; ls < s.size(); )
+    {
+        std::size_t j = ls;
+        while( j < s.size() && ( s[j] == ' ' || s[j] == '\t' ) )
+        {
+            ++j;
+        }
+        if( j < s.size() && s[j] == '#' )
+        {
+            ++j;
+            const std::string_view w = ppWord( s, j );
+            if( w == "if" || w == "ifdef" || w == "ifndef" )
+            {
+                ++depth;
+            }
+            else if( w == "endif" || w == "else" || w == "elif" || w == "elifdef" || w == "elifndef" )
+            {
+                if( depth == 0 )
+                {
+                    return ls;
+                }
+                depth -= ( w == "endif" ) ? 1 : 0;
+            }
+        }
+        const std::size_t nl = s.find( '\n', ls );
+        ls                   = ( nl == std::string_view::npos ) ? s.size() : nl + 1;
+    }
+    return s.size();
+}
+
+// The directive at s[hash] is `#if 0`, alone on its line but for a comment.
+inline bool isIfZero( std::string_view s, std::size_t hash ) noexcept
+{
+    std::size_t j = hash + 1;
+    if( ppWord( s, j ) != "if" )
+    {
+        return false;
+    }
+    while( j < s.size() && ( s[j] == ' ' || s[j] == '\t' ) )
+    {
+        ++j;
+    }
+    if( j >= s.size() || s[j] != '0' )
+    {
+        return false;
+    }
+    ++j;
+    while( j < s.size() && ( s[j] == ' ' || s[j] == '\t' || s[j] == '\r' ) )
+    {
+        ++j;
+    }
+    return j >= s.size() || s[j] == '\n' || ( s[j] == '/' && j + 1 < s.size() && ( s[j + 1] == '/' || s[j + 1] == '*' ) );
+}
+
 // C++ tokens with comments and preprocessor directives dropped. A directive is skipped whole (continuation
 // lines included): a format inside a macro body is never judged — its arguments are whatever the expansion
-// site passes.
-inline std::vector<Tok> lexCpp( std::string_view s )
+// site passes. An `#if 0` region is dropped whole (F3). `pp`, when given, receives each directive's byte and
+// the names this file #defines.
+inline std::vector<Tok> lexCpp( std::string_view s, CppPreproc* pp = nullptr )
 {
     std::vector<Tok> out;
     std::size_t      i         = 0;
@@ -214,10 +298,28 @@ inline std::vector<Tok> lexCpp( std::string_view s )
         }
         if( c == '#' && lineStart )
         {
+            const std::size_t hash = i;
+            if( pp != nullptr )
+            {
+                pp->directives.push_back( static_cast<std::uint32_t>( hash ) );
+                std::size_t j = hash + 1;
+                if( ppWord( s, j ) == "define" )
+                {
+                    const std::string_view name = ppWord( s, j );
+                    if( !name.empty() )
+                    {
+                        pp->macros.emplace_back( name );
+                    }
+                }
+            }
             // the directive runs to the first newline a backslash does not continue
             while( i < s.size() && !( s[i] == '\n' && ( i == 0 || s[i - 1] != '\\' ) ) )
             {
                 ++i;
+            }
+            if( isIfZero( s, hash ) )
+            {
+                i = skipIfZeroRegion( s, i < s.size() ? i + 1 : i );
             }
             continue;
         }
@@ -295,22 +397,58 @@ inline std::vector<Tok> lexCpp( std::string_view s )
         out.push_back( { TokKind::Punct, b, b + n, b, b + n } );
         i += n;
     }
+    if( pp != nullptr )
+    {
+        std::sort( pp->macros.begin(), pp->macros.end() );
+        pp->macros.erase( std::unique( pp->macros.begin(), pp->macros.end() ), pp->macros.end() );
+    }
     return out;
 }
 
-// Python tokens with comments dropped (newlines are not tokens: an implicit concat inside parentheses spans
-// lines, and the shapes read here never need statement boundaries).
+// One Python string literal: its prefix starts at `b`, its opening quote sits at `q`. Single-quoted literals end at
+// their quote or the line's end; a backslash escapes the next byte for the scan (raw literals included).
+inline Tok lexPythonString( std::string_view s, std::uint32_t b, std::size_t q )
+{
+    const char        quote  = s[q];
+    const bool        triple = s.substr( q, 3 ) == std::string( 3, quote );
+    const std::size_t cb     = q + ( triple ? 3 : 1 );
+    std::size_t       j      = cb;
+    while( j < s.size() && !( triple ? s.substr( j, 3 ) == std::string( 3, quote ) : ( s[j] == quote || s[j] == '\n' ) ) )
+    {
+        j += ( s[j] == '\\' ) ? 2 : 1;
+    }
+    const std::size_t ce  = std::min( j, s.size() );
+    const std::size_t end = std::min( s.size(), j + ( j < s.size() && s[j] != '\n' ? ( triple ? 3 : 1 ) : 0 ) );
+    return { TokKind::String, b, static_cast<std::uint32_t>( end ), static_cast<std::uint32_t>( cb ), static_cast<std::uint32_t>( ce ) };
+}
+
+// Python tokens with comments dropped. A newline inside brackets is not a token (an implicit concat inside
+// parentheses spans lines), and neither is a backslash-continued one; a newline that ENDS a logical line (outside
+// every bracket) is one "\n" token, so two statements' adjacent literals are never read as one concat
+// (X = "a {}" on one line, "{}".format( 1 ) on the next).
 inline std::vector<Tok> lexPython( std::string_view s )
 {
     std::vector<Tok> out;
-    std::size_t      i = 0;
+    std::size_t      i     = 0;
+    int              depth = 0;
     const auto       isPrefixChar = []( char c ) { return c == 'r' || c == 'R' || c == 'b' || c == 'B' || c == 'u' || c == 'U' || c == 'f' || c == 'F'; };
     while( i < s.size() )
     {
         const char c = s[i];
+        if( c == '\n' && depth == 0 )
+        {
+            if( !out.empty() && !tokIs( s, out.back(), "\n" ) )
+            {
+                const std::uint32_t nl = static_cast<std::uint32_t>( i );
+                out.push_back( { TokKind::Punct, nl, nl + 1, nl, nl + 1 } );   // a logical line ends
+            }
+            ++i;
+            continue;
+        }
         if( isSpace( c ) || c == '\\' )
         {
-            ++i;
+            // a backslash-continued newline is skipped with its backslash: one logical line
+            i += ( c == '\\' && s.substr( i + 1, 1 ) == "\n" ) ? 2 : ( c == '\\' && s.substr( i + 1, 2 ) == "\r\n" ) ? 3 : 1;
             continue;
         }
         if( c == '#' )
@@ -329,31 +467,8 @@ inline std::vector<Tok> lexPython( std::string_view s )
         }
         if( q < s.size() && ( s[q] == '"' || s[q] == '\'' ) && ( q == i || !isIdentChar( i > 0 ? s[i - 1] : ' ' ) ) )
         {
-            const char  quote  = s[q];
-            const bool  triple = s.substr( q, 3 ) == std::string( 3, quote );
-            std::size_t j      = q + ( triple ? 3 : 1 );
-            const std::size_t cb = j;
-            while( j < s.size() )
-            {
-                if( s[j] == '\\' )
-                {
-                    j += 2;
-                    continue;
-                }
-                if( triple ? s.substr( j, 3 ) == std::string( 3, quote ) : s[j] == quote )
-                {
-                    break;
-                }
-                if( !triple && s[j] == '\n' )
-                {
-                    break;
-                }
-                ++j;
-            }
-            const std::size_t ce  = std::min( j, s.size() );
-            const std::size_t end = std::min( s.size(), j + ( j < s.size() && s[j] != '\n' ? ( triple ? 3 : 1 ) : 0 ) );
-            out.push_back( { TokKind::String, b, static_cast<std::uint32_t>( end ), static_cast<std::uint32_t>( cb ), static_cast<std::uint32_t>( ce ) } );
-            i = end;
+            out.push_back( lexPythonString( s, b, q ) );
+            i = out.back().end;
             continue;
         }
         if( isIdentStart( c ) )
@@ -380,6 +495,11 @@ inline std::vector<Tok> lexPython( std::string_view s )
         }
         const std::uint32_t n = punctLen( s, i );
         out.push_back( { TokKind::Punct, b, b + n, b, b + n } );
+        if( n == 1 )
+        {
+            depth += ( c == '(' || c == '[' || c == '{' ) ? 1 : 0;
+            depth -= ( ( c == ')' || c == ']' || c == '}' ) && depth > 0 ) ? 1 : 0;
+        }
         i += n;
     }
     return out;
@@ -554,8 +674,8 @@ inline bool readArgId( std::string_view s, std::size_t& i, FieldUse& use, bool a
 }
 
 // The std::format / fmt / Python str.format replacement-field grammar, over the literal's content as written
-// (escape sequences do not produce braces, except Python's \N{...}, which is skipped). `python` selects the
-// Python field-name and conversion syntax.
+// (Python's \N{...} is skipped; a literal with an escape that spells a brace never reaches here — see
+// escapeSpellsBrace). `python` selects the Python field-name and conversion syntax.
 inline FieldUse parseFields( std::string_view s, bool python )
 {
     FieldUse use;
@@ -693,6 +813,11 @@ inline const FormatFamily* formatFamilyAt( std::string_view src, const std::vect
     {
         return nullptr;
     }
+    if( k >= 4 && tokIs( src, toks[k - 3], "::" ) && toks[k - 4].kind == TokKind::Ident && !tokIs( src, toks[k - 4], "return" )
+        && !tokIs( src, toks[k - 4], "co_return" ) && !tokIs( src, toks[k - 4], "throw" ) )
+    {
+        return nullptr;   // other::std::format names some other namespace's std, not the family; ::std::format still is
+    }
     const std::string_view ns   = tokText( src, toks[k - 2] );
     const std::string_view name = tokText( src, toks[k] );
     for( const FormatFamily& f : kFormatFamilies )
@@ -714,11 +839,60 @@ inline bool isAllCapsIdent( std::string_view w ) noexcept
     return std::all_of( w.begin(), w.end(), []( char c ) { return ( c >= 'A' && c <= 'Z' ) || isDigit( c ) || c == '_'; } );
 }
 
+inline bool inSortedNames( const std::vector<std::string>* names, std::string_view w )
+{
+    if( names == nullptr )
+    {
+        return false;
+    }
+    const auto it = std::lower_bound( names->begin(), names->end(), w, []( const std::string& a, std::string_view b ) { return std::string_view( a ) < b; } );
+    return it != names->end() && *it == w;
+}
+
+// The macro names an argument is judged against (F1): this file's #defines (CppPreproc::macros) and the
+// tree's — every macro definition the index holds in a C-family file (the C++ grammar indexes function-like
+// macros; the C grammar both kinds). Either list may be absent.
+struct MacroNames
+{
+    const std::vector<std::string>* file = nullptr;
+    const std::vector<std::string>* tree = nullptr;
+};
+
+// F1: an identifier outside every bracket of the argument [first, last] that may be a macro expanding to an
+// argument LIST — one the file or the tree #defines, or an ALL_CAPS one followed by '(' (SRC_LOC(), VEC3( v ))
+// whose definition is not visible. A member or qualified name (x.f(, ns::F() is never a macro.
+inline bool argMayBeMacroList( std::string_view src, const std::vector<Tok>& toks, const ArgRange& a, const MacroNames& macros )
+{
+    int depth = 0;
+    for( std::size_t k = a.first; k <= a.last; ++k )
+    {
+        const Tok& t = toks[k];
+        if( t.kind == TokKind::Punct && t.end - t.begin == 1 )
+        {
+            const char c = src[ t.begin ];
+            depth += ( c == '(' || c == '[' || c == '{' ) ? 1 : ( c == ')' || c == ']' || c == '}' ) ? -1 : 0;
+        }
+        const bool qualified = k > a.first && ( tokIs( src, toks[k - 1], "::" ) || tokIs( src, toks[k - 1], "." ) || tokIs( src, toks[k - 1], "->" ) );
+        if( depth != 0 || t.kind != TokKind::Ident || qualified )
+        {
+            continue;
+        }
+        const std::string_view w      = tokText( src, t );
+        const bool             called = k < a.last && tokIs( src, toks[k + 1], "(" );
+        if( inSortedNames( macros.file, w ) || inSortedNames( macros.tree, w ) || ( called && isAllCapsIdent( w ) ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 // An argument whose count is unknowable here: a pack expansion, __VA_ARGS__, an all-caps identifier alone (an
-// object-like macro may expand to a comma list), or more '<' than '>' (a template argument list the comma split
-// may have cut: std::pair<int, int>{} splits as "std::pair<int" and "int>{}"). A lone '>' is a comparison
-// (n > 0) and does not make the count unknowable.
-inline bool argCountUnknowable( std::string_view src, const std::vector<Tok>& toks, const ArgRange& a ) noexcept
+// object-like macro may expand to a comma list), more '<' than '>' (a template argument list the comma split
+// may have cut: std::pair<int, int>{} splits as "std::pair<int" and "int>{}"), or an identifier that may be a
+// macro expanding to an argument list (argMayBeMacroList, F1). A lone '>' is a comparison (n > 0) and does not
+// make the count unknowable.
+inline bool argCountUnknowable( std::string_view src, const std::vector<Tok>& toks, const ArgRange& a, const MacroNames& macros )
 {
     if( a.empty() )
     {
@@ -742,7 +916,102 @@ inline bool argCountUnknowable( std::string_view src, const std::vector<Tok>& to
         angle += tokIs( src, toks[k], "<" ) ? 1 : 0;
         angle -= tokIs( src, toks[k], ">" ) ? 1 : 0;
     }
-    return angle > 0;
+    return angle > 0 || argMayBeMacroList( src, toks, a, macros );
+}
+
+// True when a backslash escape in `content` (an ordinary, non-raw literal) spells a brace: \x7b, \173, \u007d,
+// \N{LEFT CURLY BRACKET}, a C++23 delimited \x{..} / \o{..} / \u{..} (never decoded, assumed to). The field
+// grammar reads a literal as WRITTEN, so such a literal's fields are not knowable here — the call is skipped.
+// Python's \xHH takes exactly two digits; C++'s takes every hex digit that follows.
+inline bool escapeSpellsBrace( std::string_view content, bool python ) noexcept
+{
+    const auto hexVal = []( char c ) -> int
+    {
+        if( c >= '0' && c <= '9' ) { return c - '0'; }
+        if( c >= 'a' && c <= 'f' ) { return c - 'a' + 10; }
+        if( c >= 'A' && c <= 'F' ) { return c - 'A' + 10; }
+        return -1;
+    };
+    for( std::size_t i = 0; i + 1 < content.size(); ++i )
+    {
+        if( content[i] != '\\' )
+        {
+            continue;
+        }
+        const char e = content[i + 1];
+        std::uint32_t v      = 0x110000;   // "no code point" unless an escape below decodes one
+        std::size_t   j      = i + 2;
+        std::size_t   maxLen = 0;
+        int           base   = 16;
+        if( ( e == 'x' || e == 'o' || e == 'u' || e == 'N' ) && j < content.size() && content[j] == '{' )
+        {
+            if( e != 'N' || !python )
+            {
+                return true;   // a delimited escape (C++23 \x{..}, \o{..}, \u{..}, \N{..})
+            }
+            const std::size_t close = content.find( '}', j );
+            std::string        name( content.substr( j + 1, close == std::string_view::npos ? 0 : close - j - 1 ) );
+            std::ranges::transform( name, name.begin(), []( char ch ) { return static_cast<char>( std::toupper( static_cast<unsigned char>( ch ) ) ); } );
+            if( name == "LEFT CURLY BRACKET" || name == "RIGHT CURLY BRACKET" )
+            {
+                return true;
+            }
+            ++i;
+            continue;
+        }
+        if( e == 'x' )
+        {
+            maxLen = python ? 2 : 8;
+        }
+        else if( e == 'u' )
+        {
+            maxLen = 4;
+        }
+        else if( e == 'U' )
+        {
+            maxLen = 8;
+        }
+        else if( e >= '0' && e <= '7' )
+        {
+            j      = i + 1;
+            maxLen = 3;
+            base   = 8;
+        }
+        else
+        {
+            ++i;   // \\, \", \n …: one escaped byte, never a brace
+            continue;
+        }
+        std::uint32_t acc = 0;
+        std::size_t   n   = 0;
+        while( j < content.size() && n < maxLen )
+        {
+            const int d = hexVal( content[j] );
+            if( d < 0 || d >= base )
+            {
+                break;
+            }
+            acc = acc * static_cast<std::uint32_t>( base ) + static_cast<std::uint32_t>( d );
+            ++j;
+            ++n;
+        }
+        if( n > 0 )
+        {
+            v = acc;
+        }
+        if( v == 0x7B || v == 0x7D )
+        {
+            return true;
+        }
+        i = j - 1;
+    }
+    return false;
+}
+
+// A C++ string token is raw when its prefix (the bytes before the quote) holds an R.
+inline bool isRawCppLiteral( std::string_view src, const Tok& t ) noexcept
+{
+    return src.substr( t.begin, t.contentBegin - t.begin ).find( 'R' ) != std::string_view::npos;
 }
 
 // The argument's tokens are one or more adjacent string literals → their concatenated content; else empty
@@ -760,14 +1029,28 @@ inline bool literalContent( std::string_view src, const std::vector<Tok>& toks, 
         {
             return false;
         }
+        if( !isRawCppLiteral( src, toks[k] ) && escapeSpellsBrace( tokContent( src, toks[k] ), false ) )
+        {
+            return false;   // "\x7b\x7d" is "{}": a field the as-written grammar cannot see — skipped, never guessed
+        }
         out.append( tokContent( src, toks[k] ) );
     }
     return true;
 }
 
-inline void scanFormatArityCpp( std::string_view src, const std::vector<Tok>& toks, std::vector<Site>& out )
+// F2: a preprocessor directive between the call's parentheses — the tokens of every #if arm are concatenated
+// here, so the argument count is no arm's count. Skipped.
+inline bool callHoldsDirective( const std::vector<std::uint32_t>& directives, std::uint32_t open, std::uint32_t close ) noexcept
 {
-    std::string fmt;
+    const auto it = std::lower_bound( directives.begin(), directives.end(), open );
+    return it != directives.end() && *it < close;
+}
+
+inline void scanFormatArityCpp( std::string_view src, const std::vector<Tok>& toks, const CppPreproc& pp, const std::vector<std::string>* treeMacros,
+                                std::vector<Site>& out )
+{
+    std::string      fmt;
+    const MacroNames macros{ &pp.macros, treeMacros };
     for( std::size_t k = 2; k + 1 < toks.size(); ++k )
     {
         const FormatFamily* fam = formatFamilyAt( src, toks, k );
@@ -776,7 +1059,7 @@ inline void scanFormatArityCpp( std::string_view src, const std::vector<Tok>& to
             continue;
         }
         const std::size_t close = matchClose( src, toks, k + 1 );
-        if( close >= toks.size() )
+        if( close >= toks.size() || callHoldsDirective( pp.directives, toks[k + 1].begin, toks[close].begin ) )
         {
             continue;
         }
@@ -796,10 +1079,11 @@ inline void scanFormatArityCpp( std::string_view src, const std::vector<Tok>& to
         {
             continue;
         }
+        // every argument, the ones before the format too: a macro there may shift the format's index
         bool unknowable = false;
-        for( std::size_t a = fi + 1; a < args.size(); ++a )
+        for( std::size_t a = 0; a < args.size(); ++a )
         {
-            unknowable = unknowable || argCountUnknowable( src, toks, args[a] );
+            unknowable = unknowable || ( a != fi && argCountUnknowable( src, toks, args[a], macros ) );
         }
         const FieldUse use = parseFields( fmt, false );
         if( unknowable || !use.ok )
@@ -827,6 +1111,12 @@ inline bool pyStringPrefixOk( std::string_view src, const Tok& t ) noexcept
         }
     }
     return true;
+}
+
+inline bool pyStringIsRaw( std::string_view src, const Tok& t ) noexcept
+{
+    const std::string_view prefix = src.substr( t.begin, t.contentBegin - t.begin );
+    return prefix.find( 'r' ) != std::string_view::npos || prefix.find( 'R' ) != std::string_view::npos;
 }
 
 // A keyword before '(' makes the parentheses a grouping (return ( "a" "b" ).format(…)), not a call.
@@ -889,7 +1179,20 @@ inline void scanFormatArityPython( std::string_view src, const std::vector<Tok>&
         for( std::size_t p = firstLit; p <= lastLit; ++p )
         {
             prefixOk = prefixOk && pyStringPrefixOk( src, toks[p] );
-            fmt.append( tokContent( src, toks[p] ) );
+            const std::string_view content = tokContent( src, toks[p] );
+            if( pyStringIsRaw( src, toks[p] ) )
+            {
+                // a raw literal has no escapes: r"\N{a}" is a backslash, an N and the field {a} — the \N{...} skip in
+                // parseFields must not see a backslash here
+                const std::size_t from = fmt.size();
+                fmt.append( content );
+                std::replace( fmt.begin() + static_cast<std::ptrdiff_t>( from ), fmt.end(), '\\', ' ' );
+            }
+            else
+            {
+                prefixOk = prefixOk && !escapeSpellsBrace( content, true );   // "\x7b\x7d" is "{}": not judged
+                fmt.append( content );
+            }
         }
         const std::size_t close = matchClose( src, toks, k + 2 );
         if( !prefixOk || close >= toks.size() )
@@ -2025,6 +2328,7 @@ struct ShAssert
     std::size_t line = 0;
     GrepPipe    pipe;
     Polarity    pol  = Polarity::None;
+    bool        sameCapture = false;   // a guard-only requirement (shGuardRequirements): it guards only the capture that reaches it
 };
 
 inline std::vector<ShAssert> shAssertions( const ShLineToks& lt, const std::vector<std::pair<std::string, Reporter>>& defined )
@@ -2140,6 +2444,195 @@ inline std::vector<ShAssert> shAssertions( const ShLineToks& lt, const std::vect
     return out;
 }
 
+// Requirements the absence scan does not read as assertions but that still GUARD a capture (rv-cr-qd-kinds-068
+// §1c, the kind's own rule: a crash empties the text, so a positive on that text fails the script): an if / elif
+// condition of &&-joined greps on the text whose then-branch passes (if echo "$V" | grep -q A && echo "$V" |
+// grep -qF B; then ok), and a grep on the text through a function the script defines (rows "$V" | grep -q P &&
+// ok). Requirements only — never an absence row — and each guards only the SAME capture (the assignment of the
+// variable that reaches it is the one that reaches the absence; a reassigned variable is a different run). Not
+// read as guards (a crash can still pass): a condition with || in it, a helper the script does not define, a
+// helper given more than one variable.
+inline GrepPipe guardPipe( const std::vector<ShTok>& t, std::size_t b, std::size_t e, const std::vector<std::pair<std::string, Reporter>>& defined )
+{
+    GrepPipe g = grepPipe( t, b, e );
+    if( g.ok )
+    {
+        return g;
+    }
+    GrepPipe    h;
+    std::size_t s = b;
+    while( s < e && !t[s].op && ( t[s].text == "{" || t[s].text == "(" ) )
+    {
+        ++s;
+    }
+    if( s < e && t[s].op && t[s].text == "!" )
+    {
+        h.negated = true;
+        ++s;
+    }
+    if( s >= e || t[s].op
+        || std::none_of( defined.begin(), defined.end(), [ & ]( const std::pair<std::string, Reporter>& d ) { return d.first == t[s].text; } ) )
+    {
+        return h;
+    }
+    std::size_t p0e = s + 1;
+    while( p0e < e && !( t[p0e].op && t[p0e].text == "|" ) )
+    {
+        ++p0e;
+    }
+    if( p0e >= e )
+    {
+        return h;
+    }
+    std::string_view v;
+    std::size_t      vars = 0;
+    for( std::size_t k = s + 1; k < p0e; ++k )
+    {
+        const std::string_view r = varRef( t[k].text );
+        if( !r.empty() )
+        {
+            v = r;
+            ++vars;
+        }
+        else if( t[k].text.find( "$(" ) != std::string::npos )
+        {
+            return h;
+        }
+    }
+    std::size_t last = p0e + 1;
+    for( std::size_t k = p0e + 1; k < e; ++k )
+    {
+        if( t[k].op && t[k].text == "|" )
+        {
+            last = k + 1;
+        }
+    }
+    std::size_t operands = 0;
+    if( vars != 1 || !isQuietGrep( t, last, e, operands ) || operands > 1 )
+    {
+        return h;
+    }
+    h.var = std::string( v );
+    h.ok  = true;
+    return h;
+}
+
+inline std::vector<ShAssert> shGuardRequirements( const ShLineToks& lt, const std::vector<std::pair<std::string, Reporter>>& defined )
+{
+    std::vector<ShAssert> out;
+    const auto keep = [ & ]( std::size_t li, const GrepPipe& g, Reporter onMatchSide, Reporter onOther )
+    {
+        if( g.ok && !g.direct && !g.var.empty() && polarityOf( g.negated, onMatchSide, onOther ) == Polarity::Requirement )
+        {
+            out.push_back( { li, g, Polarity::Requirement, true } );
+        }
+    };
+    for( std::size_t li = 0; li < lt.size(); ++li )
+    {
+        const std::vector<ShTok>& t = lt[li];
+        if( t.empty() || t[0].op )
+        {
+            continue;
+        }
+        if( t[0].text == "if" || t[0].text == "elif" )
+        {
+            std::vector<ShTok> st;
+            for( std::size_t j = li; j < lt.size() && j < li + 80; ++j )
+            {
+                st.insert( st.end(), lt[j].begin(), lt[j].end() );
+                st.push_back( { ";", true } );
+            }
+            std::size_t thenAt = 1;
+            while( thenAt < st.size() && !( !st[thenAt].op && st[thenAt].text == "then" ) )
+            {
+                ++thenAt;
+            }
+            std::size_t condEnd = thenAt;
+            while( condEnd > 1 && st[condEnd - 1].op && st[condEnd - 1].text == ";" )
+            {
+                --condEnd;
+            }
+            const bool hasOr = std::any_of( st.begin() + 1, st.begin() + static_cast<std::ptrdiff_t>( condEnd ),
+                                            []( const ShTok& w ) { return w.op && ( w.text == "||" || w.text == ";" ); } );
+            if( thenAt >= st.size() || hasOr )
+            {
+                continue;
+            }
+            // the else reporter only for an `if` with no elif chain (an elif's else is the chain's)
+            Reporter onElse = Reporter::None;
+            if( t[0].text == "if" )
+            {
+                std::size_t elseAt  = st.size();
+                bool        hasElif = false;
+                int         depth   = 0;
+                for( std::size_t k = 0; k < st.size(); ++k )
+                {
+                    if( st[k].op )
+                    {
+                        continue;
+                    }
+                    const std::string& w = st[k].text;
+                    if( w == "if" )
+                    {
+                        ++depth;
+                    }
+                    else if( w == "fi" && --depth == 0 )
+                    {
+                        break;
+                    }
+                    else if( depth == 1 && w == "elif" )
+                    {
+                        hasElif = true;
+                    }
+                    else if( depth == 1 && w == "else" )
+                    {
+                        elseAt = k;
+                    }
+                }
+                onElse = ( !hasElif && elseAt < st.size() ) ? reporterOf( st, elseAt + 1, defined ) : Reporter::None;
+            }
+            const Reporter onThen = reporterOf( st, thenAt + 1, defined );
+            std::size_t    cb     = 1;
+            for( std::size_t k = 1; k <= condEnd; ++k )
+            {
+                if( k == condEnd || ( st[k].op && st[k].text == "&&" ) )
+                {
+                    keep( li, guardPipe( st, cb, k, defined ), onThen, onElse );
+                    cb = k + 1;
+                }
+            }
+            continue;
+        }
+        // `HELPER "$V" | grep -q P && R1 || R2` and `… && R` / `… || R`: the helper spelling grepPipe does not read
+        std::size_t andAt = t.size(), orAt = t.size();
+        for( std::size_t k = 0; k < t.size(); ++k )
+        {
+            if( t[k].op && t[k].text == "&&" && andAt == t.size() && orAt == t.size() )
+            {
+                andAt = k;
+            }
+            else if( t[k].op && t[k].text == "||" && orAt == t.size() )
+            {
+                orAt = k;
+            }
+            else if( t[k].op && ( t[k].text == ";" || t[k].text == ";;" ) )
+            {
+                break;
+            }
+        }
+        const std::size_t pipeEnd = std::min( andAt, orAt );
+        if( pipeEnd == t.size() )
+        {
+            continue;
+        }
+        const GrepPipe g       = guardPipe( t, 0, pipeEnd, defined );
+        const Reporter onTrue  = andAt < t.size() && andAt == pipeEnd ? reporterOf( t, andAt + 1, defined ) : Reporter::None;
+        const Reporter onFalse = orAt < t.size() ? reporterOf( t, orAt + 1, defined ) : Reporter::None;
+        keep( li, g, onTrue, onFalse );
+    }
+    return out;
+}
+
 // The innermost span (function) holding `byte`, or spans.size() for top-level code.
 inline std::size_t scopeOf( const std::vector<Span>& spans, std::uint32_t byte ) noexcept
 {
@@ -2218,7 +2711,8 @@ inline bool contentRequired( const std::vector<ShLine>& lines, const ShLineToks&
     }
     for( const ShAssert& a : asserts )
     {
-        if( a.line != absenceLine && scope[a.line] == scope[absenceLine] && a.pol == Polarity::Requirement && !a.pipe.direct && a.pipe.var == v )
+        if( a.line != absenceLine && scope[a.line] == scope[absenceLine] && a.pol == Polarity::Requirement && !a.pipe.direct && a.pipe.var == v
+            && ( !a.sameCapture || assignmentOf( lt, scope, a.line, v ) == assignmentOf( lt, scope, absenceLine, v ) ) )
         {
             return true;
         }
@@ -2486,6 +2980,11 @@ inline std::vector<Site> scanVacuousAssertBash( std::string_view src, const std:
     const std::vector<std::pair<std::string, Reporter>> defined = shDefinedReporters( src, lines, lt, spans );
     const std::vector<ShAssert>                         asserts = shAssertions( lt, defined );
     const std::vector<char>                             errexit = shErrexit( lines, lt );
+    std::vector<ShAssert>                               guards  = asserts;   // what guards a capture: every assertion plus the guard-only requirements
+    {
+        const std::vector<ShAssert> extra = shGuardRequirements( lt, defined );
+        guards.insert( guards.end(), extra.begin(), extra.end() );
+    }
     for( const ShAssert& a : asserts )
     {
         if( a.pol != Polarity::Absence || lineReadsRc( lines[a.line].text ) )
@@ -2521,7 +3020,7 @@ inline std::vector<Site> scanVacuousAssertBash( std::string_view src, const std:
                 {
                     ++innerEnd;
                 }
-                guard = captureGuarded( lines, lt, scope, asserts, a.line, as, var, errexit[as] != 0 );
+                guard = captureGuarded( lines, lt, scope, guards, a.line, as, var, errexit[as] != 0 );
                 if( isRunUnderTest( inner, 0, innerEnd ) )
                 {
                     runSource = true;
@@ -2561,11 +3060,13 @@ inline std::vector<Site> scanVacuousAssertBash( std::string_view src, const std:
 
 // C++: format-arity over the whole file; utf8-cut and dedup-first inside each function span. A site found
 // in nested spans is reported once (the scan of each span is independent; the caller anchors by byte).
-inline std::vector<Site> scanCpp( std::string_view src, const std::vector<Span>& fnSpans )
+// `treeMacros`: the macro names the index holds across the tree (sorted, unique), for format-arity's F1 skip.
+inline std::vector<Site> scanCpp( std::string_view src, const std::vector<Span>& fnSpans, const std::vector<std::string>* treeMacros = nullptr )
 {
-    std::vector<Site>            out;
-    const std::vector<detail::Tok> toks = detail::lexCpp( src );
-    detail::scanFormatArityCpp( src, toks, out );
+    std::vector<Site>              out;
+    detail::CppPreproc             pp;
+    const std::vector<detail::Tok> toks = detail::lexCpp( src, &pp );
+    detail::scanFormatArityCpp( src, toks, pp, treeMacros, out );
     for( const Span& sp : fnSpans )
     {
         const auto first = std::lower_bound( toks.begin(), toks.end(), sp.begin, []( const detail::Tok& t, std::uint32_t b ) { return t.begin < b; } );

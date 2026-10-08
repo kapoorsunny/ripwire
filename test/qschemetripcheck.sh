@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-10-08, lane/cr-qd-kinds-068 fix round 1: RE-PINNED with UPDATE_GOLDEN=1. defectSitesOf collects the tree's
+#   macro names for the C++ scanner (format-arity's F1 skip) and the scanners record fewer sites; the blob shape is
+#   unchanged and 18 never shipped, so kQSnapCacheScheme stays 18 (its v18 note says so); the producer identity keeps
+#   this build's blobs apart from the phase-2 build's.
 # 2026-10-08, lane/cr-qd-kinds-068 cleanup: RE-PINNED with UPDATE_GOLDEN=1 (hash 2fdb42dc0a…3c1b8d). Refactor only:
 #   computeSnapshot projects defectSitesOf's records with std::ranges::transform instead of a helper loop (the same
 #   records in the same order); kQSnapCacheScheme stays 18.
