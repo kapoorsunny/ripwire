@@ -812,6 +812,28 @@ implementor rows it LISTED after narrowing to its own files (`implementors="1"` 
   without one are byte-identical (34 argv across three corpora). Gate: `countfloorcheck`.
 
 
+### Fixed — test infrastructure: `rubyrecvnarrowcheck` absence arms no longer pass on a crashed run
+
+The four "`--callers=X` does not list the row" arms read an empty capture, so a binary that crashed or refused passed
+them. They now go through one helper that reads the absence only off a run that exited 0 and produced its `<callers>`
+root, and fails by name otherwise.
+
+### Fixed — the skill scanner's per-line / joined-body dedupe keeps the worst row of a (line, rule)
+
+The scanner's two passes can report the same (line, rule), and the dedupe sorted with a non-stable sort on (line, rule)
+and kept the first row, so which severity survived was left to the sort. It now sorts stably with the worst severity first
+(the rule the shell-script pass merge already follows), as one shared helper. No input reaches the collision today (a
+rule's severity is a function of its line), so output is unchanged; `test/skillscan.sh` drives the helper with colliding
+pairs in both orders.
+
+### Fixed — a `--scan-skills` / `wrap` finding's excerpt is cut on a character boundary
+
+A skill line longer than the 120-byte excerpt cap was cut at a byte offset, so a multibyte UTF-8 character straddling the
+cap left an invalid tail in the excerpt (the text is arbitrary and untrusted). The cut now backs off to the code-point
+boundary, the same rule as the other text caps, and the `...` is added only when bytes were really dropped; a line of
+exactly the cap is shown whole. `test/skillscan.sh` pins a 2-byte and a 4-byte character at the cap, a line of exactly
+120 bytes, and a plain overlong line.
+
 ### Added — MCP `grep` rows carry the matched text and a `fetch_body` handle (CLI parity)
 
 The MCP `grep` hit row was `{file, line, in}`: no matched text, so an agent re-read every file it had just searched, and
