@@ -1020,7 +1020,11 @@ echo
 # RE-ANCHORED 2026-09-26 (lane impact-depth-065, depth-labelled --impact): 7,500 → 7,700 B, measured 7,622 (7,495 on the
 # base binary b343b988). The loop's --impact=distance probe now carries by_depth= and d=, and its compact legend reads both
 # (+127 B, the (U) table's ripwire.impact/v1 row); the other nine verbs unmoved. Same rule: the next multiple of 100 B.
-echo "=== (L) the canonical ten-verb edit loop: compact legend bill ≤ 7,700 B (34,431 B in full on the fixture) ==="
+# RE-ANCHORED 2026-10-08 (train 26b): 7,700 → 7,800 B, measured 7,711. Attributed on this fixture by merge step: 7,622 at
+# the train's phase-A head, 7,688 with receiver evidence merged (its present-only via= readings; under the old ceiling),
+# 7,711 with lean-answers merged: +23 B, all on the --for probe, the " (absent cx/ccx/in = 0)" reading the lane pinned
+# in the ripwire.for/v1 row. The other verbs are unmoved by that step. Same rule: the next multiple of 100 B.
+echo "=== (L) the canonical ten-verb edit loop: compact legend bill ≤ 7,800 B (34,716 B in full on the fixture) ==="
 loopBytes=0; fullBytes=0
 for v in "--for=geometry distance" "--callers=distance" "--impact=distance" "--uses=distance" "--edit-check=total_area" \
          "--quality-delta" "--test-gate=geometry.cpp" "--affected=geometry.cpp" "--safe-delete=total_area" "--slice=total_area"; do
@@ -1029,8 +1033,8 @@ for v in "--for=geometry distance" "--callers=distance" "--impact=distance" "--u
     b="$( leg bytes "$TMP/l.c" )"; f="$( leg bytes "$TMP/l.f" )"
     loopBytes=$(( loopBytes + b )); fullBytes=$(( fullBytes + f ))
 done
-[ "$loopBytes" -le 7700 ] && ok "(L) ten-verb loop: $loopBytes B of compact legend (full: $fullBytes B)" \
-                          || no "(L) ten-verb loop pays $loopBytes B of compact legend (> 7,700 B; full: $fullBytes B)"
+[ "$loopBytes" -le 7800 ] && ok "(L) ten-verb loop: $loopBytes B of compact legend (full: $fullBytes B)" \
+                          || no "(L) ten-verb loop pays $loopBytes B of compact legend (> 7,800 B; full: $fullBytes B)"
 
 echo
 echo "=== (M) MCP: legend:\"compact\" on edit_check answers in ≤ 900 B on a clean tree; every XML verb takes the argument, within its per-verb legend pin ==="
