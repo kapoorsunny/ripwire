@@ -860,6 +860,20 @@ registration window void (it had no control arm); the readout clock restarts at 
 the new window's readout date once its start date is recorded in docs/EVALS.md. Gates: `routehookcheck`,
 `codexpromptroutecheck`, `taskroutecheck`, `toolcallroutecheck`, `hookcheck`, `routingreportcheck`.
 
+### Added — `test/mcpreloadasancheck.sh`: MCP index reloads under a sanitizer build
+
+A cached object that points into the MCP server's index dangles when the index is rebuilt in place; a cached
+`ValueRefIndex` once did exactly that (heap-use-after-free after a rebuild that kept its content stamp), and no single-query
+gate can see it. The gate runs one long-lived `--mcp` session on the sanitizer binary for 20 cycles of query, stamp-keeping
+mutation (chmod, a new non-source file, an empty directory), content mutation (file rewrite or the edit verbs), root
+switch, workspace and memory release. Every query answer is compared with a one-shot CLI run on the same tree state; the
+`analyze` answer on a dirty root is compared with a cold server instead. It asserts that each rebuild it drives happened
+(`rebuilt=1`) and that there were zero sanitizer reports. The memory-release arm is host-dependent: when no release session
+meets its premises it prints a named SKIP and the other arms still decide the verdict. The whole gate SKIPs by name when no
+sanitizer build is present, and exits 2 when `RIPWIRE_ASAN_BIN` is set to a path with no executable. The freed-chunk
+quarantine stays on except in the memory-release sessions. It goes red on the build that still had that bug and is green
+after the fix.
+
 
 ### Added — MCP `grep` rows carry the matched text and a `fetch_body` handle (CLI parity)
 
