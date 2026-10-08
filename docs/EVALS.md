@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 677 gate scripts plus the determinism, cache-transparency and golden contracts. <!-- gatecount --> |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 678 gate scripts plus the determinism, cache-transparency and golden contracts. <!-- gatecount --> |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -5888,7 +5888,7 @@ copy here would be exactly the dialect divergence that gate exists to catch. Com
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **677 gate scripts**, all of which exist on disk. <!-- gatecount -->
+naming **678 gate scripts**, all of which exist on disk. <!-- gatecount -->
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -6189,15 +6189,29 @@ regenerated file. It skips (exit 0) when no reference binary is given, self-test
 and asserts it left the tree unmodified — an assertion that is itself **controlled**: a stray file is
 created on purpose, must be detected, and must then be gone.
 
-### `--quality-delta`'s eleven kinds: ten measured failure modes and placeholder
+### `--quality-delta`'s twelve kinds: ten measured failure modes, placeholder and defect-shape
 
 These are the exact `kind=` strings the binary emits, from `src/quality.h`:
 
 `complexity` · `verbosity` · `nesting` · `params` · `duplication` · `dead-code` · `api-surface` ·
-`error-masking` · `short-horizon-churn` · `new-clone-of-reused-helper` · `placeholder`
+`error-masking` · `short-horizon-churn` · `new-clone-of-reused-helper` · `placeholder` · `defect-shape`
 
 The first ten each target a failure mode measured in the literature; `placeholder` (added 0.6.5) is an
-honesty check on "done" — a stub or TODO the change added — and never gates.
+honesty check on "done" — a stub or TODO the change added — and never gates. `defect-shape` carries four
+facets in `defect=` (`format-arity`, `utf8-cut`, `dedup-first`, `vacuous-assert`), shapes this project's own
+code review kept finding; only `format-arity` gates, and on any origin (new-symbol rows never gate, except
+defect-shape format-arity). Measured (2026-10-07): recall 7/8 on the eight review findings it was built
+from; with every site treated as new, 0 format-arity false positives on this tree (1,330 literal-format calls),
+on the Python 3.13 standard library (405 calls) and on libc++'s std::format tests (80 calls; the 24 hits are its
+deliberately ill-formed `.verify.cpp` calls); vacuous-assert sample precision 30/30 on this tree's gates
+(46 rows, Wilson 95% lower bound 0.89) after fix round 1 (2026-10-08) taught the guard the positive on the same
+capture spelled as an `if`/`elif` `&&` condition or through a script-defined function — before it, 3 of 49 rows were
+such false positives and the seeded sample read 28/30 (lower bound 0.79), not the 30/30 first published. Floor: an
+absence read off a file a run redirected into is not judged (`redactcheck.sh:81`, `namingcalibrationcheck.sh:292`).
+Two format-arity floors (a delta review, 2026-10-08; 0 hits on the three corpora above): the macro skip sees a name this
+file `#define`s and a function-like macro the tree defines, not a lower-case object-like macro defined only in another
+file; and only a literal `#if 0` is skipped, so `#if false`, `#if (0)`, `#if 0 && …` and the `#else` of `#if 1` are
+read as live.
 
 Note that some user-facing summaries abbreviate four of these (`dup`, `dead`, `churn`,
 `clone-of-reused-helper` / `reuse-decline`). **Match against the strings above** when grepping real
@@ -6991,7 +7005,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 677. The <!-- gatecount -->
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 678. The <!-- gatecount -->
   loop is the authority; the stale docstrings are a known drift. Since 2026-09-10 the number is not
   written by hand anywhere: `docs/gatecount_build.py` derives it from the loop and rewrites every
   published site, `test/gatecountcheck.sh` fails if any of them drifts, and `test/manifestcheck.sh`

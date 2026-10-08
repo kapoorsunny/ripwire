@@ -299,6 +299,12 @@ tools = json.loads( line )[ "result" ][ "tools" ]
 # "default: more defs listed, else the shorter page" (+23 B, the minimum that is true). Attributed: whereis schema 828 -> 851 B
 # (+23 B), whereis description unchanged at 701 B, every other tool unchanged. Headroom after this line: 21 B. The twin below
 # (1c) pins what must not move with it: whereis's description stays 701 B and the listing field says the exact rule.
+# RE-ANCHORED 2026-10-07 (lane/cr-qd-kinds-068, the twelfth --quality-delta kind): 46,750 -> 46,800, measured 46,793 (from
+# 46,732, 33 tools). The #214 precedent again: the clause describes the RESPONSE. quality_delta's description now
+# counts 12 kinds (its "11 measured failure modes" became "12 kinds", -16 B), names the new kind ("a defect shape",
+# +16 B), and states the one row family that gates on new code — "new-symbol rows never gate, except defect-shape
+# format-arity" (+61 B) — because an MCP client reading "gating" would otherwise take a gating new-symbol row for a
+# contradiction of the description. No schema byte moved, no tool added. Headroom after this line: 7 B.
 CEILING = 46890
 manifest = len( json.dumps( { "tools": tools }, separators = ( ",", ":" ) ) )
 descBytes   = sum( len( t[ "description" ] ) for t in tools )

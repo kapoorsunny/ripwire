@@ -613,7 +613,11 @@ if not bad:
 #            formats the cut's resume index (' next_offset="{}"') and the MCP machine continuation (' next_budget_tokens="{}"'):
 #            one size_t each, no string argument (35 B / 42 B worst case against 95 usable + NUL).
 #            train 26b (knob-honesty merged onto the train's 356/246/246/109): re-derived on the merged tree.
-EXPECTED = { "mentions": 358, "calls": 248, "sites": 248, "rows": 109, "widthforms": 0 }
+#            2026-10-08 (lane/cr-qd-kinds-068, the defect-shape kind): +5 mentions, no call/site/row (351 -> 356). Five
+#            lines NAME rw::formatTo without calling it: the format-arity family table and two comments in
+#            src/defectshape.h, the defect-shape legend sentence (verbs_quality.h) and the --help paragraph (cli.h).
+#            train 26b (cr-qd-kinds merged onto the train's 358/248/248/109): re-derived on the merged tree.
+EXPECTED = { "mentions": 363, "calls": 248, "sites": 248, "rows": 109, "widthforms": 0 }
 #            2026-09-30 (#325 ruby_bases_unscoped=): +2 calls/+2 mentions/+2 sites, rows unchanged — graphGaugeAttrXml/Json (graphlegend.h) each format the absent-at-zero Ruby gauge into the SAME local buf[160]: one size_t, no string argument (21 + 20 digits worst case).
 #            2026-09-04 (capture-audit L6, H9): +1 call/+1 mention, sites/rows UNCHANGED — re-read, not
 #            re-counted. packConnect gained ONE snprintf into a new `char connectCeiling[32]` for the

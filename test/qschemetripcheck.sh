@@ -51,6 +51,18 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   (above train 25's 143/144; the ref record gains the receiver chain memberPath/memberCtor and the receiver-evidence
 #   binding kinds), kCacheVersion 28 -> 29; quality.h's mirrors move with them. kQSnapCacheScheme stays 17: a snapshot's meaning is unchanged, and the
 #   edges it reads are re-derived under the new kParserVer. The train renumbers and re-derives.
+# 2026-10-08, lane/cr-qd-kinds-068 fix round 1: RE-PINNED with UPDATE_GOLDEN=1. defectSitesOf collects the tree's
+#   macro names for the C++ scanner (format-arity's F1 skip) and the scanners record fewer sites; the blob shape is
+#   unchanged and 18 never shipped, so kQSnapCacheScheme stays 18 (its v18 note says so); the producer identity keeps
+#   this build's blobs apart from the phase-2 build's.
+# 2026-10-08, lane/cr-qd-kinds-068 cleanup: RE-PINNED with UPDATE_GOLDEN=1 (hash 2fdb42dc0a…3c1b8d). Refactor only:
+#   computeSnapshot projects defectSitesOf's records with std::ranges::transform instead of a helper loop (the same
+#   records in the same order); kQSnapCacheScheme stays 18.
+# 2026-10-07, lane/cr-qd-kinds-068 (the defect-shape kind): RE-DERIVED with UPDATE_GOLDEN=1 (hash 2244e7390c…a55ef7).
+#   kQSnapCacheScheme 17 -> 18: the blob gained the defect-shape (anchor, site) records after publicApi (serializeSnapshot,
+#   deserializeSnapshot and computeSnapshot all moved), a BLOB SHAPE change. The manifest gains defectSitesOf (the site
+#   identity the baseline stores); the scanners it calls live in defectshape.h, outside the manifest — disclosed in the
+#   quality.h comment. kParserVer / kCacheVersion unchanged. The train may renumber the scheme.
 # 2026-10-04, train 26a (PR #373, Ruby method lookup, merged onto main 255dc199): RE-DERIVED ONCE on the merged tree with
 #   UPDATE_GOLDEN=1 (hash 9fe75d7e33…283213). The only watched text that moved is the kParserVer declaration: 143 -> 148,
 #   above the branch's 145 and the 145–147 other branch builds have used (148's full-use file tag is 149); quality.h's

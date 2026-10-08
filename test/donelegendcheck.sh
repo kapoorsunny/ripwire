@@ -165,7 +165,13 @@ EOF
 # this fixture against the pre-change binary: clean 2282 -> 2542, and the other three forms do not move (the
 # attribute rides only the auto-HEAD basis, and dirty/scope/refpair here do not take it). The pin is the next
 # multiple of 100 over the measured total, as every anchor in this file is.
-run_budget qd_clean       2600  8574  "$FX"  --quality-delta
+# qd 2600/3900/5200/4300 -> 2700/4000/5300/4400 (2026-10-07, lane/cr-qd-kinds-068, the twelfth kind defect-shape):
+# the ALWAYS-printed core gained the kind's name in the kind list and the one exception to "new-symbol rows never
+# gate" (defect-shape format-arity gates on any origin), which every form must state because the exit code it
+# explains is in every form. Measured on this fixture against the main binary (60dd3b3f): clean 2576 -> 2663,
+# dirty 3889 -> 3976, scope 5163 -> 5250, refpair 4293 -> 4380 (+87 B each, the same sentence). Each pin is the
+# next multiple of 100 over the measured total, as every anchor in this file is.
+run_budget qd_clean       2700  8574  "$FX"  --quality-delta
 printf '%s' "$DIRT" >> "$FX/src/base.cpp"
 # qd_dirty 3800 -> 3900 (2026-09-10, the string/perf round): the --quality-delta legend gained two facts a reader
 # needs to act on a row — the api-new-surface= count (one sentence, +105 B in every form, "printed even at zero"
@@ -173,8 +179,8 @@ printf '%s' "$DIRT" >> "$FX/src/base.cpp"
 # against the pre-round binary: clean 2177 -> 2282, dirty 3642 -> 3855, scope 4916 -> 5129, refpair 4058 -> 4271.
 # Three forms still clear their ceilings; the dirty form's 3800 had 158 B of headroom and the two sentences cost
 # 213 there, so the ceiling moves by less than the growth (45 B of headroom left) — a ratchet, not an allowance.
-run_budget qd_dirty       3900  8574  "$FX"  --quality-delta
-run_budget qd_dirty_scope 5200 10512  "$FX"  --quality-delta "--scope=src/*"
+run_budget qd_dirty       4000  8574  "$FX"  --quality-delta
+run_budget qd_dirty_scope 5300 10512  "$FX"  --quality-delta "--scope=src/*"
 # sd_uses 3800 -> 4100 (2026-10-07, lane count-floor-068, CALLSITE-LINE): every safe-delete <c> row now carries
 # sites_l=, the caller's call-site LINES beside p= (the caller's definition line) — graded answers that named every
 # caller were scored wrong for printing only definition lines — and the law this gate pins (no emitted name is
@@ -234,7 +240,7 @@ run_budget tg_empty       1590  1332  "$FXC" --test-gate
 # own HEAD~1..HEAD: that range means a different diff after every landing, so a budget on it would be a
 # ratchet whose value depends on whoever committed last.
 ( cd "$FX" && git add -A >/dev/null 2>&1 && git commit -qm dirt >/dev/null 2>&1 )
-run_budget qd_refpair     4300  8574  "$FX"  --quality-delta=HEAD~1..HEAD
+run_budget qd_refpair     4400  8574  "$FX"  --quality-delta=HEAD~1..HEAD
 
 echo
 echo "=== (b) the fraction, reported not asserted (see the header for why) ==============================="

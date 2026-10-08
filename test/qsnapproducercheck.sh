@@ -190,6 +190,7 @@ def parse(path, sha):
     dead = [struct.unpack_from("<Q", body, cur + 4 + 8 * i)[0] for i in range(n)]
     cur += 4 + n * 8
     n = struct.unpack_from("<I", body, cur)[0]; cur += 4 + n * 8   # publicApi
+    n = struct.unpack_from("<I", body, cur)[0]; cur += 4 + n * 16  # defectSites (v18): anchor + site per record
     if cur != len(body):
         print("structure does not end on the trailer (%d != %d)" % (cur, len(body))); sys.exit(3)
     return body, shaAt, deadAt, dead

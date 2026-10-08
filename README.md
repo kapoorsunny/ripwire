@@ -12,7 +12,7 @@
 **The ripgrep of AI context. A map before your agent reads the repo — and a check on what it writes.**
 
 Ranked, deterministic call graph: what to touch, what it breaks, which tests to run. On the edit: blast
-radius, tests that reach it, eleven quality kinds reporting only what got worse, forgotten co-changes, fields
+radius, tests that reach it, twelve quality kinds reporting only what got worse, forgotten co-changes, fields
 read and written, names that resolve more than one way.
 
 **Just want to use it?** Install it with the one line below, then start each coding session by telling your agent to
@@ -845,8 +845,11 @@ firing on the same function is corroboration rather than one metric counted twic
 That matters most for code an agent wrote. Empty-catch error masking is **+47%** more common in
 AI-authored commits, a function rewritten again inside two weeks **+15%** more likely, and reuse is
 *declining* as AI's share of commits grows (GitClear, *AI Copilot Code Quality*, 2026). Ten of
-`--quality-delta`'s 11 kinds each target one measured mode like those (the eleventh, `placeholder`,
-lists the stubs and TODOs a change adds, and never gates), and it reports **only what your
+`--quality-delta`'s 12 kinds each target one measured mode like those (the eleventh, `placeholder`,
+lists the stubs and TODOs a change adds, and never gates; the twelfth, `defect-shape`, catches four
+defect shapes review kept finding by hand —
+new-symbol rows never gate, except defect-shape format-arity,
+because a format/argument mismatch is a defect, not debt), and it reports **only what your
 change made worse** — then `--exemplar` shows the pattern in your own repo to copy, and `--test-gate`
 names the tests that must run before "done."
 
@@ -2082,9 +2085,9 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>677 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
+<summary><b>678 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
 
-`test/regression.sh` names **677 gate scripts** and is the authoritative list; <!-- gatecount -->
+`test/regression.sh` names **678 gate scripts** and is the authoritative list; <!-- gatecount -->
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a

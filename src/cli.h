@@ -316,10 +316,10 @@ struct Config
     bool             qualityDelta    = false;              // --quality-delta: report only code-quality regressions vs that baseline (exit 2 if any MAJOR unacked one)
     std::string_view qualityDeltaRange;                    // --quality-delta=REV|A..B (R-I): compare two COMMITTED trees instead of the working
                                                             // tree vs a baseline — the WAVE-level measurement. Same grammar --dmm= takes
-                                                            // (quality::resolveRefSpec owns it), same 11 kinds/gating/ack contract out
+                                                            // (quality::resolveRefSpec owns it), same 12 kinds/gating/ack contract out
     bool             qualityAck      = false;              // --quality-ack[=REASON]: accept the current findings into .ripwire_quality_acks (per-finding ratchet); shares qualityDelta's baseline resolution
     std::string_view qualityAckReason;                     // the reason recorded next to each acked finding
-    std::string_view qualityAckOnly;                       // --ack-only=SUBSTR[,SUBSTR]: ack only findings whose kind or canonical id contains one of these (default: all)
+    std::string_view qualityAckOnly;                       // --ack-only=SUBSTR[,SUBSTR]: ack only findings whose kind, canonical id or facet (e.g. format-arity) contains one of these (default: all)
     std::string_view qualityScope;                         // P1 --scope=GLOB[,GLOB...]: the OWNERSHIP partition for a shared working tree —
                                                             // findings outside it are printed but never gate, and --quality-ack refuses to write them.
                                                             // Grammar + floors: rw::quality's SCOPE block. Only with --quality-delta/--quality-ack (refused elsewhere)
@@ -1719,11 +1719,12 @@ inline constexpr char kHelpHead[] =
         "                               (with --quality-baseline) pin anyway: the sidecar is stamped with the dirty pin and the absorbed count, and every\n"
         "                               later --quality-delta against it carries baseline_absorbed=\"N\" — so a green exit beside that attribute reads as\n"
         "                               \"clean SINCE THE PIN\", never \"clean\". Refused alone.\n"
-        "    --quality-delta            before a PR: report ONLY what your change made worse, across 11 kinds\n"
-        "                               — pair with --test-gate. Each kind is measured against the baseline (complexity/verbosity/nesting/params/dup/dead/api-surface + error-masking/short-horizon-churn/new-clone-of-reused-helper + placeholder);\n"
+        "    --quality-delta            before a PR: report ONLY what your change made worse, across 12 kinds\n"
+        "                               — pair with --test-gate. Each kind is measured against the baseline (complexity/verbosity/nesting/params/dup/dead/api-surface + error-masking/short-horizon-churn/new-clone-of-reused-helper + placeholder + defect-shape);\n"
         "                               every finding is classified by ORIGIN: a symbol that EXISTED at the baseline and got worse (preexisting-worse=\"N\", no attribute on the row) vs one that exists only\n"
-        "                               because the code is NEW (new-symbol=\"N\", origin=\"new-symbol\" on the row). A small numeric delta is additionally sev=\"minor\". EXIT 2 ONLY on preexisting-worse AND\n"
-        "                               major AND unacked — the gating=\"N\" header count. New-symbol rows are still PRINTED (they are the debt you are adding — read them), they just never gate; exit 0 means\n"
+        "                               because the code is NEW (new-symbol=\"N\", origin=\"new-symbol\" on the row). A small numeric delta is additionally sev=\"minor\". EXIT 2 ONLY on a major AND unacked row that is\n"
+        "                               preexisting-worse or defect-shape format-arity (any origin) — the gating=\"N\" header count. New-symbol rows are still PRINTED (they are the debt you are adding — read them);\n"
+        "                               new-symbol rows never gate, except defect-shape format-arity; exit 0 means\n"
         "                               \"nothing that already existed got worse\", not \"clean\". Clone kinds classify by member set (new-symbol only if EVERY member is new); short-horizon-churn is preexisting\n"
         "                               by construction. LIMIT: origin is canonId (path::scope::name) identity, so a RENAMED/MOVED symbol reads as new and a regression carried in with the move will not gate.\n"
         "                               error-masking = a NEW empty/pass/comment-only handler, or log-only (a broad handler whose body only logs and never names the error) or rethrow-only (the sole\n"
@@ -1731,6 +1732,9 @@ inline constexpr char kHelpHead[] =
         "                               placeholder = a stub the change ADDED (todo!()/unimplemented!(), Kotlin TODO(), NotImplementedException, a bare raise NotImplementedError as a free function's body,\n"
         "                               a throw/raise/panic/assert saying \"not implemented\") or a comment line opening with TODO/FIXME that names no issue (#12, ABC-12, a URL); new-symbol by\n"
         "                               construction, so it never gates. Counted per enclosing symbol, like error-masking: a file-level TODO outside every definition is not counted.\n"
+        "                               defect-shape = a known defect shape the change ADDED, named by defect=: format-arity (a literal std::format/print/format_to, fmt::, rw::emitTo/formatTo or\n"
+        "                               Python \"literal\".format whose fields do not match its arguments — GATES on any origin, a defect not debt), utf8-cut and dedup-first (C++) and\n"
+        "                               vacuous-assert (Bash test scripts) — report-only, always sev=\"minor\". A site is new only when its text occurs more often than in the baseline: a moved one is not.\n"
         "                               Test-fixture dirs + doc sections are exempt from dead-code/churn; churn needs COMMITTED thrash evidence (rewritten across recent commits AND again by this diff), never the current edit alone\n"
         // §B7.2 (CA4): the strict-sha staleness rule and — the part that matters — the fact that this verb
         // can DELETE a file in the user's tree were disclosed nowhere a user reads before running it. The
@@ -1748,8 +1752,8 @@ inline constexpr char kHelpHead[] =
         // R-I: the WAVE-level form. Its own row rather than a bracket on the one above, because the floor it
         // compares against is a different KIND of thing (a commit, not a sidecar or the working tree) and the
         // row above spends eight lines on sidecar staleness that this form never touches.
-        "    --quality-delta=REV|A..B   the same 11-kind report between two committed trees — a whole branch at once\n"
-        "                               the same 11-kind report between two COMMITTED TREES instead of the working tree vs a baseline — the WAVE-level measurement (=A..B = tree B against tree A;\n"
+        "    --quality-delta=REV|A..B   the same 12-kind report between two committed trees — a whole branch at once\n"
+        "                               the same 12-kind report between two COMMITTED TREES instead of the working tree vs a baseline — the WAVE-level measurement (=A..B = tree B against tree A;\n"
         "                               =REV = that commit against its FIRST PARENT; an EMPTY side of the range means HEAD). Same grammar --dmm= takes, and A...B is REFUSED rather than read as A..B.\n"
         "                               Use it to measure a whole integration branch at once (--quality-delta=<merge-base>..<head>): per-lane checks each compare against their own baseline and cannot\n"
         "                               see a regression the WAVE introduced. Identical output contract to the bare form — same kinds, gating=\"N\", exit 2, and the same .ripwire_quality_acks ratchet\n"
@@ -1774,7 +1778,8 @@ inline constexpr char kHelpHead[] =
         "                               exit 2. Bare --quality-ack accepts the WHOLE report, so accepting one deliberate\n"
         "                               change silently accepts the rest — how a ratchet turns into a rubber stamp. Prefer\n"
         "                               the facet: --ack-only=contract-change acks the deliberate arity changes WITHOUT the\n"
-        "                               never-gating api-surface new-symbol rows. Matching nothing refuses (exit 1) rather\n"
+        "                               never-gating api-surface new-symbol rows; a defect-shape facet (format-arity,\n"
+        "                               utf8-cut, dedup-first, vacuous-assert) selects that shape alone. Matching nothing refuses (exit 1) rather\n"
         "                               than falling back to acking everything. Whatever you leave unacked stays visible.\n"
         "    --scope=GLOB[,GLOB...]     (with --quality-delta/--quality-ack) file findings by OWNERSHIP when one tree has several writers\n"
         "                               (with --quality-delta/--quality-ack) OWNERSHIP partition for a working tree that has\n"

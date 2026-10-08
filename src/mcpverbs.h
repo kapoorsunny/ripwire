@@ -3961,7 +3961,7 @@ inline std::string connectText( const std::string& root, const std::vector<std::
 //
 // quality_baseline WRITES the `.ripwire_quality_baseline` sidecar (a side-effect verb, like the edit verbs),
 // stamping the current HEAD sha. quality_delta is READ-ONLY: it reports ONLY what the working tree made WORSE
-// vs the baseline (11 kinds), honoring the exact precedence the CLI --quality-delta uses:
+// vs the baseline (12 kinds), honoring the exact precedence the CLI --quality-delta uses:
 //   (1) an explicit sidecar (from quality_baseline) wins — UNLESS it is STALE (pinned at a different HEAD),
 //   (2) else auto-compare vs git HEAD (computeHeadSnapshot), (3) else degrade with a clear message.
 // Both reuse quality::computeSnapshot / writeBaseline / selectBaseline / computeHeadSnapshot / gitHeadSha /
@@ -4195,7 +4195,7 @@ inline std::pair<std::string, std::string> qualityDeltaJson( const std::string& 
         {
             ++newSymbolCount;
         }
-        else if( !r.isMinor )
+        if( rw::quality::rowGates( r ) )
         {
             ++gatingCount;
         }
@@ -4255,9 +4255,9 @@ inline std::pair<std::string, std::string> qualityDeltaJson( const std::string& 
         {
             out += ",\"p\":\"" + mcpdetail::jsonEscape( r.path ) + ":" + std::to_string( r.line ) + "\""; // P2.5 locator
         }
-        if( !r.isNewSymbol && !r.isMinor )
+        if( rw::quality::rowGates( r ) )
         {
-            out += ",\"gating\":true"; // the exit predicate, per row
+            out += ",\"gating\":true"; // the exit predicate, per row (rowGates)
         }
         if( r.isMinor )
         {
