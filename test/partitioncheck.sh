@@ -293,8 +293,28 @@ fi
 # legend DEFINES the partition envelope (<ctx-partitions> counts, each <bundle>'s role/symbols/bytes/tokens=bytes/2.36, the
 # inner ctx attributes) that a single bundle does not carry, so its ratio measures those definitions, not repetition; the
 # default's own contract — ONE legend, none per slice — is asserted right after this arm.
-"$BIN" "$ROOT" --pack-task="$TASK" --partition=3 --no-cache --legend=full >"$TMP/p10.part" 2>/dev/null
-"$BIN" "$ROOT" --pack-task="$TASK" --no-cache --legend=full >"$TMP/p10.single" 2>/dev/null
+# CORPUS PINNED 2026-10-08: the ratio is measured on this repo's tree AS OF P10_CORPUS_REV, not on the live checkout.
+# Both legends carry DATA clauses besides their fixed prose — the single bundle's "[doc mentions: …]" and its
+# "| bodies: kept X of Y | far: …" tail, the partitioned document's conditional 146 B b truncated= definition — so the
+# DENOMINATOR is a function of whatever source the bundle ranks. Measured with ONE binary (cd87e30e) on the same day:
+# the 60dd3b3f tree gives 2443 vs 1916 B (PASS); a lane tree that edits 14 src/ headers, none of them partition.h or a
+# legend this arm reads, gives 2443 vs 1872 B (FAIL, 1.3x = 2433.6); src/ alone 2443 vs 1805; src/+docs/ 2297 vs 1772. Every lane edits the corpus this arm read, so the
+# arm went red on lanes that never touched partition output. Pinned, the corpus moves only when this line does, and a
+# change in either legend's prose — the thing the 1.3x bar is for — is the only thing left that can move the ratio.
+# third_party/ and bench/ are left out of the archive: byte-identical result at the pin (2443/1916), 25 MB vs 107 MB.
+# Run from INSIDE the corpus with a "." root, as the ceiling arms above do, so the checkout's path depth cannot enter.
+# CI checks out full history (fetch-depth: 0), so the pinned commit is present on every lane; a shallow clone FAILs
+# this arm by name rather than silently measuring the live tree.
+P10_CORPUS_REV="60dd3b3f2246ce0284cfa4d4ed48694eafa69c2b"
+P10_CORPUS="$TMP/p10corpus"; mkdir -p "$P10_CORPUS"
+if git -C "$ROOT" cat-file -e "$P10_CORPUS_REV^{commit}" 2>/dev/null \
+    && git -C "$ROOT" archive "$P10_CORPUS_REV" -- . ':(exclude)third_party' ':(exclude)bench' | tar -x -C "$P10_CORPUS"; then
+    ( cd "$P10_CORPUS" && "$BIN" . --pack-task="$TASK" --partition=3 --no-cache --legend=full ) >"$TMP/p10.part" 2>/dev/null
+    ( cd "$P10_CORPUS" && "$BIN" . --pack-task="$TASK" --no-cache --legend=full ) >"$TMP/p10.single" 2>/dev/null
+else
+    no "P10: pinned corpus commit $P10_CORPUS_REV is not in this clone (shallow, or no .git) — run from a full clone"
+    : >"$TMP/p10.part"; : >"$TMP/p10.single"
+fi
 read -r P10_PART P10_SINGLE P10_INNER <<EOF2
 $( python3 - "$TMP/p10.part" "$TMP/p10.single" <<'PY'
 import re, sys
