@@ -553,7 +553,13 @@ fi
 # Where paying IS what makes it fit, it pays (unchanged). Fixture: (9)'s 40 gadget functions, called by a RELATIVE path from
 # $TMP so no checkout or temp-dir path rides in the header bytes the rows are budgeted against (root="fxcut" everywhere).
 #   over-anyway @2000 / @3000: 255dc199 serves 14 / 25 of 40 (est 2270 / 3125, over); dd6e4c8e paid 2 rows (12 / 23) and was
-#     still over (est 2206 / 3071) — RED there. Rows >= 255dc199's (re-pin from a pre-continuation binary if row bytes or the
+#     still over (est 2206 / 3071) — RED there.
+#     train 26b re-pin (2026-10-08): lean-answers' zero elision made every row smaller, so @3000 is no longer over either way
+#     on the merged tree — the pre-continuation train binary (d82e4cf1) serves 25 rows at est 2945, FITTING; the unpaid
+#     answer + handle lands over and the paid one (23 rows, est 2918) fits, i.e. @3000 moved into the payable regime and is
+#     served paid, as ruled. The over-either-way budget is now @2600: d82e4cf1 serves 21 rows at est 2684 (over before any
+#     handle); the merged binary serves those 21 + the unpaid handle, est 2793, over_ceiling="1" (paying ~2 rows, ~90 tokens,
+#     cannot reach 2600). @2000 is unchanged (d82e4cf1 14 rows est 2178 over). Rows >= 255dc199's (re-pin from a pre-continuation binary if row bytes or the
 #     header change; smaller rows only raise it), the handle rides, over_ceiling="1". (Budgets with a margin on both sides of
 #     the ceiling: near one, a few bytes of legend decide whether paying fits, and the arm would pin that, not the rule.)
 #   payable @3800: 255dc199 serves 35 rows at est 3824 — OVER; paying the handle from rows (33, est 3773) is what makes it fit:
@@ -566,7 +572,7 @@ for line in sys.stdin:
     d=json.loads(line)
     if d.get("id")==1: print(d["result"]["content"][0]["text"])' 2>/dev/null | cut_arm; }
 c3row(){ printf '%s' "$1" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["shown"], d["capped"], d["next_budget_tokens"] is not None, d["over"], d["est_tokens"])' 2>/dev/null; }
-for spec in 2000:14 3000:25; do
+for spec in 2000:14 2600:21; do
     bt="${spec%%:*}"; want="${spec##*:}"
     set -- $( c3row "$( mcprel "$bt" )" )
     if [ "$#" -eq 5 ] && [ "$1" -ge "$want" ] && [ "$2" = True ] && [ "$3" = True ] && [ "$4" = True ]; then
