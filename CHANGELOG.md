@@ -26,23 +26,30 @@ Three cuts were disclosed and still dead ends — counted, with no pasteable cal
   [--pack-top-n=N] --token-budget=T`) — and, when rows were dropped, `next_offset=`: the candidate index the cut starts at
   (the last printed row's rank, so a slot that prints no row cannot skew it). `--json` carries `"sigs_next"` and
   `"sigs_next_offset"`. The MCP twin carries no CLI argv (an MCP client re-calls the tool): `next_budget_tokens=T` names
-  the `budget_tokens` a re-call needs, beside the same `next_offset=`. Present-only legend clauses define each. At the
+  the `budget_tokens` a re-call needs, beside the same `next_offset=`. Nothing consumes `next_offset=` yet
+  (`--for --offset=N` pages the file-grain list, a different one; `next=` re-runs the list), and its clause says so.
+  Present-only legend clauses define each. At the
   default ceiling, and at any explicit ceiling wide enough that the signature side is frozen at the default's, they are
   exempt from the signature trim — the rows shown are the ones they were. Under a tighter explicit ceiling (a hard one)
-  `next=` rides alone and is paid from the block's rows, and a compact answer is cut to the rows the full one keeps, so
-  the answer stays within the budget wherever it can fit; measured at `--token-budget=2000` on 20 queries, that costs one
-  row on 11 — a row the `next=` itself serves. At the rank 1..4 floor, where no row is left to pay, `next=` still ships
-  (the call that recovers a cut is never the thing cut) and, when the answer then lands past its ceiling, the root says
-  `over_ceiling="1"` with a clause naming the cause. No budget, ceiling or token conversion changed.
+  `next=` rides alone and is paid from the block's rows, and a capped compact answer is cut to the rows the full one
+  keeps, so the answer stays within the budget wherever it can fit; measured at `--token-budget=2000` on 20 queries, that
+  costs one row on 11 — a row the `next=` itself serves. Rows pay for it ONLY where that makes the answer fit: when the
+  answer lands past its ceiling paid or not (the rank 1..4 floor has nothing left to give, or the MCP `for` answer, whose
+  header overshoots `budget_tokens` on its own), no row is dropped for it — the answer keeps the rows the cut alone
+  leaves, `next=` still ships (the call that recovers a cut is never the thing cut), and the root says
+  `over_ceiling="1"`, with a clause naming the cause where the answer's own ceiling was otherwise met. Measured on MCP `for`
+  at `budget_tokens=2000` over 20 queries: the 19 capped answers over their ceiling keep every row they had before.
+  No budget, ceiling or token conversion changed.
 - **`--lint` / `--lint-rules` and `--sarif`.** A rule that spends its per-rule match budget (`count_capped="1"`) now makes
-  the root carry `findings_next=` (SARIF: `runs[0].properties.findingsNext`): only the floored rules, under a 10x budget,
-  through the new `--lint-max-per-rule=N` (the default stays 5000). A re-run still floored names its own.
+  the root carry `findings_next=` (SARIF: `runs[0].properties.findingsNext`, which keeps `--sarif`): only the floored
+  rules, under a 10x budget, through the new `--lint-max-per-rule=N` (sets each rule's budget either way; the default
+  stays 5000). A re-run still floored names its own.
 - **`--impact`.** A cut import tier dropped `importers_next=` when `--impact=SYM --limit=N` passed 120 bytes, so a long
   selector lost its only continuation with no marker. It is now always emitted in full, like every other `next=`.
 
 Also: the `ripwire-handoff` skill passed `--top-k=20` to `--for`, which does not read it; it now spells
 `--signatures-only`. Gates: `forrankordercheck` (9), `lintbudgetcheck` (5), `impactimportcheck` (#9d), `estchargecheck`
-(#11 A7 floor twin), `compactlegendcheck` (P4 floor twin).
+(#11 A7 unpaid twin), `compactlegendcheck` (P4 floor twin), `forrankordercheck` (10), `fordisclosurecheck` (#2c).
 
 
 ### Added — MCP `grep` rows carry the matched text and a `fetch_body` handle (CLI parity)

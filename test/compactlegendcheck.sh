@@ -843,12 +843,13 @@ for tb in 850 1000 1100 1200; do
     fi
 done
 [ "$p4bad" -eq 0 ] && ok "(P4) at --token-budget 850/1000/1100/1200 the compact --for answer is inside its budget or no further over it than the full one"
-# (P4 floor twin — knob-honesty-068; orchestrator ruling 2026-10-07, PROCESS rules 4/5) A capped <sigs> under a hard ceiling
-# names the call that recovers its cut (next=) and pays for it from its rows. At 500 tokens this fixture's block is at its
-# rank 1..4 floor in BOTH dialects and cannot pay: the recovery handle still ships, and the overshoot is DISCLOSED — root
-# over_ceiling="1" with the floor clause defining it, est_tokens pricing the bytes delivered (P3's rule), and the P4 claim
-# itself (compact no further over than full). Near miss at 750: the handle is paid — est_tokens <= budget in both dialects,
-# next= rides, no over_ceiling= and no floor clause (a label riding every capped answer would pass the 500 half alone).
+# (P4 floor twin — knob-honesty-068; orchestrator rulings 2026-10-07, PROCESS rules 4/5) A capped <sigs> under a hard ceiling
+# names the call that recovers its cut (next=) and pays for it from its rows where that makes the answer fit. At 500 tokens
+# this fixture's block is at its rank 1..4 floor in BOTH dialects and the answer is past its ceiling paid or not: no row is
+# dropped for the handle (ruling C3), it still ships, unpaid, and the overshoot is DISCLOSED — root over_ceiling="1" with the
+# unpaid clause defining it, est_tokens pricing the bytes delivered (P3's rule), and the P4 claim itself (compact no further
+# over than full). Near miss at 750: paying is what makes it fit — est_tokens <= budget in both dialects, next= rides, no
+# over_ceiling= and no unpaid clause (a label riding every capped answer would pass the 500 half alone).
 p4floor_bad=0
 for tb in 500 750; do
     for lg in compact full; do
@@ -857,10 +858,10 @@ for tb in 500 750; do
     pc="$( grep -o 'est_tokens="[0-9]*"' "$TMP/p4f.compact" | head -1 | tr -dc '0-9' )"; pf="$( grep -o 'est_tokens="[0-9]*"' "$TMP/p4f.full" | head -1 | tr -dc '0-9' )"
     for lg in compact full; do
         f="$TMP/p4f.$lg"; pb="$( wc -c <"$f" | tr -d ' ' )"; pe="$( grep -o 'est_tokens="[0-9]*"' "$f" | head -1 | tr -dc '0-9' )"
-        root="$( grep -oE '^<ctx [^>]*>' "$f" | head -1 )"; sigs="$( grep -oE '<sigs [^>]*>' "$f" | head -1 )"
+        root="$( grep -oE '^<ctx [^>]*>' "$f" | head -1 )"; sigs="$( grep -oE '<sigs [^>]*>' "$f" | tail -1 )"
         hasnext=0; case "$sigs" in *' capped="1"'*' next="--for='*) hasnext=1;; esac
         over=0; [ "${root#* over_ceiling=\"1\"}" != "$root" ] && over=1
-        clause=0; grep -qF '[over_ceiling=1 also when <sigs> at its r=1..4 floor cannot pay its next=: the call ships anyway]' "$f" && clause=1
+        clause=0; grep -qF '[over_ceiling=1 also when the sigs next= rides unpaid: no row is dropped to pay for it on an answer that would not fit either way]' "$f" && clause=1
         if [ -z "$pe" ] || [ "$hasnext" -ne 1 ]; then
             p4floor_bad=$(( p4floor_bad + 1 )); no "(P4 floor twin) --token-budget=$tb --legend=$lg: est_tokens=${pe:-?}, <sigs> next= present=$hasnext — a capped block must carry its next="
             continue
@@ -880,7 +881,7 @@ for tb in 500 750; do
         p4floor_bad=$(( p4floor_bad + 1 )); no "(P4 floor twin) --token-budget=$tb: compact est_tokens=${pc:-?} over the budget AND over the full answer's ${pf:-?}"
     fi
 done
-[ "$p4floor_bad" -eq 0 ] && ok "(P4 floor twin) at 500 both dialects ship <sigs> next= at the rank 1..4 floor with over_ceiling=\"1\", the floor clause and an honest est_tokens, the 750 run's paid next= fits with no label, compact never further over than full"
+[ "$p4floor_bad" -eq 0 ] && ok "(P4 floor twin) at 500 both dialects ship <sigs> next= unpaid at the rank 1..4 floor with over_ceiling=\"1\", the unpaid clause and an honest est_tokens, the 750 run's paid next= fits with no label, compact never further over than full"
 
 # (P5) the BUDGET LEDGER survives compaction (orchestrator rule, METHODOLOGY §9.3/§9.4: never cut silently). --pack-task's
 # full legend ends with "budget=N bytes (T-token target, ceiling C) | ranking: … | bodies: … | callers: … | notes: … | tests:

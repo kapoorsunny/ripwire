@@ -1287,11 +1287,12 @@ struct ForLensRootFinish
     std::size_t      tokenBudget          = 0;
     int              maxTokens            = 0;
     bool             bodyCeiling          = false;
-    // knob-honesty-068 (orchestrator ruling 2026-10-07): a charged <sigs> continuation rode unpaid from the rank 1..4 floor
-    // (SigsCutReport::continuationUnpaidBytes) AND the document lands past its ceiling — byte allowance or budget_tokens.
+    // knob-honesty-068 (orchestrator rulings 2026-10-07): a charged <sigs> continuation rode unpaid — the rank 1..4 floor could
+    // not give its bytes up, or no row was dropped for it because the answer lands past its ceiling paid or not (ruling C3) —
+    // (SigsCutReport::continuationUnpaidBytes) AND the document lands past its ceiling: byte allowance or budget_tokens.
     // Decided by the caller on the finished document (a value, never a search of the text); labels it over_ceiling="1"
-    // with kForSigsFloorOverCeilingNote, which is true where kOverCeilingLegend's est_tokens reading may not be.
-    bool             sigsFloorOver        = false;
+    // with kForSigsUnpaidOverCeilingNote, which is true where kOverCeilingLegend's est_tokens reading may not be.
+    bool             sigsUnpaidOver       = false;
 };
 
 // PR #215 review: the finished header AND the number it prints, handed back together. finishForLensHeader
@@ -1376,12 +1377,12 @@ inline ForLensPricedHeader finishForLensHeaderPriced( std::string header, const 
     // adding bytes only RAISES est_tokens — so one extra stage is exact and the flag never oscillates. The
     // definition rides the legend of the document that carries the attribute.
     const bool namedCeilingOver = forLensOverCeiling( f.lastRungFired, f.tokenBudget, f.maxTokens, f.bodyCeiling, priced.first );
-    if( namedCeilingOver || f.sigsFloorOver )
+    if( namedCeilingOver || f.sigsUnpaidOver )
     {
         // each clause rides only where its reading is true: the est_tokens/last-rung one when that predicate holds, the
-        // <sigs> floor one when the unpaid recovery handle is what crossed (knob-honesty-068) — both when both hold
+        // <sigs> unpaid one when the recovery handle rode unpaid on an answer past its ceiling (knob-honesty-068) — both when both hold
         spliceBefore( header, " -->", /*fromEnd=*/true, namedCeilingOver ? f.overCeilingLegend : std::string_view() );
-        spliceBefore( header, " -->", /*fromEnd=*/true, f.sigsFloorOver ? rw::kForSigsFloorOverCeilingNote : std::string_view() );
+        spliceBefore( header, " -->", /*fromEnd=*/true, f.sigsUnpaidOver ? rw::kForSigsUnpaidOverCeilingNote : std::string_view() );
         overAttr = " over_ceiling=\"1\"";
         priced   = priceFixpoint( header.size() + f.nonHeaderMarkupBytes, overAttr.size() );
     }
@@ -1422,7 +1423,11 @@ inline std::string forLensJsonTailStanza( const rw::FileTail& tail, std::size_t 
     return stanza;
 }
 
-inline int emitForLensJson( std::FILE* out, const std::string& header, const ForLensJsonInputs& in )
+// knob-honesty-068 (orchestrator ruling C3, 2026-10-07): one RENDER of the --json bundle. `sigsNextPayFromRows` is the charged
+// "sigs_next" payment mode (serialize.h SigsCutContinuation::payFromRows); with `sigsNextRetryUnpaid` set, a paid render whose
+// bundle still lands past its ceiling writes NOTHING and asks for the unpaid one (emitForLensJson below).
+inline int emitForLensJsonPass( std::FILE* out, const std::string& header, const ForLensJsonInputs& in, bool sigsNextPayFromRows,
+                                bool* sigsNextRetryUnpaid )
 {
     using namespace rw;
 
@@ -1466,7 +1471,8 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     const std::size_t sigsBudget = bundleBudget > fixedBytes ? bundleBudget - fixedBytes : 1;
     // knob-honesty-068: the cut's continuation. This dialect serves no bodies, so its sig side IS the ceiling: charged under
     // an explicit --token-budget, exempt at the default (the XML twin's rule, SigsCutContinuation)
-    const rw::SigsCutContinuation cutNext{ in.task, in.packTopN, in.rankFlags, fixedBytes, /*charged=*/in.tokenBudget > 0, /*json=*/true };
+    const rw::SigsCutContinuation cutNext{ in.task, in.packTopN, in.rankFlags, fixedBytes, /*charged=*/in.tokenBudget > 0, /*json=*/true,
+                                           /*pasteHandle=*/true, /*ledgerGapBytes=*/0u, sigsNextPayFromRows };
 
     const JsonSigLens lens{ /*metrics=*/true, in.fanIn, in.impure, in.churnPerFile, in.cloneMember,
                             in.tested, in.amp, /*rankAdaptivePayload=*/true, in.noteIndex };
@@ -1661,6 +1667,13 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
         overCeiling = ",\"over_ceiling\":true";
     }
     ASSUME( overCeiling.size() == 0 || overCeiling.size() == 20 );   // the 20 the charge above reserved for it
+    // knob-honesty-068 (ruling C3): rows paid for "sigs_next" and the bundle STILL lands past its ceiling — dropping them bought
+    // nothing. Write nothing; the caller re-renders unpaid (the cut's own rows, the handle riding unpaid, over_ceiling disclosed).
+    if( sigsNextRetryUnpaid != nullptr && sigsNextPayFromRows && cutNext.charged && sigsCut.hasContinuation && !overCeiling.empty() )
+    {
+        *sigsNextRetryUnpaid = true;
+        return 0;
+    }
     std::fputs( header.c_str(), out );
     std::fwrite( kJsonBundleSigsKey.data(), 1, kJsonBundleSigsKey.size(), out );
     std::fwrite( surfaceCountsStanza.data(), 1, surfaceCountsStanza.size(), out );
@@ -1675,6 +1688,26 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     std::fwrite( sigsJson.data(), 1, sigsJson.size(), out );
     std::fputs( "}", out );
     return 0;
+}
+
+// The --json bundle (orchestrator ruling C3, 2026-10-07): a charged "sigs_next" is paid for in rows only where that makes the
+// bundle fit. The paid render runs first (the payable case is unchanged); when it lands past its ceiling anyway it wrote nothing,
+// and the bundle is rendered again with the rows the cut alone leaves and the handle unpaid. The redaction tally is put back
+// to its entry value first, so the rows the summary counts are the ones written. Rendering only — the ranking is the caller's.
+inline int emitForLensJson( std::FILE* out, const std::string& header, const ForLensJsonInputs& in )
+{
+    const std::optional<rw::RedactCounts> tallyAtEntry = in.redact != nullptr ? std::optional<rw::RedactCounts>( *in.redact ) : std::nullopt;
+    bool retryUnpaid = false;
+    const int paidRc = emitForLensJsonPass( out, header, in, /*sigsNextPayFromRows=*/true, &retryUnpaid );
+    if( !retryUnpaid )
+    {
+        return paidRc;
+    }
+    if( tallyAtEntry )
+    {
+        *in.redact = *tallyAtEntry;
+    }
+    return emitForLensJsonPass( out, header, in, /*sigsNextPayFromRows=*/false, nullptr );
 }
 
 // ── T3: the terminal-by-default auto <bodies> section (pre-registered: docs/EVALS.md §4) ─────────────────
@@ -2252,7 +2285,10 @@ inline std::string renderForHdrRowsXml( const rw::IngestResult& ing, const std::
     return x;
 }
 
-std::optional<int> runForLens( const MainDispatch& d )
+// knob-honesty-068 (orchestrator ruling C3, 2026-10-07): one RUN of the --for lens. `sigsNextPayFromRows` is the charged <sigs>
+// continuation's payment mode (serialize.h SigsCutContinuation::payFromRows); with `sigsNextRetryUnpaid` set, a paid run whose
+// document still lands past its ceiling writes NOTHING to stdout and asks for the unpaid run (runForLens below).
+std::optional<int> runForLensPass( const MainDispatch& d, bool sigsNextPayFromRows, bool* sigsNextRetryUnpaid )
 {
     using namespace rw;
     const Config&                     cfg          = d.cfg;
@@ -3026,11 +3062,14 @@ std::optional<int> runForLens( const MainDispatch& d )
         // the room the compact charge was given beyond full's (compactLedgerGapBytes) — in the plan, so only a block the ladder
         // already trims pays it: a capped compact answer serves the rows the full one does and lands no further over its
         // ceiling (compactlegendcheck P4). An uncapped answer is untouched. AT THE FLOOR (rank 1..4, nothing left to shed) the
-        // handle still ships and an overshoot is labelled (rootFinish.sigsFloorOver below; orchestrator ruling 2026-10-07).
+        // handle still ships and an overshoot is labelled (rootFinish.sigsUnpaidOver below; orchestrator ruling 2026-10-07).
+        // AND ONLY WHERE PAYING MAKES IT FIT (ruling C3): a paid run that lands past its ceiling anyway is re-run unpaid
+        // (sigsNextPayFromRows=false: no ledger gap, no payment — the rows the cut alone leaves; runForLens).
         const bool                    forSigsNextCharged = cfg.tokenBudget > 0 && sigSideCeiling == bundleBudget;
         const std::string             forRankFlags       = forRankShapingFlags( cfg );
         const rw::SigsCutContinuation forSigsNext{ cfg.forTask, cfg.packTopN, forRankFlags, fixedBytes, forSigsNextCharged, /*json=*/false,
-                                                   /*pasteHandle=*/true, /*ledgerGapBytes=*/forSigsNextCharged ? compactLedgerGapBytes : 0u };
+                                                   /*pasteHandle=*/true, /*ledgerGapBytes=*/forSigsNextCharged ? compactLedgerGapBytes : 0u,
+                                                   sigsNextPayFromRows };
         bool        forSigsCapped      = false;   // did the H1 ladder trim <sigs>? — decides the budget_bytes= legend clause below
         rw::SigsCutReport forSigsCut;             // cut-fix lane A: the <sigs> tag's shown/total/docs_dropped — its clauses below
         forSigsCut.continuationRequest = &forSigsNext;   // knob-honesty-068: IN — the capped block's continuation
@@ -3514,17 +3553,24 @@ std::optional<int> runForLens( const MainDispatch& d )
                                                                        /*hasRouteAttr=*/!routeNoteRaw.empty(), kNotes );
             headerStr                = std::move( chosen.header );
             rootFinish.lastRungFired = ( chosen.rung == rw::CeilingRung::OverCeiling );
-            // knob-honesty-068 (orchestrator ruling 2026-10-07): the recovery handle ALWAYS ships. When the <sigs> floor could
-            // not pay for its next= and the document it rides in lands past its ceiling — the byte allowance, or the token
-            // budget the root names — the root says so: over_ceiling="1" + kForSigsFloorOverCeilingNote. Read off the
-            // FINISHED document (the header this ladder chose + every byte stdout receives); the label only adds bytes,
-            // so a document over before it is over after it.
-            if( forSigsCut.continuationUnpaidBytes > 0 )
+            // knob-honesty-068 (orchestrator rulings 2026-10-07): the recovery handle ALWAYS ships. Read off the FINISHED
+            // document (the header this ladder chose + every byte stdout receives): does it land past its ceiling — the byte
+            // allowance, or the token budget the root names? The label only adds bytes, so a document over before it is over
+            // after it.
+            const ForLensPricedHeader asChosen  = finishForLensHeaderPriced( headerStr, rootFinish );
+            const bool                landsOver = asChosen.header.size() + emittedNonHeaderBytes > ladderCeiling
+                                               || asChosen.estTokens > cfg.tokenBudget;
+            // C3: rows paid for the handle and the answer STILL lands past its ceiling — they bought nothing. Nothing has
+            // reached stdout yet: hand back and let runForLens re-run unpaid (the rows the cut alone leaves).
+            if( sigsNextRetryUnpaid != nullptr && forSigsNext.payFromRows && forSigsNextCharged && forSigsCut.hasContinuation
+                && ( landsOver || rootFinish.lastRungFired ) )
             {
-                const ForLensPricedHeader asChosen = finishForLensHeaderPriced( headerStr, rootFinish );
-                rootFinish.sigsFloorOver = asChosen.header.size() + emittedNonHeaderBytes > ladderCeiling
-                                        || asChosen.estTokens > cfg.tokenBudget;
+                *sigsNextRetryUnpaid = true;
+                return std::nullopt;
             }
+            // the handle rode unpaid (the floor could not give its bytes up, or this is the unpaid run) and the document lands
+            // past its ceiling: over_ceiling="1" + kForSigsUnpaidOverCeilingNote
+            rootFinish.sigsUnpaidOver = forSigsCut.continuationUnpaidBytes > 0 && landsOver;
         }
         headerStr = finishForLensHeader( std::move( headerStr ), rootFinish );
 
@@ -3615,6 +3661,27 @@ std::optional<int> runForLens( const MainDispatch& d )
         return 0;
     }
     return std::nullopt;
+}
+
+// The --for lens (orchestrator ruling C3, 2026-10-07: never drop rows to pay for next= when the answer is over its ceiling
+// anyway — dropping them does not make it fit). A charged <sigs> continuation is paid for in rows first, so the payable case is
+// the run it always was; a paid run whose finished document still lands past its ceiling wrote nothing (the decision is taken
+// before the first byte reaches stdout) and the lens runs again with payFromRows=false: the rows the cut alone leaves, the
+// handle unpaid, over_ceiling="1" + kForSigsUnpaidOverCeilingNote. The redaction tally is put back to its entry value first,
+// so the summary counts the rows written once. The re-run repeats the ranking: it happens only on a capped, charged answer
+// that cannot fit (the tight-ceiling tail), never on the default ceiling.
+std::optional<int> runForLens( const MainDispatch& d )
+{
+    const rw::RedactCounts tallyAtEntry = d.redactCounts;
+    bool                   retryUnpaid  = false;
+    std::optional<int>     paidRc       = runForLensPass( d, /*sigsNextPayFromRows=*/true, &retryUnpaid );
+    if( !retryUnpaid )
+    {
+        return paidRc;
+    }
+    ASSUME( !paidRc.has_value() );   // the paid run returned before writing anything
+    d.redactCounts = tallyAtEntry;
+    return runForLensPass( d, /*sigsNextPayFromRows=*/false, nullptr );
 }
 
 std::optional<int> runTargetedViews( const MainDispatch& d )

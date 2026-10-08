@@ -545,5 +545,32 @@ else
     no "(9) MCP twin: the re-call with budget_tokens=$MNB did not serve the block uncut: ${M2:-<no output>}"
 fi
 
+# ── (10) C3: NO ROW IS DROPPED TO PAY FOR A HANDLE THAT CANNOT MAKE THE ANSWER FIT (orchestrator ruling 2026-10-07) ──────────
+# The MCP `for` answer overshoots budget_tokens on its own (its sig ledger exempts header bytes), so under a budget that caps
+# <sigs> it is nearly always past its ceiling paid or not; paying next_budget_tokens= from the rows (dd6e4c8e: ~245 B, 1-2
+# rows) bought nothing. Over its ceiling either way → the rows the cut alone leaves, the handle unpaid, over_ceiling="1".
+# Where paying IS what makes it fit, it pays (unchanged). Fixture: (9)'s 40 gadget functions.
+#   over-anyway @2000: 255dc199 serves 14 of 40 (est 2298, over); dd6e4c8e paid 2 rows (12, est 2234, still over) — RED there.
+#     Rows >= 14 (re-pin from a pre-continuation binary if row bytes change; smaller rows only raise it), the handle rides,
+#     over_ceiling="1". Same at 3500 (255dc199: 31 of 40).
+#   payable @4000: 255dc199 serves 37 of 40 inside the budget (est 3971); the handle's bytes are paid from rows so the answer
+#     STILL fits — est_tokens <= 4000, no over_ceiling=, next_budget_tokens= present, fewer rows than the 37 (paid).
+c3row(){ printf '%s' "$1" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["shown"], d["capped"], d["next_budget_tokens"] is not None, d["over"], d["est_tokens"])' 2>/dev/null; }
+for spec in 2000:14 3500:31; do
+    bt="${spec%%:*}"; want="${spec##*:}"
+    MC3="$( mcpfor ",\"budget_tokens\":$bt" )"; set -- $( c3row "$MC3" )
+    if [ "$#" -eq 5 ] && [ "$1" -ge "$want" ] && [ "$2" = True ] && [ "$3" = True ] && [ "$4" = True ]; then
+        ok "(10) MCP budget_tokens=$bt, over its ceiling either way: $1 rows (>= the cut's own $want, none dropped for the handle), next_budget_tokens= unpaid, over_ceiling=\"1\" (est $5)"
+    else
+        no "(10) MCP budget_tokens=$bt: shown/capped/handle/over/est = ${*:-<no output>} — want >= $want rows (the cut's own), the handle, over_ceiling=\"1\""
+    fi
+done
+MP="$( mcpfor ',"budget_tokens":4000' )"; set -- $( c3row "$MP" )
+if [ "$#" -eq 5 ] && [ "$1" -lt 37 ] && [ "$2" = True ] && [ "$3" = True ] && [ "$4" = False ] && [ "$5" -le 4000 ]; then
+    ok "(10) MCP budget_tokens=4000, payable: the handle is paid from rows ($1 < 37) and the answer fits (est $5 <= 4000, no over_ceiling=)"
+else
+    no "(10) MCP budget_tokens=4000: shown/capped/handle/over/est = ${*:-<no output>} — want a paid handle inside the budget"
+fi
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit "$fail"
