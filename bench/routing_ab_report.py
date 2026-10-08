@@ -37,7 +37,7 @@
 # there is no flag that overrides it, and none should be added.
 #
 # WHAT THIS NEVER OPENS. Exactly the two paths named by --routing and --meter, plus the one registration
-# file docs/EVALS.md (--evals) read for the registered readout date and nothing else — no other path on
+# file docs/EVALS.md (--evals) read for the window-2 start date and nothing else — no other path on
 # disk, ever. routing.jsonl carries no prompt text by construction (a cksum and a byte length only), and this
 # script never reads a field that could hold any (`detail`, transcripts, repo content); every number
 # printed below is a count, a rate, or a file path the caller supplied.
@@ -85,54 +85,75 @@ def default_evals():
 
 
 # The prompt-router registration (docs/EVALS.md, "Claude Code prompt router — PRE-REGISTERED 2026-09-02")
-# carries its readout date as bold lines `**Readout date:** YYYY-MM-DD` and, once, `**Readout date, extended
-# once:** YYYY-MM-DD`. Both are read from that section only.
+# carries the readout clock as ONE bold line, `**Window start:** YYYY-MM-DD` (or `PENDING`). Window 1 (the
+# 2026-09-02 registration) had no control arm on a default install (issue #381), so it is VOID for the
+# verdict and is printed as such, never as a readout date; window 2 starts at the release that ships
+# `arm=auto`, and its readout date is start + 28 days, with the one-time extension at start + 42 days. The
+# registration states neither date: they are derived here from the start. Read from that section only.
 REGISTRATION_HEADING = "### Claude Code prompt router — PRE-REGISTERED"
-READOUT_RE = re.compile(r"^\*\*Readout date:\*\*\s*(\d{4}-\d{2}-\d{2})", re.M)
-READOUT_EXT_RE = re.compile(r"^\*\*Readout date, extended once:\*\*\s*(\d{4}-\d{2}-\d{2})", re.M)
+WINDOW_START_LINE_RE = re.compile(r"^\*\*Window start:\*\*[ \t]*(.*)$", re.M)
+WINDOW_START_DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})(?!\d)")
+READOUT_DAYS = 28
+EXTENDED_DAYS = 42
+WINDOW1_LINE = ("prompt-router window 1 (registered 2026-09-02): VOID -- no control arm (issue #381); "
+                "not a readout")
+PENDING_LINE = ("prompt-router readout date: PENDING -- window 2 starts at the release that ships arm=auto "
+                "(no Window start date in docs/EVALS.md yet)")
 
 
-def read_readout_dates(path):
-    """(readout, extended, problem). Dates are `datetime.date` or None; `problem` is a one-line reason
-    when the readout date could not be read (file missing, section missing, no date line) so the report
-    says "unknown" and why instead of staying silent."""
+def read_window_start(path):
+    """(start, pending, problem). `start` is a `datetime.date` when the registration records a window-2
+    start date; `pending` is True when it says PENDING or carries no `**Window start:**` line at all;
+    `problem` is a one-line reason when the clock could not be read (file missing, section missing, a
+    start that is neither a calendar date nor PENDING) so the report says "unknown" and why."""
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as fh:
             text = fh.read()
     except OSError:
-        return None, None, "registration file not readable: %s" % os.path.normpath(path)
-    start = text.find(REGISTRATION_HEADING)
-    if start < 0:
-        return None, None, "no prompt-router registration section in %s" % os.path.normpath(path)
-    nxt = text.find("\n### ", start + 1)
-    section = text[start:nxt if nxt > 0 else len(text)]
-    m, e = READOUT_RE.search(section), READOUT_EXT_RE.search(section)
+        return None, False, "registration file not readable: %s" % os.path.normpath(path)
+    begin = text.find(REGISTRATION_HEADING)
+    if begin < 0:
+        return None, False, "no prompt-router registration section in %s" % os.path.normpath(path)
+    nxt = text.find("\n### ", begin + 1)
+    section = text[begin:nxt if nxt > 0 else len(text)]
+    line = WINDOW_START_LINE_RE.search(section)
+    if line is None:
+        return None, True, None
+    value = line.group(1).strip()
+    if value.upper().startswith("PENDING"):
+        return None, True, None
+    m = WINDOW_START_DATE_RE.match(value)
+    if m is None:
+        return None, False, "the `**Window start:**` line is neither a YYYY-MM-DD date nor PENDING"
     try:
-        readout = datetime.date.fromisoformat(m.group(1)) if m else None
-        extended = datetime.date.fromisoformat(e.group(1)) if e else None
+        return datetime.date.fromisoformat(m.group(1)), False, None
     except ValueError:
-        return None, None, "readout date in the registration is not a valid calendar date"
-    if readout is None:
-        return None, None, "the registration section carries no `**Readout date:**` line"
-    return readout, extended, None
+        return None, False, "the `**Window start:**` date is not a valid calendar date"
 
 
-def readout_lines(readout, extended, problem, today):
-    """The report's readout-date lines: the registered date, how far it is from `today`, and a loud flag
-    once it has passed (a passed date is exactly when an unread, underpowered window needs a decision)."""
+def flag_line(label, d, today):
+    """One readout-date line: the date, how far it is from `today`, and a loud flag once it has passed (a
+    passed date is exactly when an unread, underpowered window needs a decision)."""
+    delta = (today - d).days
+    if delta > 0:
+        return "%s: %s -- PASSED %d day(s) ago (as of %s)" % (label, d.isoformat(), delta, today.isoformat())
+    if delta == 0:
+        return "%s: %s -- TODAY" % (label, d.isoformat())
+    return "%s: %s -- in %d day(s) (as of %s)" % (label, d.isoformat(), -delta, today.isoformat())
+
+
+def readout_lines(start, pending, problem, today):
+    """The report's readout lines. Window 1 is ALWAYS printed as VOID -- it is never given a readout date,
+    so no output of this script can call the 2026-09-02 window passed. Window 2 follows its start date."""
+    lines = [WINDOW1_LINE]
     if problem:
-        return ["readout date: UNKNOWN -- %s" % problem]
-    lines = []
-    for label, d in (("prompt-router registered readout date", readout), ("prompt-router extended readout date (one-time)", extended)):
-        if d is None:
-            continue
-        delta = (today - d).days
-        if delta > 0:
-            lines.append("%s: %s -- PASSED %d day(s) ago (as of %s)" % (label, d.isoformat(), delta, today.isoformat()))
-        elif delta == 0:
-            lines.append("%s: %s -- TODAY" % (label, d.isoformat()))
-        else:
-            lines.append("%s: %s -- in %d day(s) (as of %s)" % (label, d.isoformat(), -delta, today.isoformat()))
+        lines.append("readout date: UNKNOWN -- %s" % problem)
+    elif pending or start is None:
+        lines.append(PENDING_LINE)
+    else:
+        lines.append(flag_line("prompt-router window 2 readout date", start + datetime.timedelta(days=READOUT_DAYS), today))
+        lines.append(flag_line("prompt-router window 2 extended readout date (one-time)",
+                               start + datetime.timedelta(days=EXTENDED_DAYS), today))
     return lines
 
 
@@ -366,9 +387,9 @@ def parse_today(arg):
 
 
 def print_readout(evals_path, today):
-    """The registered readout date lines. They belong to the PROMPT router's registration; the toolcall
+    """The readout-clock lines. They belong to the PROMPT router's registration; the toolcall
     router has its own registration and is not dated here."""
-    for line in readout_lines(*read_readout_dates(evals_path), today):
+    for line in readout_lines(*read_window_start(evals_path), today):
         print(line)
 
 
@@ -391,10 +412,10 @@ def main():
     ap.add_argument("--since", default=None, help="only rows with at >= this ISO8601 timestamp")
     ap.add_argument("--until", default=None, help="only rows with at < this ISO8601 timestamp")
     ap.add_argument("--evals", default=default_evals(),
-                     help="path to docs/EVALS.md, read only for the prompt-router registration's readout "
-                          "date (default: the docs/EVALS.md next to this script)")
+                     help="path to docs/EVALS.md, read only for the prompt-router registration's window-2 "
+                          "start date (default: the docs/EVALS.md next to this script)")
     ap.add_argument("--today", default=None,
-                     help="YYYY-MM-DD to compare the readout date against (default: the current UTC date; "
+                     help="YYYY-MM-DD to compare the window-2 readout date against (default: the current UTC date; "
                           "a fixed value makes the report reproducible)")
     ap.add_argument("--router", default=None,
                      help="report only this router (e.g. prompt, toolcall) instead of every router "

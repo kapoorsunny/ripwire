@@ -660,6 +660,34 @@ run_meter "$L20D" "$( bashjson "$M20CSID" "grep -rn 'needle|other' ." )" "$TM20D
 [ -n "$M20CSID" ] && [ "$( meterrowget "$L20D" 1 arm )" = "control" ] \
     && ok "M20d meter: the same control-side session with no override lands in control (the default really is auto)" \
     || no "M20d meter: unconfigured control-side session [$M20CSID] got arm=[$( meterrowget "$L20D" 1 arm )]"
+# meter.conf PARSING (issue #381 fix round 1; the same arms as A10-A18 in routehookcheck, for meter_init): a
+# final line without a newline is not lost, a CRLF value is not read as treatment, and near-miss values still
+# read as treatment. The side the buggy reading would NOT give is used each time. meter_init reads every key
+# through the same loop, so the CRLF arm also covers `enabled=` (M20f: `enabled=0\r` still turns counting off).
+M20TRT=""
+for _m in meter20t1 meter20t2 meter20t3 meter20t4 meter20t5 meter20t6; do
+    _mh="$( printf '%s' "$_m" | cksum | cut -d' ' -f1 )"; [ "$(( _mh % 100 ))" -ge 50 ] && { M20TRT="$_m"; break; }
+done
+meter_conf_arm()   # meter_conf_arm LABEL SESSION CONFBYTES(printf format) WANT
+{
+    _cd="$TMP/mca_$1"; mkdir -p "$_cd"; printf "$3" >"$_cd/meter.conf"; _cl="$TMP/mca_$1.jsonl"
+    run_meter "$_cl" "$( bashjson "$2" "grep -rn 'needle|other' ." )" "$_cd" RIPWIRE_HOME="$_cd" >/dev/null 2>&1
+    [ -n "$2" ] && [ "$( meterrowget "$_cl" 1 arm )" = "$4" ] && ok "$1 meter: meter.conf [$3] -> $4" \
+        || no "$1 meter: meter.conf [$3] gave arm=[$( meterrowget "$_cl" 1 arm )], want $4 (session [$2])"
+}
+meter_conf_arm M20e1 "$M20CSID" 'arm=treatment' treatment
+meter_conf_arm M20e2 "$M20TRT" 'arm=control' control
+meter_conf_arm M20e3 "$M20TRT" 'arm=control\r\n' control
+meter_conf_arm M20e4 "$M20CSID" 'arm=auto\r\n' control
+meter_conf_arm M20e5 "$M20TRT" 'sweep=0\r\narm=control\r\nenabled=1\r\n' control
+meter_conf_arm M20e6 "$M20TRT" 'sweep=0\narm=control' control
+meter_conf_arm M20e7 "$M20CSID" 'arm=controlx\n' treatment
+meter_conf_arm M20e8 "$M20CSID" 'arm=control\rx\n' treatment
+meter_conf_arm M20e9 "$M20CSID" 'arm=treatment\r\n' treatment
+_cd="$TMP/mca_en"; mkdir -p "$_cd"; printf 'enabled=0\r\n' >"$_cd/meter.conf"; _cl="$TMP/mca_en.jsonl"; : >"$_cl"
+run_meter "$_cl" "$( bashjson "$M20TRT" "grep -rn 'needle|other' ." )" "$_cd" RIPWIRE_HOME="$_cd" >/dev/null 2>&1
+[ ! -s "$_cl" ] && ok "M20f meter: a CRLF meter.conf's enabled=0 turns counting off (the CR is not part of the value)" \
+    || no "M20f meter: enabled=0 with a CRLF line still logged: $( cut -c1-120 "$_cl" )"
 [ "$OUTM19" = "$OUTM20" ] \
     && ok "M20b meter: control and treatment produce BYTE-IDENTICAL PreToolUse output (both empty)" \
     || no "M20b meter: the arms still differ on the PreToolUse path: control=[$OUTM19] treatment=[$OUTM20]"

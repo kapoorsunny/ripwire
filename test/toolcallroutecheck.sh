@@ -180,6 +180,32 @@ done
     || no "default arm: meter.conf arm=treatment gave $( tail -n1 "$LOG" | cut -c1-160 ) for control-side session [$DEFCTLSID]"
 rm -f "$RIPWIRE_HOME/meter.conf"
 
+# meter.conf PARSING (issue #381 fix round 1; same arms as A10-A18 in routehookcheck, for this copy of
+# resolve_arm): a final line without a newline is not lost, a CRLF value is not read as treatment, and a
+# near-miss value still reads as treatment. Each session sits on the side the buggy reading would not give.
+DEFTRTSID=""
+for sid in d1 d2 d3 d4 d5 d6 d7 d8; do
+    h="$( printf '%s' "$sid" | cksum | cut -d' ' -f1 )"; [ "$(( h % 100 ))" -ge 50 ] && { DEFTRTSID="$sid"; break; }
+done
+conf_arm()   # conf_arm LABEL SESSION CONFBYTES(printf format) WANT
+{
+    : >"$LOG"; printf "$3" >"$RIPWIRE_HOME/meter.conf"
+    ( unset RIPWIRE_METER_ARM; run_hook Bash "$( jq -cn --arg c "grep -rn confArm$1 src/" '{command:$c}' )" "$2" >/dev/null )
+    got="$( tail -n1 "$LOG" | jq -r '.arm // "<missing>"' 2>/dev/null )"
+    rm -f "$RIPWIRE_HOME/meter.conf"
+    [ -n "$2" ] && [ "$got" = "$4" ] && ok "$1: toolroute meter.conf [$3] -> $4" \
+        || no "$1: toolroute meter.conf [$3] gave arm=[$got], want $4 (session [$2])"
+}
+conf_arm T10 "$DEFCTLSID" 'arm=treatment' treatment
+conf_arm T11 "$DEFTRTSID" 'arm=control' control
+conf_arm T12 "$DEFTRTSID" 'arm=control\r\n' control
+conf_arm T13 "$DEFCTLSID" 'arm=auto\r\n' control
+conf_arm T14 "$DEFTRTSID" 'sweep=0\r\narm=control\r\nenabled=1\r\n' control
+conf_arm T15 "$DEFTRTSID" 'sweep=0\narm=control' control
+conf_arm T16 "$DEFCTLSID" 'arm=controlx\n' treatment
+conf_arm T17 "$DEFCTLSID" 'arm=control\rx\n' treatment
+conf_arm T18 "$DEFCTLSID" 'arm=treatment\r\n' treatment
+
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 # This hook's notification guard matches markers INSIDE a tool input; it deliberately does NOT carry the
 # prompt hooks' `<channel`/`<agent-message` wrapper prefixes (issue #381): a tool call is the agent's own

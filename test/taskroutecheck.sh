@@ -243,16 +243,19 @@ SYSTASK='help me understand the implementation of targetSymbol'
 for sysp in "<channel source=\"x\">$SYSTASK</channel>" "<channel>$SYSTASK</channel>" \
             "$( printf '\n  \t<channel source="x">%s</channel>' "$SYSTASK" )" \
             "<agent-message from=\"w\">$SYSTASK</agent-message>" "<agent-message>$SYSTASK</agent-message>" \
-            "$( printf '  \n<agent-message from="w">%s' "$SYSTASK" )"; do
+            "$( printf '  \n<agent-message from="w">%s' "$SYSTASK" )" \
+            "$( printf '\v<channel source="x">%s</channel>' "$SYSTASK" )" \
+            "$( printf ' \f\v<agent-message from="w">%s' "$SYSTASK" )" \
+            "$( printf '\f<task-notification>%s' "$SYSTASK" )"; do
     SYSC="$( route "$sysp" )"
-    case "$SYSC" in *'status="abstain"'*'resolved_symbols="0"'*) ok "harness wrapper abstains: $( printf '%s' "$sysp" | tr '\n\t' '  ' | cut -c1-40 )";; *) no "harness wrapper routed: $sysp => $SYSC";; esac
+    case "$SYSC" in *'status="abstain"'*'resolved_symbols="0"'*) ok "harness wrapper abstains: $( printf '%s' "$sysp" | tr '\n\t\v\f' '    ' | cut -c1-40 )";; *) no "harness wrapper routed: $sysp => $SYSC";; esac
 done
 # Near-misses: a different tag, or a mention that is not the leading bytes, is a user prompt and routes.
 for nearp in "<channelz> $SYSTASK" "<channels> $SYSTASK" "<agent-messages> $SYSTASK" \
              "what does <channel source=\"x\"> mean? $SYSTASK" "what does <agent-message from=\"w\"> mean? $SYSTASK" \
-             "channel the energy: $SYSTASK"; do
+             "channel the energy: $SYSTASK" "$( printf '\v<channelz> %s' "$SYSTASK" )"; do
     SYSN="$( route "$nearp" )"
-    case "$SYSN" in *'status="recommend"'*'--expand='*'targetSymbol'*) ok "near-miss still routes: $( printf '%s' "$nearp" | cut -c1-40 )";; *) no "near-miss wrongly suppressed: $nearp => $SYSN";; esac
+    case "$SYSN" in *'status="recommend"'*'--expand='*'targetSymbol'*) ok "near-miss still routes: $( printf '%s' "$nearp" | tr '\n\t\v\f' '    ' | cut -c1-40 )";; *) no "near-miss wrongly suppressed: $nearp => $SYSN";; esac
 done
 
 # ── the weak tier may not confirm itself, and may not read a config key as code (2026-09-10) ───────────

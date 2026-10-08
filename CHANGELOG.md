@@ -15,18 +15,25 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
-### Changed — router and meter default to a random control arm; channel events and agent hand-backs are not prompts
+### Changed — router and meter default to a per-session control split; channel events and agent hand-backs are not prompts
 
 With no `~/.ripwire/meter.conf` and no `RIPWIRE_METER_ARM`, the Claude Code prompt router, the tool-call router and
 the meter used to put every session on `treatment`, so the registered treatment-versus-control comparison had no control
 group on a default install (issue #381). The unconfigured default is now `arm=auto`, the stable per-session split
-the meter already had; `arm=treatment` and `arm=control` are still honoured. The Claude Code and Codex prompt-router hooks
+the meter already had; `arm=treatment` and `arm=control` are still honoured. User-visible consequence: about half of
+the sessions on an unconfigured install now get NO injected advice and NO SessionStart primer (the control arm);
+`arm=treatment` in `~/.ripwire/meter.conf` restores the old behaviour. The Claude Code and Codex prompt-router hooks
 and the `--help-task` classifier now treat a prompt that starts with `<channel` (an MCP channel event) or
 `<agent-message` (a sub-agent hand-back), followed by a space or `>`, as a harness event, like `<task-notification>` and
 `<system-reminder>`: no classification, a `skip-system` log row. `<channelz>`, `<agent-messages>` and a prompt that merely
-mentions a wrapper mid-sentence still route. `bench/routing_ab_report.py` prints per-arm counts, says `NO CONTROL ARM`
-when an arm has no prompts, and prints the registration's readout date, flagged once it has passed. Gates:
-`routehookcheck`, `codexpromptroutecheck`, `taskroutecheck`, `toolcallroutecheck`, `hookcheck`, `routingreportcheck`.
+mentions a wrapper mid-sentence still route; a prompt that itself starts with a literal `<channel>` or `<agent-message>`
+fragment (a pasted RSS fragment without its prolog, say) is treated as a harness event and is not routed. The
+classifier's leading-whitespace strip now also covers `\v` and `\f`, as the hooks' strip always did. `meter.conf`
+parsing, in `resolve_arm` of both router hooks and in the meter, no longer loses a final line that has no newline
+and no longer reads a CRLF value (`arm=control\r`) as `treatment`. `bench/routing_ab_report.py` prints per-arm counts, says `NO CONTROL ARM` when an arm has no prompts, and marks the 2026-09-02
+registration window void (it had no control arm); the readout clock restarts at this release, and the report prints
+the new window's readout date once its start date is recorded in docs/EVALS.md. Gates: `routehookcheck`,
+`codexpromptroutecheck`, `taskroutecheck`, `toolcallroutecheck`, `hookcheck`, `routingreportcheck`.
 
 
 ### Added — MCP `grep` rows carry the matched text and a `fetch_body` handle (CLI parity)

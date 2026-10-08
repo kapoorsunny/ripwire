@@ -386,8 +386,12 @@ meter_init()
     _conf_cap=""
     if [ -n "$_mhome" ] && [ -f "$_mhome/meter.conf" ]
     then
-        while IFS='=' read -r _ck _cv
+        # `|| [ -n "$_ck" ]` keeps a final line that has no newline (read returns 1 on it but has filled the
+        # variables); `${_cv%$'\r'}` drops the CR of a CRLF file, for every key, so `arm=control\r` reads
+        # as `control` (the same fix as resolve_arm in hooks/ripwire-claude-route.sh and -toolroute.sh).
+        while IFS='=' read -r _ck _cv || [ -n "$_ck" ]
         do
+            _cv="${_cv%$'\r'}"
             case "$_ck" in
                 enabled)        _conf_enabled="$_cv" ;;
                 arm)            _conf_arm="$_cv" ;;

@@ -268,6 +268,37 @@ route_run "$H7B" "$WITH_RIPWIRE" "$( promptjson "$CTLSID" "$REPO" "$RECPROMPT" )
     && ok "A9 arm default: a meter.conf with no arm= line follows the auto default too" \
     || no "A9 arm default: arm-less meter.conf gave arm=[$( rowget "$H7B/routing.jsonl" 1 arm )] for control-side session [$CTLSID]"
 
+# meter.conf PARSING (issue #381 fix round 1; the same three arms run against resolve_arm in
+# hooks/ripwire-claude-toolroute.sh (toolcallroutecheck) and meter_init in hooks/ripwire-nudge.sh
+# (hookcheck)). Three bugs sat in the read loop of all three copies:
+#   - a FINAL LINE WITHOUT A NEWLINE is lost (`read` returns 1 on it), so `arm=control` there resolved to auto;
+#   - a CRLF value (`arm=control\r`) reads as `treatment` (the CR stays in the value);
+# Each arm pairs a session on the side the BUGGY reading would NOT give: a control-side session for the
+# forced treatment, a treatment-side session for the forced control, so none passes by coincidence.
+TRTSID=""
+for sid in s1 s2 s3 s4 s5 s6 s7 s8; do
+    h="$( printf '%s' "$sid" | cksum | cut -d' ' -f1 )"; [ "$(( h % 100 ))" -ge 50 ] && { TRTSID="$sid"; break; }
+done
+conf_arm()   # conf_arm LABEL SESSION CONFBYTES(printf format) WANT
+{
+    _ch="$TMP/ca_$1"; mkdir -p "$_ch"; printf "$3" >"$_ch/meter.conf"
+    route_run "$_ch" "$WITH_RIPWIRE" "$( promptjson "$2" "$REPO" "$RECPROMPT" )" >/dev/null 2>&1
+    _cg="$( rowget "$_ch/routing.jsonl" 1 arm )"
+    [ -n "$2" ] && [ "$_cg" = "$4" ] && ok "$1: meter.conf [$3] -> $4" \
+        || no "$1: meter.conf [$3] gave arm=[$_cg], want $4 (session [$2])"
+}
+conf_arm A10 "$CTLSID" 'arm=treatment' treatment             # no final newline: a lost line would leave auto = control
+conf_arm A11 "$TRTSID" 'arm=control' control                 # no final newline: a lost line would leave auto = treatment
+conf_arm A12 "$TRTSID" 'arm=control\r\n' control             # CRLF: a CR left in the value reads as treatment
+conf_arm A13 "$CTLSID" 'arm=auto\r\n' control                # CRLF auto: the CR in the value read as treatment
+conf_arm A14 "$TRTSID" 'sweep=0\r\narm=control\r\nenabled=1\r\n' control   # CRLF file, arm= in the middle
+conf_arm A15 "$TRTSID" 'sweep=0\narm=control' control       # last line is the arm, no newline, other keys before it
+# Near-misses the fix must NOT turn into a match: a different word, and a CR inside the value, still read as
+# treatment (any unrecognized value fails toward treatment).
+conf_arm A16 "$CTLSID" 'arm=controlx\n' treatment
+conf_arm A17 "$CTLSID" 'arm=control\rx\n' treatment
+conf_arm A18 "$CTLSID" 'arm=treatment\r\n' treatment         # explicit treatment still honoured under CRLF
+
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 # (O) ADOPTION-WITHIN-TWO — the loop the band is measured through, closed from the PreToolUse hook
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -679,6 +710,11 @@ chan_route "N9c channel mention: <channel ...> mid-sentence still routes" chn3 "
 chan_route "N9d agent-message near-miss: <agent-messages> is not the wrapper" chn4 "<agent-messages> $CHROUT"
 chan_route "N9e agent-message mention: mid-sentence still routes"         chn5 "what does <agent-message from=\"w\"> mean here? $CHROUT"
 chan_route "N9f channel near-miss: a bare word 'channel' in prose routes"  chn6 "channel the energy: $CHROUT"
+# Leading VERTICAL TAB / FORM FEED: bash's [:space:] strip removes them, and src/taskroute.h's strip must remove
+# the same bytes (it used to stop at space/tab/LF/CR, so `--help-task` routed a prompt the hook skipped).
+chan_skip  "N10 channel: a leading \\v before <channel> skips"           chn7 "$( printf '\v<channel source="x">%s</channel>' "$CHROUT" )"
+chan_skip  "N10b channel: a leading \\f before <agent-message> skips"    chn8 "$( printf '\f <agent-message from="w">%s</agent-message>' "$CHROUT" )"
+chan_route "N10c channel: \\v then a near-miss <channelz> still routes" chn9 "$( printf '\v<channelz> %s' "$CHROUT" )"
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 # O9 — rw_is_ripwire_call: ONE block, three files, and the shapes an agent actually types (PR #215 item 6)
@@ -716,6 +752,34 @@ elif diff -q "$HB_CLAUDE" "$HB_CODEX" >/dev/null; then
     ok "O9b rw_is_harness_event is byte-identical in the Claude and Codex prompt hooks ($( wc -l < "$HB_CLAUDE" | tr -d ' ' ) lines)"
 else
     no "O9b the two copies of rw_is_harness_event have DRIFTED — Claude and Codex disagree on what a user prompt is"
+fi
+
+# N3: the third copy of the list is src/taskroute.h's kHarnessEventTags, and nothing but behaviour used to tie it
+# to the shell block (a tag ADDED to one copy only passed every behavioural arm). Compare them textually:
+# each side is reduced to sorted `tag|whole` lines. Shell: a `'<x>'*` pattern is a whole tag, a `'<x '*`/`'<x>'*`
+# PAIR is the attribute-carrying tag `<x` (whole=0). C++: the `{ "<x", true|false }` rows of the table.
+shell_tags(){
+    grep -o "'[^']*'\*" "$1" | sed -e "s/^'//" -e "s/'\*\$//" | awk '
+        { t[NR] = $0; seen[$0] = 1 }
+        END { for (i = 1; i <= NR; i++) {
+                x = t[i]
+                if (x ~ / $/) { sub(/ $/, "", x); print x "|0" }
+                else if (x ~ />$/ && ((substr(x, 1, length(x) - 1) " ") in seen)) { }
+                else print x "|1"
+              } }' | sort
+}
+cxx_tags(){
+    awk '/kHarnessEventTags *\{/,/^\} \};/' "$1" | grep -o '{ *"[^"]*", *\(true\|false\) *}' \
+        | sed -e 's/^{ *"//' -e 's/", *true *}$/|1/' -e 's/", *false *}$/|0/' | sort
+}
+CXX_TAGS="$( cxx_tags "$ROOT/src/taskroute.h" )"
+SH_TAGS_CLAUDE="$( shell_tags "$HB_CLAUDE" )"; SH_TAGS_CODEX="$( shell_tags "$HB_CODEX" )"
+if [ -z "$CXX_TAGS" ] || [ -z "$SH_TAGS_CLAUDE" ]; then
+    no "O9c could not extract the harness-event tag lists (C++ [$( printf '%s' "$CXX_TAGS" | wc -l | tr -d ' ' )] shell [$( printf '%s' "$SH_TAGS_CLAUDE" | wc -l | tr -d ' ' )]) — the textual comparison would prove nothing"
+elif [ "$CXX_TAGS" = "$SH_TAGS_CLAUDE" ] && [ "$CXX_TAGS" = "$SH_TAGS_CODEX" ]; then
+    ok "O9c the shell harness-event tag list equals src/taskroute.h kHarnessEventTags ($( printf '%s\n' "$CXX_TAGS" | wc -l | tr -d ' ' ) tags: $( printf '%s' "$CXX_TAGS" | tr '\n' ' ' ))"
+else
+    no "O9c the harness-event tag lists DISAGREE — C++: [$( printf '%s' "$CXX_TAGS" | tr '\n' ' ' )] claude: [$( printf '%s' "$SH_TAGS_CLAUDE" | tr '\n' ' ' )] codex: [$( printf '%s' "$SH_TAGS_CODEX" | tr '\n' ' ' )]"
 fi
 
 # The rule itself, sourced from the claude hook's copy so the arm tests what ships.

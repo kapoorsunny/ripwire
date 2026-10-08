@@ -180,7 +180,8 @@ inline constexpr std::array<HarnessEventTag, 4> kHarnessEventTags{ {
 inline bool looksLikeSystemEvent( std::string_view task ) noexcept
 {
     std::size_t i = 0;
-    while( i < task.size() && ( task[i] == ' ' || task[i] == '\t' || task[i] == '\n' || task[i] == '\r' ) )
+    // The six bytes the hooks' bash `[:space:]` strip removes: space and \t \n \v \f \r (kept equal, issue #381).
+    while( i < task.size() && ( task[i] == ' ' || ( task[i] >= '\t' && task[i] <= '\r' ) ) )
     {
         ++i;
     }

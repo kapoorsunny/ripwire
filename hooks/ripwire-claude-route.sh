@@ -78,8 +78,11 @@ resolve_arm()
     _ra_home="${RIPWIRE_HOME:-${HOME:+$HOME/.ripwire}}"
     if [ -n "$_ra_home" ] && [ -f "$_ra_home/meter.conf" ]
     then
-        while IFS='=' read -r _ra_k _ra_v
+        # `|| [ -n "$_ra_k" ]` keeps a final line that has no newline (read returns 1 on it but has filled
+        # the variables); `${_ra_v%$'\r'}` drops the CR of a CRLF file so `arm=control\r` reads as `control`.
+        while IFS='=' read -r _ra_k _ra_v || [ -n "$_ra_k" ]
         do
+            _ra_v="${_ra_v%$'\r'}"
             case "$_ra_k" in arm) _ra_conf="$_ra_v" ;; esac
         done < "$_ra_home/meter.conf"
     fi

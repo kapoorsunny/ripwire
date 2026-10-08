@@ -159,6 +159,9 @@ chan_case "channel event, leading blank line" cx2 "$( printf '  \n\t<channel sou
 chan_case "bare <channel> tag"            cx3 "<channel>$CHT</channel>" skip
 chan_case "agent-message hand-back"       cx4 "<agent-message from=\"w\">$CHT</agent-message>" skip
 chan_case "agent-message, leading blank line" cx5 "$( printf '\n\n <agent-message from="w">%s' "$CHT" )" skip
+chan_case "leading \\v before <channel>"    cx11 "$( printf '\v<channel source="x">%s' "$CHT" )" skip
+chan_case "leading \\f before <agent-message>" cx12 "$( printf ' \f<agent-message from="w">%s' "$CHT" )" skip
+chan_case "\\v then near-miss <channelz>"   cx13 "$( printf '\v<channelz> %s' "$CHT" )" route
 chan_case "near-miss <channelz>"          cx6 "<channelz> $CHT" route
 chan_case "near-miss <channels>"          cx7 "<channels> $CHT" route
 chan_case "near-miss <agent-messages>"    cx8 "<agent-messages> $CHT" route
