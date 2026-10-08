@@ -99,6 +99,9 @@ PY
 "$BIN" docdemotefix --for="$BUGQ" --no-route --format=candidates --no-cache >"$TMP/noroute.xml" 2>/dev/null
 "$BIN" docdemotefix --for="$BUGQ"     --no-cache >"$TMP/bugfor.xml"    2>/dev/null
 "$BIN" docdemotefix --for="$TRACEQ"   --no-cache >"$TMP/tracefor.xml"  2>/dev/null
+# RE-PIN 2026-10-08 (train 26b: lean-answers merged): docdemotegolden_for.xml 6167 -> 5902 B (est_tokens "2467" -> "2361")
+# and docdemotegolden_noroute.xml 9695 -> 9364 B ("3441" -> "3309"). Only the zero elision and its legend reading moved:
+# undoing it (zeros back, reading removed, est_tokens=/at= masked) gives the train-side goldens exactly, on both fixtures.
 # RE-PIN 2026-10-08 (train 26b: FE-B merged beside for-spine-span's hop-slot rule): docdemotegolden_for.xml 6268 -> 6167 B
 # (est_tokens "2507" -> "2467"). FE-B binds request_page's only callee `evict_one( self )` by name alone, so the hop-slot
 # rule gives request_page no <h> slot: <hops shown="1" … noedge="5"> with its one <h> row becomes <hops shown="0" …

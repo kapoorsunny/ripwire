@@ -111,6 +111,9 @@ CONCEPT="how does resolution work"
 # ladder trimmed used to appear in neither section), and the clause defining the tail says so. Verified before
 # re-pinning: with every comment and est_tokens= normalized out, old and new documents are byte-identical —
 # this fixture's head covers every file, so its tail is unchanged and every ranking byte is unmoved.
+# RE-PIN 2026-10-08 (train 26b: lean-answers merged onto for-spine-span): 4026 -> 4002 B, est_tokens="1533" -> "1524".
+# The two lanes' changes compose: e= rows and clause plus the zero elision and its clause. Verified mechanically:
+# undoing ONLY the zero elision (est_tokens=/at= masked) gives the train-side golden exactly.
 # RE-PIN 2026-10-07 (lane for-spine-span-068, by design): 3776 -> 4026 B (+250 B), est_tokens="1433" -> "1533". CAUSE: --for
 # rows with a known extent carry e="N" (the definition's last line) right after l= (3 rows here), and the full
 # legend gains the clause defining e=. Verified before re-pinning (tmp re-pin script, base binary 0c115310 == old golden):
