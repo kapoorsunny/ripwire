@@ -38,7 +38,7 @@
 //            (model.h kValueRefDepthCutScope); argCount=the subtrees kVrMaxDepth stopped the walk above (saturating);
 //            startByte/line=the first one. Not a row: valuerefindex.h counts it, and every answer that reads value
 //            references discloses it (value_refs_depth_capped= / value_refs_depth_at=), except --quality-delta's dead kind
-//            and the --quality overview (a named deferral).
+//            and its value-ref-excluded= count (a named deferral).
 // A local/file Through survives only when the same scope fed that container a function value (the filter at
 // scope exit / file end), so an ordinary `x.m()` adds nothing; a parameter Through always survives — its
 // values arrive from callers elsewhere.
