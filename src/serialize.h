@@ -4708,21 +4708,6 @@ inline std::string sigsCutReportLegend( const SigsCutReport& cut )
     }
     return notes;
 }
-// The bytes the continuation adds to the tag + the header legend (attributes + clauses), measured as the difference against the
-// same report with the continuation stripped — so a caller can price the answer the cut alone would have left (ruling C3).
-inline std::string sigsOpenTag( const SigsCutReport& cut );
-inline std::size_t sigsCutContinuationBytes( const SigsCutReport& cut )
-{
-    SigsCutReport bare     = cut;
-    bare.next              = std::string();
-    bare.nextBudgetTokens  = 0;
-    bare.hasContinuation   = false;
-    bare.terseContinuation = false;
-    const std::size_t with    = sigsOpenTag( cut ).size() + sigsCutReportLegend( cut ).size();
-    const std::size_t without = sigsOpenTag( bare ).size() + sigsCutReportLegend( bare ).size();
-    ENSURES( with >= without, "a continuation only adds bytes" );
-    return with - without;
-}
 // the same clauses from the four numbers a caller without a continuation holds (--from-trace, --pack-task)
 inline std::string sigsCutLegendNotes( bool isCapped, std::size_t shown, std::size_t total, std::size_t docsDropped )
 {

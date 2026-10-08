@@ -2420,43 +2420,33 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
         mcpSigsCut.continuationRequest = nullptr;   // it pointed at this pass's mcpSigsNext, which ends here
         return McpForAssembly{ std::move( out ), mcpSigsCut };
     };
-    // C3 — pay for the handle in rows ONLY where that makes the answer fit. This surface overshoots budget_tokens
-    // structurally (the header bytes its ledger exempts), so a paid answer is nearly always over anyway; the UNPAID pass runs
-    // first: the rows the cut alone leaves, the handle riding unpaid. Only when the answer the cut alone left — that document
-    // minus the handle's bytes, priced by the same rule priceForTaskRoot applies — fits budget_tokens can paying matter, and only
-    // then does the paid pass run; it is kept when it fits, else the unpaid one ships (over_ceiling="1" either way).
+    // C3 — pay for the handle in rows ONLY where that makes the answer fit (the CLI twin's rule, runForLens). The PAID pass runs
+    // first, so the payable case is the answer it always was; when that answer still lands past budget_tokens — and this surface
+    // overshoots on its own (the header bytes its ledger exempts), so a capped answer under a budget nearly always does — the
+    // rows it dropped bought nothing, and the UNPAID pass is served instead: the rows the cut alone leaves, the handle riding
+    // unpaid, over_ceiling="1" (priceForTaskRoot). Both passes share the one ranking above; only the assembly re-runs.
+    const auto estOf = []( std::size_t docBytes )
+    {
+        std::size_t est = 0;
+        (void)rw::pricedRootAttr( docBytes, rw::kBytesPerTokenDefault, 0, &est );   // priceForTaskRoot's own reading
+        return est;
+    };
     const std::optional<RedactCounts> tallyAtEntry = redact != nullptr ? std::optional<RedactCounts>( *redact ) : std::nullopt;
-    McpForAssembly chosen = assembleMcpFor( /*payFromRows=*/false, headerStr, legoStr, composeStr, legoScoped, legoPreCapCount );
+    McpForAssembly chosen = assembleMcpFor( /*payFromRows=*/true, headerStr, legoStr, composeStr, legoScoped, legoPreCapCount );
     if( !chosen.doc )
     {
         return std::nullopt;
     }
-    const auto estOf = []( std::size_t docBytes )
+    if( budgetTokens > 0 && chosen.cut.hasContinuation && estOf( chosen.doc->size() ) > budgetTokens )
     {
-        std::size_t est = 0;
-        (void)rw::pricedRootAttr( docBytes, rw::kBytesPerTokenDefault, 0, &est );
-        return est;
-    };
-    if( budgetTokens > 0 && chosen.cut.hasContinuation )
-    {
-        const std::size_t handleBytes = rw::sigsCutContinuationBytes( chosen.cut );
-        ASSUME( handleBytes <= chosen.doc->size() );
-        if( estOf( chosen.doc->size() - handleBytes ) <= budgetTokens )
+        if( tallyAtEntry )
         {
-            const std::optional<RedactCounts> tallyUnpaid = redact != nullptr ? std::optional<RedactCounts>( *redact ) : std::nullopt;
-            if( tallyAtEntry )
-            {
-                *redact = *tallyAtEntry;   // the summary counts the rows of the ONE answer served
-            }
-            McpForAssembly paid = assembleMcpFor( /*payFromRows=*/true, headerStr, legoStr, composeStr, legoScoped, legoPreCapCount );
-            if( paid.doc && estOf( paid.doc->size() ) <= budgetTokens )
-            {
-                chosen = std::move( paid );
-            }
-            else if( tallyUnpaid )
-            {
-                *redact = *tallyUnpaid;
-            }
+            *redact = *tallyAtEntry;   // the summary counts the rows of the ONE answer served
+        }
+        chosen = assembleMcpFor( /*payFromRows=*/false, headerStr, legoStr, composeStr, legoScoped, legoPreCapCount );
+        if( !chosen.doc )
+        {
+            return std::nullopt;
         }
     }
     std::string out = std::move( *chosen.doc );

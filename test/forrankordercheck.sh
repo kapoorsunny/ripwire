@@ -547,29 +547,38 @@ fi
 
 # ── (10) C3: NO ROW IS DROPPED TO PAY FOR A HANDLE THAT CANNOT MAKE THE ANSWER FIT (orchestrator ruling 2026-10-07) ──────────
 # The MCP `for` answer overshoots budget_tokens on its own (its sig ledger exempts header bytes), so under a budget that caps
-# <sigs> it is nearly always past its ceiling paid or not; paying next_budget_tokens= from the rows (dd6e4c8e: ~245 B, 1-2
-# rows) bought nothing. Over its ceiling either way → the rows the cut alone leaves, the handle unpaid, over_ceiling="1".
-# Where paying IS what makes it fit, it pays (unchanged). Fixture: (9)'s 40 gadget functions.
-#   over-anyway @2000: 255dc199 serves 14 of 40 (est 2298, over); dd6e4c8e paid 2 rows (12, est 2234, still over) — RED there.
-#     Rows >= 14 (re-pin from a pre-continuation binary if row bytes change; smaller rows only raise it), the handle rides,
-#     over_ceiling="1". Same at 3500 (255dc199: 31 of 40).
-#   payable @4000: 255dc199 serves 37 of 40 inside the budget (est 3971); the handle's bytes are paid from rows so the answer
-#     STILL fits — est_tokens <= 4000, no over_ceiling=, next_budget_tokens= present, fewer rows than the 37 (paid).
+# <sigs> it is often past its ceiling paid or not; paying next_budget_tokens= from the rows (dd6e4c8e: ~245 B, 1-2 rows)
+# bought nothing there. Over its ceiling either way → the rows the cut alone leaves, the handle unpaid, over_ceiling="1".
+# Where paying IS what makes it fit, it pays (unchanged). Fixture: (9)'s 40 gadget functions, called by a RELATIVE path from
+# $TMP so no checkout or temp-dir path rides in the header bytes the rows are budgeted against (root="fxcut" everywhere).
+#   over-anyway @2000 / @3000: 255dc199 serves 14 / 25 of 40 (est 2270 / 3125, over); dd6e4c8e paid 2 rows (12 / 23) and was
+#     still over (est 2206 / 3071) — RED there. Rows >= 255dc199's (re-pin from a pre-continuation binary if row bytes or the
+#     header change; smaller rows only raise it), the handle rides, over_ceiling="1". (Budgets with a margin on both sides of
+#     the ceiling: near one, a few bytes of legend decide whether paying fits, and the arm would pin that, not the rule.)
+#   payable @3800: 255dc199 serves 35 rows at est 3824 — OVER; paying the handle from rows (33, est 3773) is what makes it fit:
+#     the answer carries next_budget_tokens= and NO over_ceiling= (a binary that never pays serves 35 rows at est 3934, over).
+mcprel(){ ( cd "$TMP" && printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"fxcut","task":"gadget assembler","budget_tokens":%s}}}\n' "$1" \
+       | "$BIN" --mcp 2>/dev/null ) | python3 -c 'import json,sys
+for line in sys.stdin:
+    line=line.strip()
+    if not line: continue
+    d=json.loads(line)
+    if d.get("id")==1: print(d["result"]["content"][0]["text"])' 2>/dev/null | cut_arm; }
 c3row(){ printf '%s' "$1" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["shown"], d["capped"], d["next_budget_tokens"] is not None, d["over"], d["est_tokens"])' 2>/dev/null; }
-for spec in 2000:14 3500:31; do
+for spec in 2000:14 3000:25; do
     bt="${spec%%:*}"; want="${spec##*:}"
-    MC3="$( mcpfor ",\"budget_tokens\":$bt" )"; set -- $( c3row "$MC3" )
+    set -- $( c3row "$( mcprel "$bt" )" )
     if [ "$#" -eq 5 ] && [ "$1" -ge "$want" ] && [ "$2" = True ] && [ "$3" = True ] && [ "$4" = True ]; then
         ok "(10) MCP budget_tokens=$bt, over its ceiling either way: $1 rows (>= the cut's own $want, none dropped for the handle), next_budget_tokens= unpaid, over_ceiling=\"1\" (est $5)"
     else
         no "(10) MCP budget_tokens=$bt: shown/capped/handle/over/est = ${*:-<no output>} — want >= $want rows (the cut's own), the handle, over_ceiling=\"1\""
     fi
 done
-MP="$( mcpfor ',"budget_tokens":4000' )"; set -- $( c3row "$MP" )
-if [ "$#" -eq 5 ] && [ "$1" -lt 37 ] && [ "$2" = True ] && [ "$3" = True ] && [ "$4" = False ] && [ "$5" -le 4000 ]; then
-    ok "(10) MCP budget_tokens=4000, payable: the handle is paid from rows ($1 < 37) and the answer fits (est $5 <= 4000, no over_ceiling=)"
+set -- $( c3row "$( mcprel 3800 )" )
+if [ "$#" -eq 5 ] && [ "$2" = True ] && [ "$3" = True ] && [ "$4" = False ] && [ "$5" -le 3800 ]; then
+    ok "(10) MCP budget_tokens=3800, payable: the handle is paid from rows ($1 shown) and that is what makes the answer fit (est $5 <= 3800, no over_ceiling=)"
 else
-    no "(10) MCP budget_tokens=4000: shown/capped/handle/over/est = ${*:-<no output>} — want a paid handle inside the budget"
+    no "(10) MCP budget_tokens=3800: shown/capped/handle/over/est = ${*:-<no output>} — want a paid handle inside the budget"
 fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
