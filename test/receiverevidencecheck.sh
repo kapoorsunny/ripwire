@@ -382,14 +382,40 @@ marked(){
         else no "($r) --$v=$s dropped the name-only true edge [$spec]: $( show )"; fi
     done
 }
-# hopnotproven ROOT QUERY HOP NAME LINE — the --for answer shows the hop block <h n=HOP> (else FAIL: the arm needs
-# it), and that hop's <calls> row NAME at l=LINE is absent or via="name"
+# hopnotproven ROOT QUERY HOP NAME LINE — the --for answer shows the hop block <h n=HOP>, and that hop's <calls> row
+# NAME at l=LINE is absent or via="name". A hop with no block is read through the HOP-SLOT RULE (test/forsigspancheck.sh
+# (H)): a hop candidate whose every callee edge is name-only gets no <h> row and counts in noedge=. Then the arm reads
+# the same fact off --callees instead, and every premise is checked, so an absent hop is never an empty pass: HOP's <d>
+# row is in the answer with r= within <hops total=> (it was a hop candidate), noedge= >= 1, and --callees=FILE:HOP lists
+# NAME and proves no row at all (else the hop was dropped for another reason: FAIL).
 hopnotproven(){
     local r="$1" q="$2" h="$3" n="$4" l="$5" f
     f="$( answer "$r" for "$q" )"
     ran_ok "($r) --for=\"$q\"" "$f" || return
     P hcalls "$f" "$h" || return
-    if [ "$PARSED" = "NOROOT" ]; then no "($r) --for=\"$q\" shows no hop <h n=\"$h\"> with <calls> (the arm needs that hop)"; return; fi
+    if [ "$PARSED" = "NOROOT" ]; then
+        local drow hp hr htot hne
+        drow="$( grep -o "<d [^>]*n=\"$h\"[^>]*>" "$f" | head -1 )"
+        hp="$( printf '%s' "$drow" | sed -n 's/.* p="\([^"]*\)".*/\1/p' )"
+        hr="$( printf '%s' "$drow" | sed -n 's/.* r="\([0-9][0-9]*\)".*/\1/p' )"
+        htot="$( grep -o '<hops [^>]*>' "$f" | head -1 | sed -n 's/.* total="\([0-9][0-9]*\)".*/\1/p' )"
+        hne="$( grep -o '<hops [^>]*>' "$f" | head -1 | sed -n 's/.* noedge="\([0-9][0-9]*\)".*/\1/p' )"
+        case "$hp|$hr|$htot|$hne" in
+            *'||'*|'|'*|*'|') no "($r) --for=\"$q\" shows no hop <h n=\"$h\">, and the hop-slot premises are unreadable (d p=/r=: '$hp'/'$hr', hops total=/noedge=: '$htot'/'$hne')"; return ;;
+        esac
+        if [ "$hr" -gt "$htot" ] || [ "$hne" -lt 1 ]; then
+            no "($r) --for=\"$q\" shows no hop <h n=\"$h\">, and it was no dropped hop candidate (r=$hr, hops total=$htot, noedge=$hne)"; return
+        fi
+        getrows "$r" callees "$hp:$h" || return
+        if [ -z "$( printf '%s\n' "$GOT" | awk -v n="$n" 'NF >= 5 && $2 == n' )" ]; then
+            no "($r) --for=\"$q\" dropped hop $h, and --callees=$hp:$h does not list $n either: $( show )"
+        elif [ -n "$( printf '%s\n' "$GOT" | awk 'NF >= 5 && $5 != "name"' )" ]; then
+            no "($r) --for=\"$q\" dropped hop $h, yet --callees=$hp:$h proves a row (the hop-slot rule does not explain the drop): $( show )"
+        else
+            ok "($r) --for=\"$q\": hop $h takes no slot (every callee name-only: --callees=$hp:$h, noedge=$hne), so it never proves <c n=\"$n\">"
+        fi
+        return
+    fi
     if [ -n "$( printf '%s\n' "$PARSED" | awk -v n="$n" -v l="$l" '$1 == n && $2 == l && $3 != "name"' )" ]; then
         no "($r) --for=\"$q\": hop $h proves <c n=\"$n\" l=\"$l\"> (no via=\"name\"): $( printf '%s' "$PARSED" | tr '\n' ';' )"
     else ok "($r) --for=\"$q\": hop $h never proves <c n=\"$n\" l=\"$l\"> (absent or hedged)"; fi
