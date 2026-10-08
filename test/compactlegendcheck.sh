@@ -288,7 +288,7 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # outside-import/use,super-past-the-tree;...)" (was "(builtin/stdlib-name-...,external-import,...)"), +106 B — and the
 # est_tokens= that prices them, 858 -> 901 (header and root). Checked: the new output differs from the pin by exactly
 # those two clauses and that figure; the six other pins are unchanged.
-# RE-ANCHORED 2026-10-08 (train 26b: lean-answers merged onto for-spine-span), for.xml only: 4201 -> 4125 B, est_tokens=
+# RE-ANCHORED 2026-10-08 (train 26b: lean-answers merged onto for-spine-span), for.xml only: 4201 -> 4117 B, est_tokens=
 # 1683 -> 1650. The two lanes' changes compose (e= rows and clause, then the zero elision and its clause); undoing ONLY
 # the zero elision (est_tokens=/at= masked) gives the previous pin exactly. at= is stored masked, as before. The six other
 # pins are unchanged.

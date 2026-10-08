@@ -385,7 +385,7 @@ struct Config
     std::string_view laneBrief;                              // --brief=FILE: one non-blank line per lane, each ranked on its own
     bool             whereisFlag     = false;               // --whereis was given at all (a bare/empty value still routes to the
                                                              // handler and refuses loudly rather than falling through to the map)
-    std::string_view whereisListing;                        // --whereis-listing=defs|refs|all (default: the shorter of defs and all; crossref.h WhereisListing)
+    std::string_view whereisListing;                        // --whereis-listing=defs|refs|all (default: defs when it lists more definitions than all, else the strictly shorter; crossref.h whereisServedListing)
     std::string_view whereis;                               // --whereis=SYM: every ref whose TREE contains SYM,
                                                              // HEAD first, with on-head= saying whether the live line has it at all.
                                                              // Scans each ref's FULL tree; each distinct blob is read once (content-

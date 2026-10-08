@@ -713,6 +713,8 @@ if command -v python3 >/dev/null 2>&1; then
     [ "$( mcpq "$D16" zqMany '' )" = "$M16_A" ] \
         && ok "LEAN (L16-MCP): MCP whereis serves the same all page as the CLI when both pages show the same definitions" \
         || no "LEAN (L16-MCP): the MCP default differs from the CLI's on the capped, same-definitions answer"
+else
+    printf '  SKIP  LEAN (L16-MCP) MCP twin (no python3)\n'
 fi
 
 if command -v xmllint >/dev/null 2>&1; then
