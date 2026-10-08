@@ -31,9 +31,20 @@ in a Java class with an outside base drawn to an unrelated class's `flush`.
   (`this.bucket = new Schemas()`, Python `self.x = Foo()`, Go struct and embedded fields, Java/C# fields and
   properties, Kotlin/Swift properties and Kotlin `val` constructor properties, read through `this`/`self` or bare);
   Python `feed = parser.feed`. A Go module alias proves its package by the exact import path: the nearest `go.mod`'s
-  module path plus the directory below it, or the path a local `replace` gives a directory. An untyped local, a local
-  that hides a field, and an interface-typed receiver with several implementors stay name-only. A JS/TS call on the class object reaches its `static` members only, and a call on an
-  instance never one. A Ruby call's candidates that Ruby's own method lookup proves (the entries below) are its
+  module path plus the directory below it, or the path a local `replace` gives a directory (in a tree with no `go.mod`
+  at all, a directory that ends the import path). A local is read where its language scopes it: a block's declaration
+  from the declaration to the block's end, a parameter in its function or lambda, a Python name in its whole function.
+  Every other binding of a name also hides the field or the outer local it shadows there — a loop, lambda, catch,
+  resource or `with`/`except` variable, a pattern, `case`, `out var` or `match` capture, a destructuring entry, Swift
+  `if`/`guard`/`while let`, a Go range / type-switch / short variable, a JS/TS/Python/Go reassignment. Such a binding
+  names its own class only when it is written or constructed with one (a typed loop, lambda or resource variable); otherwise the call
+  through it is name-only, like a call through an untyped local or an interface-typed receiver with several
+  implementors. A written type that names a generic's type parameter (`<Tank>`, `[T any]`, `def f[T]`) names no class,
+  even when a class of that name exists. Wider than the language, and so name-only rather than resolved: a pattern
+  variable hides its field in its whole enclosing block (an `else` branch too), a Java local hides a field anywhere in
+  its method, and a Python rebinding anywhere in its function. Not read, the floor: a nested function or class
+  declaration that reuses a typed binding's name (JS/TS/Python), and Kotlin's implicit `it` beside a field named `it`. A JS/TS call on the class object reaches its `static` members only,
+  and a call on an instance never one. A Ruby call's candidates that Ruby's own method lookup proves (the entries below) are its
   answer, never `via="name"`.
 - **A call nothing proves is NAME-ONLY.** Its candidates the language's own lookup proves are its answer (an
   implicit receiver's class and bases, a free function in scope, the module a receiver alias names). With none
@@ -54,7 +65,7 @@ in a Java class with an outside base drawn to an unrelated class's `flush`.
   change); the `--max-tokens=3000` maps of the eight repositories keep 337 rows (331 before the change). The gate is
   `test/receiverevidencecheck.sh` (every surface, CLI/MCP parity, census conservation, and near misses
   for every evidence rule). Ingest records the receiver chain and the Java/C#/Kotlin/Swift declarations
-  (`kParserVer` 152, `kCacheVersion` 29), so a cache written by an earlier build is re-parsed.
+  (`kParserVer` 154, `kCacheVersion` 29), so a cache written by an earlier build is re-parsed.
 
 ### Changed — a Ruby call to self, or on an instance the code builds, answers from its own side: an instance never reaches `def self.m`
 

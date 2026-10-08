@@ -45,3 +45,10 @@ its static (companion) members, a call on an instance the others. A fallback hoo
 (py/src/tui/ghost.py): `__getattr__` leaves a defined member's call resolved.
 
 The names are paraphrases of graded false rows; the code is minimal and is never built.
+- `scope/{java,cs,kt,swift,ts,js,py,go}` — review B4: Tank and Barrel both define `spill`, and the class's field (or the
+  function's outer parameter / local) named `tank` is a Tank. Each method binds `tank` again — a loop, lambda, catch,
+  resource, pattern, `case`, `out var`, destructuring, `if`/`guard`/`while let`, `with`/`except`/walrus/`match`, a Go
+  range / if / type-switch variable, a reassignment — and calls `tank.spill()`, which must never prove Tank's spill;
+  `nestedBlock` / `lambdaOutside` / `blockOutside` call it past the block that hid it, which must never prove Barrel's. A
+  generic whose type parameter is spelled `Tank` (method and class, a field of that type) must never prove class Tank.
+  Kept: the field itself, a typed local, a typed loop / lambda variable's own class, a typed parameter.

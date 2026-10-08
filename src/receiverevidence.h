@@ -24,7 +24,9 @@
 #include "resolve.h"   // includerDir; HashMap / SmallVec through it
 #include "smallvec.h"
 
+#include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -155,7 +157,16 @@ struct ReceiverEvidence
     HashMap<std::string, std::string>                     memberType;      // "Class#field" → field class ("" = tombstone)
     HashMap<std::string, std::vector<std::string>>        embeds;          // "Class" → its other bases: Go embedded classes (promotion)
     HashMap<std::string, std::string>                     nameAlias;       // "<fileId>#local" → the class name it imports
-    HashMap<std::string, std::string>                     localType;       // "<fromSymbol>#var" → class ("" = tombstone)
+    // FE-B (review B4): one binding of a local name — the class it names ("" = unknown: it hides an outer binding of the
+    // name and proves nothing) and the bytes it is visible in. end == 0: a record with no span (a Python name, a reassignment,
+    // a base pass Type record): somewhere in its definition, extent unknown.
+    struct LocalFact
+    {
+        std::uint32_t start = 0;
+        std::uint32_t end   = 0;
+        std::string   type;
+    };
+    HashMap<std::string, std::vector<LocalFact>>          localType;       // "<fromSymbol>#var" → its bindings
     HashMap<std::string, std::pair<std::string, std::string>> methodAlias; // "<fromSymbol>#var" → ( object var, method )
     HashMap<std::string, std::string>                     moduleAlias;     // "<fileId>#name" → module as written ("" = tombstone)
     std::vector<std::vector<NodeId>>                      fnsByFile;       // fileId → functions/methods sorted by start (enclosing walk)
@@ -201,6 +212,17 @@ struct ReceiverEvidence
         if( !fresh && it->second != v )
         {
             it->second.clear();   // two different classes for one name: decide nothing
+        }
+    }
+
+    void addLocalFact( const std::string& k, const Binding& b )
+    {
+        const bool                  spanned = b.spanEnd > b.spanStart;
+        LocalFact                   f{ spanned ? b.spanStart : 0u, spanned ? b.spanEnd : 0u, b.typeName };
+        std::vector<LocalFact>&     facts = localType[ k ];
+        if( std::none_of( facts.begin(), facts.end(), [ & ]( const LocalFact& g ) { return g.start == f.start && g.end == f.end && g.type == f.type; } ) )
+        {
+            facts.push_back( std::move( f ) );
         }
     }
 
@@ -346,7 +368,7 @@ struct ReceiverEvidence
             }
             else if( typedLocal && !b.var.empty() )
             {
-                tombstoneInsert( localType, keyOf( from, '#', b.var ), b.typeName );
+                addLocalFact( keyOf( from, '#', b.var ), b );
             }
             else if( b.kind == LocalBindKind::MemberType && !b.var.empty() )
             {
@@ -393,19 +415,56 @@ struct ReceiverEvidence
         }
         return kNoNode;
     }
-    // the class a typed local names in `from` or a function enclosing it; nullptr when untyped (or tombstoned)
-    const std::string* typedLocal( NodeId from, std::string_view var ) const
+    // FE-B (review B4): the class local `var` holds at byte `site` of definition `scope`, by lexical scope — the innermost
+    // spanned binding that holds the site (a later start is more inner; a tie of two classes is unknown), checked against
+    // every binding with no span (its extent is unknown, so a disagreement is unknown). nullopt: no binding of `var` is
+    // visible there; "": one is, and it names no single class.
+    std::optional<std::string_view> visibleLocal( NodeId scope, std::string_view var, std::uint32_t site ) const
     {
-        const std::string* hit = nullptr;
+        const auto it = localType.find( keyOf( scope, '#', var ) );
+        if( it == localType.end() )
+        {
+            return std::nullopt;
+        }
+        const LocalFact* inner = nullptr;
+        bool             innerSplit = false;
+        std::optional<std::string_view> whole;
+        for( const LocalFact& f : it->second )
+        {
+            if( f.end == 0 )
+            {
+                whole = ( whole.has_value() && *whole != f.type ) ? std::string_view{} : std::string_view( f.type );
+                continue;
+            }
+            if( site < f.start || site >= f.end )
+            {
+                continue;
+            }
+            if( inner == nullptr || f.start > inner->start || ( f.start == inner->start && f.end < inner->end ) )
+            {
+                inner      = &f;
+                innerSplit = false;
+            }
+            else if( f.start == inner->start && f.end == inner->end && f.type != inner->type )
+            {
+                innerSplit = true;
+            }
+        }
+        if( inner == nullptr )
+        {
+            return whole;
+        }
+        const std::string_view seen = innerSplit ? std::string_view{} : std::string_view( inner->type );
+        return ( whole.has_value() && *whole != seen ) ? std::string_view{} : seen;
+    }
+    // the local `var` visible at byte `site` of `from` or of a function enclosing it (the innermost that has one)
+    std::optional<std::string_view> localAt( NodeId from, std::string_view var, std::uint32_t site ) const
+    {
+        std::optional<std::string_view> hit;
         walkScopes( from, [ & ]( NodeId scope )
         {
-            const auto it = localType.find( keyOf( scope, '#', var ) );
-            if( it == localType.end() )
-            {
-                return false;
-            }
-            hit = it->second.empty() ? nullptr : &it->second;
-            return true;
+            hit = visibleLocal( scope, var, site );
+            return hit.has_value();
         } );
         return hit;
     }
@@ -439,20 +498,19 @@ struct ReceiverEvidence
     // does `from` or a function enclosing it DECLARE `name` (a parameter or a local, typed or not) — not merely bind it: Java
     // copies each field name onto its class's methods as a bound-only name (graph.h shadowJavaFieldsOntoMethods), which must
     // not hide the field itself
-    bool declaresLocal( NodeId from, std::string_view name ) const
+    bool declaresLocal( NodeId from, std::string_view name, std::uint32_t site ) const
     {
         return walkScopes( from, [ & ]( NodeId s )
         {
-            const std::string& k = keyOf( s, '#', name );
-            if( localType.contains( k ) )
+            if( visibleLocal( s, name, site ).has_value() )
             {
-                return true;
+                return true;   // a binding of the name is visible at the site (review B4: by its span)
             }
             if( localNames == nullptr )
             {
                 return false;
             }
-            const auto it = localNames->find( k );
+            const auto it = localNames->find( keyOf( s, '#', name ) );
             return it != localNames->end() && ( it->second & kLocalNameDeclared ) != 0;
         } ) != kNoNode;
     }
@@ -632,14 +690,14 @@ struct ReceiverEvidence
             superOnly = true;
             return callerClass( r.fromSymbol );
         }
-        if( const std::string* t = typedLocal( r.fromSymbol, root ) )
+        if( const std::optional<std::string_view> t = localAt( r.fromSymbol, root, r.startByte ); t.has_value() && !t->empty() )
         {
             return unalias( r.fileId, *t );
         }
         // Java/C#/Kotlin/Swift (the implicit-receiver languages but C++, whose Rule 2b reads fields, and Ruby, whose fields
         // are @ivars): a bare `field.m()` inside a method is `this.field.m()` — the field the caller's class (or a base)
         // declares, when no parameter or local of that name hides it
-        if( implicitReceiverLang( r.lang ) && r.lang != Lang::Cpp && r.lang != Lang::Ruby && !declaresLocal( r.fromSymbol, root ) )
+        if( implicitReceiverLang( r.lang ) && r.lang != Lang::Cpp && r.lang != Lang::Ruby && !declaresLocal( r.fromSymbol, root, r.startByte ) )
         {
             const std::string_view owner = callerClass( r.fromSymbol );
             if( const std::string_view ft = owner.empty() ? std::string_view{} : fieldOf( owner, root ); !ft.empty() )
@@ -749,8 +807,8 @@ struct ReceiverEvidence
         {
             return methodOf( callerClass( scope ), alias->second, false );   // `write = self.write`: the class's own member
         }
-        const std::string* type = typedLocal( scope, alias->first );
-        return type != nullptr && methodOf( unalias( r.fileId, *type ), alias->second, false );
+        const std::optional<std::string_view> type = localAt( scope, alias->first, r.startByte );
+        return type.has_value() && !type->empty() && methodOf( unalias( r.fileId, *type ), alias->second, false );
     }
 
     // does module alias `root` (bound in the caller's file) name the file defining `c`

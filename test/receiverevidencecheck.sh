@@ -91,7 +91,17 @@
 #            constructed field or property — read bare (implicit this) or through this/self — and a Kotlin `val`
 #            constructor property RESOLVE to the declared class's member (Pump.*: Tank and Barrel both define spill).
 #            Near misses stay hedged: an untyped local (a lower-case factory), a local that hides the field, an
-#            interface/protocol-typed receiver with two implementors (both still listed).
+#            interface/protocol-typed receiver with two implementors (both still listed). Every other binding form: (B).
+#   (B) binding scope (review B4; scope/*: Tank and Barrel both define spill, the class's field / the outer binding is a
+#            Tank). (a) A binding that HIDES the field or an outer typed local never lets the call prove the field's
+#            class: Java for/lambda/catch/resource/instanceof/case/record-pattern variables, C# foreach/lambda/is/out
+#            var/case/deconstruction/catch/LINQ, Kotlin for/destructuring/lambda/let/when/catch, Swift for-in/case let/
+#            tuple/closure/if-guard-while let/catch, and the same shapes where FE-B reads TS/JS/Python/Go evidence
+#            (arrow and catch parameters, for-of, a block const, a destructuring; a Python for/lambda/comprehension/
+#            with/except/walrus/match/reassignment; a Go range/if/type-switch variable). Outside its block a local never
+#            lends its class (a nested block, a lambda's typed parameter), and the field (or outer local) proves again.
+#            (b) A generic's type parameter spelled like a class (`<Tank>`, `Box<Tank>`, `[Tank Spiller]`, `def f[Tank]`)
+#            never proves that class. Kept: the field itself, a typed local, a typed loop / lambda variable's own class.
 #   (I) implicit receiver: Java, Kotlin, C#, C++, Swift, Ruby — a bare call inside a class whose base is OUTSIDE
 #            the tree (or that imports the name from outside) never proves an unrelated class's method. Near
 #            misses: own members (private too), an in-repo superclass's member (the cone, and Java super.m()),
@@ -293,7 +303,7 @@ P(){
 # answer ROOT VERB SEL [EXTRA…] — write the verb's answer to a per-call file, its exit status beside it (FILE.rc)
 answer(){
     local r="$1" v="$2" s="$3"; shift 3
-    local f; f="$TMP/$r.$v.$( printf '%s' "$s$*" | tr '/:.,= ' '______' ).xml"
+    local f; f="$TMP/$( printf '%s' "$r" | tr '/' '_' ).$v.$( printf '%s' "$s$*" | tr '/:.,= ' '______' ).xml"
     rw "$r" "--$v=$s" "$@" >"$f"; printf '%s' "$?" >"$f.rc"
     printf '%s' "$f"
 }
@@ -536,6 +546,56 @@ notproven   swift callees Sources/App/Pump.swift:untyped "spill Sources/App/Pump
 notproven   swift callees Sources/App/Pump.swift:shadow "spill Sources/App/Pump.swift:5" "spill Sources/App/Pump.swift:6"
 notproven   swift callees Sources/App/Pump.swift:viaIface "spill Sources/App/Pump.swift:5" "spill Sources/App/Pump.swift:6"
 visible     swift callees Sources/App/Pump.swift:viaIface "spill Sources/App/Pump.swift:5" "spill Sources/App/Pump.swift:6"
+
+echo "=== (B) binding scope (review B4): a binding that hides a field or an outer local, and a type parameter ==="
+# hides ROOT FILE NAME OUTER BOUND FN… — at each FN's call, a binding of the receiver's name hides the field (or outer local)
+# whose class defines NAME at line OUTER: that edge is never PROVEN, and the candidate at line BOUND (the binding's own
+# class) stays visible, hedged or proven. Outside a binding's scope the roles swap (OUTER = the binding's class).
+hides(){
+    local r="$1" f="$2" n="$3" outer="$4" bound="$5" fn; shift 5
+    for fn in "$@"; do
+        notproven "$r" callees "$f:$fn" "$n $f:$outer"
+        visible   "$r" callees "$f:$fn" "$n $f:$bound"
+    done
+}
+J=src/app/Scope.java; C=App/Scope.cs; K=src/app/Scope.kt; W=Sources/App/Scope.swift
+hides scope/java  $J spill 7 8 forEachLoop lambdaParam typedLambda catchUse tryRes patternVar negatedPattern switchPattern recordPattern
+hides scope/java  $J spill 8 7 nestedBlock lambdaOutside                       # outside its block: never the binding's Barrel
+hides scope/java  $J spill 7 7 methodTypeParam classTypeParam typeParamField   # <Tank>: any Spiller, never class Tank proven
+proven scope/java callees $J:fieldUse "method spill $J:7"
+proven scope/java callees $J:typedLocal "method spill $J:8"
+hides scope/cs    $C Spill 7 8 ForEachLoop ForEachVar LambdaParam PatternVar OutVar SwitchCase Deconstruct CatchUse Linq
+hides scope/cs    $C Spill 8 7 NestedBlock LambdaOutside
+hides scope/cs    $C Spill 7 7 MethodTypeParam ClassTypeParam TypeParamField
+proven scope/cs   callees $C:FieldUse "method Spill $C:7"
+proven scope/cs   callees $C:NestedBlock "method Spill $C:7"                     # the field, past the block that hid it
+proven scope/cs   callees $C:TypedLocal "method Spill $C:8"
+proven scope/cs   callees $C:ForEachLoop "method Spill $C:8"                     # the loop variable's own declared class
+hides scope/kt    $K spill 5 6 forLoop forDestructure lambdaParam letParam typedLambda destructure whenSubject catchUse
+hides scope/kt    $K spill 6 5 nestedBlock lambdaOutside
+hides scope/kt    $K spill 5 5 classTypeParam typeParamField
+proven scope/kt   callees $K:fieldUse "fn spill $K:5"
+proven scope/kt   callees $K:typedLocal "fn spill $K:6"
+proven scope/kt   callees $K:typedLambda "fn spill $K:6"
+hides scope/swift $W spill 3 4 forLoop forCaseLet forTuple closureParam typedClosure ifLet guardLet whileLet caseLet ifCaseLet catchLet
+hides scope/swift $W spill 4 3 nestedBlock
+hides scope/swift $W spill 3 3 classTypeParam typeParamField
+proven scope/swift callees $W:fieldUse "fn spill $W:3"
+proven scope/swift callees $W:typedLocal "fn spill $W:4"
+echo "--- (B) the same shapes where FE-B reads TS / JS / Python / Go evidence (an outer typed or constructed binding hidden)"
+hides scope/ts    scope.ts spill 4 5 arrowParam forOf blockLocal catchParam destructure
+hides scope/ts    scope.ts spill 4 4 typeParam classTypeParam typeParamField
+proven scope/ts   callees scope.ts:typedParam "method spill scope.ts:4"
+hides scope/js    scope.js spill 2 3 arrowParam forOf catchParam
+proven scope/js   callees scope.js:blockOutside "method spill scope.js:2"         # the outer local, past the block that hid it
+proven scope/js   callees scope.js:constructed "method spill scope.js:2"
+hides scope/py    scope.py spill 3 6 for_loop lambda_param comprehension with_as except_as walrus reassign match_capture match_as
+hides scope/py    scope.py spill 3 3 type_param
+proven scope/py   callees scope.py:typed_param "fn spill scope.py:3"
+hides scope/go    scope.go Spill 8 12 RangeLoop ShortIf TypeSwitch
+hides scope/go    scope.go Spill 8 8 TypeParam TypeParamField
+proven scope/go   callees scope.go:BlockOutside "method Spill scope.go:8"
+proven scope/go   callees scope.go:TypedParam "method Spill scope.go:8"
 
 echo "=== (I) implicit receiver: a bare call never proves an unrelated class's method ==="
 notproven java callees src/main/java/app/Logger.java:line "render src/main/java/app/Exporter.java"

@@ -312,7 +312,11 @@ constexpr std::uint32_t kCacheVersion = 29;           // 29: FE-B (test/receiver
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 152;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 154;          // bump on any grammar/.scm/extraction change
+                                                      // 154 = lane FE-B fix round 2 (review B4): every binding form records its name with
+                                                      //   the bytes it is visible in (RecvType spans; an unknown class is a tombstone), and a
+                                                      //   written type that names a type parameter names no class. 154, not 153: 152's rich
+                                                      //   file tag is 153; the train renumbers if it collides.
                                                       // 152 = lane FE-B fix round 1 (review B3): Java/C#/Kotlin/Swift typed parameters, locals,
                                                       //   fields and constructed declarations record RecvType/MemberType. 152, not 151: 150's
                                                       //   rich file tag is 151; the train renumbers if it collides.
