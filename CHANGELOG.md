@@ -869,12 +869,14 @@ which puts the 12 back on `Core`'s def as single edges.
 resolved call edges did not reach `B`, even when that search had passed a call the graph keeps no edge for: a call the
 resolver declined (several candidates, none local, nothing chose one), an unresolved call, a function handed off as a
 value (`.then( handleResponse )`), or a call through a parameter. Any of those can be the missing hop. Such an answer now
-says the search was incomplete: `searched=` (the symbols it reached), `gaps="declined:D,unresolved:U,value:V,through:T"`,
+says the search was incomplete: `searched=` (the symbols it reached), `gaps="declined:D,unresolved:U,value:V,through:T,name:M"`,
 `gap_syms=` with up to three `<gap t= n= p= gaps=>` rows (nearest `from=` first, `gap_syms_capped="1"` past that) and a
 `next=` that expands their bodies. A `<gap>` row is where the search could not see, never a hop. Ambiguous calls are not
-counted (every candidate has an edge the search follows), nor are calls bound by name alone (`via="name"`: the search
-follows the candidates such a call lists, so a namesake in another directory that it does not list is never searched,
-and an unreached `to=` behind one still reads "no directed call path"), nor calls to names defined nowhere in the tree. When the
+counted (every candidate has an edge the search follows), nor calls to names defined nowhere in the tree. A call bound by
+name alone (`via="name"`) counts as a `name` gap when the tree defines that name, same language and kind, somewhere the
+call has no edge to: the search follows only the candidates such a call lists, so a namesake in another directory is
+never searched and may be the missing hop (`run(obj)` calling `obj.process()`, bound to the same-directory
+`A.process`, while `other/B.process` calls the target). When the
 search met no such call the answer is unchanged, byte for byte. The legend dictionary gains three entries. A floor:
 the `next=` names a gap row by file and name, so where one file holds two definitions of that name it serves both. Gate:
 `test/pathgapcheck.sh`.

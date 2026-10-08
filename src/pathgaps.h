@@ -7,6 +7,10 @@
 // UNRESOLVED (an in-repo name whose every definition was filtered out), a function handed off as a VALUE (stored or
 // passed, then invoked by whoever holds it) and a call made THROUGH a parameter or slot. Any of those can be the hop
 // that joins A to B, so "no path" there was a wholeness claim the search could not make.
+// A fifth population (train 26b, honesty-small condition 3): a call bound by NAME ALONE (FE-B via="name") has edges only to
+// the candidates in reach of the caller, so a same-language, same-kind definition of that name elsewhere (another
+// directory) is never searched — the fx/lpy case: run(obj) calls obj.process(), the edge goes to the same-directory
+// A.process, and other/B.process, which calls the target, was invisible behind a plain "no directed call path".
 //
 // THE CONTRACT. pathSearchGaps walks the same directed cone the BFS walked (every symbol reachable from the from=
 // definitions over resolved call edges) and counts those four populations inside it. When the count is non-zero the
@@ -19,7 +23,8 @@
 // (graph.h buildGraph's splitPick), and the BFS follows all of them, so ambiguity never hides a path (it can only make
 // a FOUND path a guess, which prov="split" / amb= already disclose). Calls to names with no in-repo definition at all
 // (Undefined) are not counted either: the graph keeps no per-caller tally of them, and nearly all are library calls.
-// Both are floors the legend sentence states.
+// Both are floors the legend sentence states. A via="name" call whose every same-language, same-kind definition of the
+// name already has an edge from the caller is not a gap either: nothing it could bind to was left unsearched.
 //
 // ONE analysis and ONE emitter for both transports (verbs_navigate.h runPath, mcpverbs.h pathText): the two used to
 // carry their own copies of the hint and must not drift on this clause.
@@ -47,9 +52,9 @@ namespace rw
 inline constexpr std::size_t kPathGapRows = 3;   // <gap> rows printed; gap_syms= counts them all, gap_syms_capped="1" says so
 
 // The four gap populations, in the order gaps= lists them. A declarative table (CONTRIBUTING §3): the spelling lives once.
-enum class PathGapKind : std::uint8_t { Declined, Unresolved, Value, Through };
-inline constexpr std::size_t                                    kPathGapKindCount = 4;
-inline constexpr std::array<std::string_view, kPathGapKindCount> kPathGapKindNames = { "declined", "unresolved", "value", "through" };
+enum class PathGapKind : std::uint8_t { Declined, Unresolved, Value, Through, Name };
+inline constexpr std::size_t                                    kPathGapKindCount = 5;
+inline constexpr std::array<std::string_view, kPathGapKindCount> kPathGapKindNames = { "declined", "unresolved", "value", "through", "name" };
 using PathGapCounts = std::array<std::size_t, kPathGapKindCount>;
 
 struct PathGapSym
@@ -69,6 +74,78 @@ struct PathSearchGaps
 
     bool any() const noexcept { return calls > 0; }
 };
+
+// NAME gaps: per cone symbol, the callee names it reaches only by name (an edge whose Graph::outNameOnly bit is set) for
+// which the tree holds a same-language, same-kind DEFINITION the caller has no edge to — a namesake the search never
+// walked. Counted once per such name per caller. Only the names behind the cone's name-only edges are looked up.
+inline void countUnlistedNamesakes( const IngestResult& ing, const Graph& g, std::span<const NodeId> cone, std::vector<PathGapCounts>& per )
+{
+    EXPECTS( g.outNameOnly.size() == g.outTargets.size(), "buildGraph allocates the hedge bits one per flattened edge" );
+    struct Key
+    {
+        Lang             lang;
+        SymKind          kind;
+        std::string_view name;
+        auto operator<=>( const Key& ) const = default;
+    };
+    const auto keyOf    = [ & ]( NodeId t ) { const Symbol& s = ing.symbols[t]; return Key{ s.lang, s.kind, s.name }; };
+    const auto hasHedge = [ & ]( NodeId u ) { return std::any_of( g.outNameOnly.begin() + g.outOff[u], g.outNameOnly.begin() + g.outOff[u + 1], []( std::uint8_t b ) { return b != 0; } ); };
+    const auto isSym    = [ & ]( std::uint32_t k ) { return g.outTargets[k] < ing.symbols.size(); };
+    std::vector<std::string_view> names;
+    for( const NodeId u : cone )
+    {
+        for( std::uint32_t k = g.outOff[u]; k < g.outOff[u + 1]; ++k )
+        {
+            if( g.outNameOnly[k] != 0 && isSym( k ) )
+            {
+                names.push_back( ing.symbols[ g.outTargets[k] ].name );
+            }
+        }
+    }
+    if( names.empty() )
+    {
+        return;
+    }
+    std::ranges::sort( names );
+    names.erase( std::ranges::unique( names ).begin(), names.end() );
+    std::vector<Key> defs;   // the tree's definitions of exactly those names
+    for( const Symbol& s : ing.symbols )
+    {
+        if( isDefinitionNotDeclaration( s ) && std::ranges::binary_search( names, std::string_view( s.name ) ) )
+        {
+            defs.push_back( Key{ s.lang, s.kind, s.name } );
+        }
+    }
+    std::ranges::sort( defs );
+    for( const NodeId u : cone )
+    {
+        if( !hasHedge( u ) )
+        {
+            continue;
+        }
+        std::vector<Key> listed, hedged;   // every target u has an edge to; the targets it reached by name alone
+        for( std::uint32_t k = g.outOff[u]; k < g.outOff[u + 1]; ++k )
+        {
+            if( !isSym( k ) )
+            {
+                continue;
+            }
+            listed.push_back( keyOf( g.outTargets[k] ) );
+            if( g.outNameOnly[k] != 0 )
+            {
+                hedged.push_back( keyOf( g.outTargets[k] ) );
+            }
+        }
+        std::ranges::sort( listed );
+        std::ranges::sort( hedged );
+        hedged.erase( std::ranges::unique( hedged ).begin(), hedged.end() );
+        for( const Key& key : hedged )
+        {
+            const bool unlisted = std::ranges::equal_range( defs, key ).size() > std::ranges::equal_range( listed, key ).size();
+            per[u][ std::size_t( PathGapKind::Name ) ] += unlisted ? 1u : 0u;
+        }
+    }
+}
 
 // The directed cone of `srcs` (the same out-edges shortestPathAny walks, every one of them — no early stop at a target,
 // because this runs only when there was none) and the gap populations inside it. Deterministic: BFS in id-ascending
@@ -133,6 +210,10 @@ inline PathSearchGaps pathSearchGaps( const IngestResult& ing, const Graph& g, s
             }
         }
     }
+    if( !g.outNameOnly.empty() )   // FE-B's hedge bits (absent on a graph built without them: no name population)
+    {
+        countUnlistedNamesakes( ing, g, queue, per );
+    }
     for( const NodeId u : queue )
     {
         std::size_t here = 0;
@@ -163,7 +244,7 @@ inline PathSearchGaps pathSearchGaps( const IngestResult& ing, const Graph& g, s
     return out;
 }
 
-// gaps="declined:D,unresolved:U,value:V,through:T" — zero entries left out, table order.
+// gaps="declined:D,unresolved:U,value:V,through:T,name:M" — zero entries left out, table order.
 inline std::string pathGapCountsValue( const PathGapCounts& c )
 {
     std::string v;
@@ -181,11 +262,11 @@ inline std::string pathGapCountsValue( const PathGapCounts& c )
 inline constexpr std::string_view kPathGapsLegend =
     "searched=N gaps= gap_syms=: reachable=0 but the search is INCOMPLETE — the N symbols reachable from from= over resolved call edges hold calls the graph "
     "keeps no edge for (gaps= counts them: declined = several candidates and nothing chose one, unresolved = an in-repo name every definition of which was "
-    "filtered out, value = a function stored or passed as a value and not otherwise reached, through = a call through a parameter or slot), so this is NOT "
-    "proof that no path exists. <gap t= n= p= gaps=> rows are the symbols that carry them, nearest to from= first, gap_syms_capped=1 = more than shown; a row "
-    "is where the search could not see, never a hop. Not counted: ambiguous calls (every candidate has an edge the search followed), calls bound by "
-    "name alone (via=name: the search follows the candidates such a call lists, never a namesake it does not list) and calls to names defined nowhere "
-    "in the tree. next= reads the rows' bodies. ";
+    "filtered out, value = a function stored or passed as a value and not otherwise reached, through = a call through a parameter or slot, name = a call "
+    "bound by name alone (via=name) whose name the tree also defines, same language and kind, where the call has no edge: that namesake was never "
+    "searched), so this is NOT proof that no path exists. <gap t= n= p= gaps=> rows are the symbols that carry them, nearest to from= first, "
+    "gap_syms_capped=1 = more than shown; a row is where the search could not see, never a hop. Not counted: ambiguous calls (every candidate has an "
+    "edge the search followed) and calls to names defined nowhere in the tree. next= reads the rows' bodies. ";
 inline std::string_view pathGapsLegend( bool on ) noexcept
 {
     return on ? kPathGapsLegend : std::string_view();
@@ -234,7 +315,7 @@ inline PathGapsXml pathUnreachedXml( const IngestResult& ing, const PathSearchGa
     }
     out.rootAttrs = " searched=\"" + std::to_string( gaps.searched ) + "\" gaps=\"" + pathGapCountsValue( gaps.totals ) + "\" gap_syms=\""
                   + std::to_string( gaps.syms.size() ) + "\"" + ( gaps.syms.size() > shown ? " gap_syms_capped=\"1\"" : "" )
-                  + " hint=\"no path through resolved call edges, but the search is incomplete: it met calls with no edge (gaps=) — read the gap rows, or try "
+                  + " hint=\"no path through resolved call edges, but the search is incomplete: it met calls or hand-offs it could not follow in full (gaps=) — read the gap rows, or try "
                   + ex( say.connect ) + " (undirected: finds a shared caller)" + std::string( say.tail ) + "\"" + nextAttrXml( next );
     return out;
 }
