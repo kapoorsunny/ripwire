@@ -105,7 +105,7 @@ false rows on a review's 76 adversarial candidate shapes plus the gate's 19 macr
 unchecked run; sample 30/30, Wilson 95% lower bound 0.89. An absence beside a positive on the same capture — an
 `if`/`elif` condition of `&&`-joined greps, or a grep through a function the script defines — is guarded (a crash
 fails the positive); before that guard the same tree gave 49 rows, of which 3 were such false positives (a seeded
-sample of 28/30, lower bound 0.79). The `tools/list` manifest grows 46,732 → 46,793 B: the quality_delta description counts 12 kinds and
+sample of 28/30, lower bound 0.79). The `tools/list` manifest grows 46,869 → 46,930 B on this release's tree (46,732 → 46,793 B on the lane's base, +61 B both ways): the quality_delta description counts 12 kinds and
 states the format-arity exception.
 
 Not checked, so no row there is no verdict: Python %-formatting and f-strings; a format in a named constant, a macro
@@ -1628,7 +1628,7 @@ whose full-use file tag is 155, so no cache such a build wrote is read as this r
 `memberPath`/`memberCtor`; the Ruby branch's appended binding kinds need no bump of their own) and `kQSnapCacheScheme` 15 → 19
 (the `--quality-delta` error-masking and placeholder changes, then the dead kind agreeing with `--dead-code` on functions
 held as values, then on a function that only stores itself, then the defect-shape records of the twelfth kind). Every ingest cache written by an earlier build is refused and re-indexed once, and every
-cached quality snapshot is recomputed. The session legend dictionary is `dictv=cbadf4aa6acda0c2 entries=787`.
+cached quality snapshot is recomputed. The session legend dictionary is `dictv=593769ab691623d8 entries=806`.
 
 ### Fixed — a call the language resolves outside the tree no longer binds to a same-named in-repo definition
 

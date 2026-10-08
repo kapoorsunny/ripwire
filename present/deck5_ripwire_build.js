@@ -230,7 +230,7 @@ function storyCards(s, { kick, head, stories, footText }){
     s.addText(flags, { x: MX+6.3,  y: y+0.04, w: 5.65, h: 0.58, fontFace: MONO, fontSize: 9, color: CYAN, valign: "middle", margin: 0 });
     y += 0.74;
   }
-  foot(s, "--help is generated from the binary's own flag table — 188 long flags; docs/COMMANDS.md carries an entry for every one of them, 167 with a recorded invocation and its output");
+  foot(s, "--help is generated from the binary's own flag table — 188 long flags; docs/COMMANDS.md carries an entry for every one of them, 168 with a recorded invocation and its output");
 }
 
 /* ── S5 · the moments ───────────────────────────────────────────────────── */

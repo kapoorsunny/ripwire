@@ -305,7 +305,12 @@ tools = json.loads( line )[ "result" ][ "tools" ]
 # +16 B), and states the one row family that gates on new code — "new-symbol rows never gate, except defect-shape
 # format-arity" (+61 B) — because an MCP client reading "gating" would otherwise take a gating new-symbol row for a
 # contradiction of the description. No schema byte moved, no tool added. Headroom after this line: 7 B.
-CEILING = 46890
+# RE-ANCHORED 2026-10-08 (train 26b, the final regeneration): 46,890 -> 46,950, measured 46,930 (33 tools). The two
+# re-anchors above were measured on different bases — lean-answers 46,869 (whereis `listing`), cr-qd-kinds 46,793 (from
+# 46,732: the quality_delta description's twelfth kind, +61 B) — and the merged tree carries both: 46,869 + 61 = 46,930,
+# every byte attributed (whereis schema 851 B and quality_delta's description as their lanes measured them; no other
+# tool moved; knob-honesty and the path-gap fix touch no tool description or schema). Headroom after this line: 20 B.
+CEILING = 46950
 manifest = len( json.dumps( { "tools": tools }, separators = ( ",", ":" ) ) )
 descBytes   = sum( len( t[ "description" ] ) for t in tools )
 schemaBytes = sum( len( json.dumps( t[ "inputSchema" ], separators = ( ",", ":" ) ) ) for t in tools )

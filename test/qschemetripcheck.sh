@@ -34,10 +34,12 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
-# PENDING (train 26b, not yet re-derived): the pin below is FE-B's lane pin (34d7ef2e81…), and it is stale on the train,
-#   whose watched text is kParserVer 156 (above FE-B's 154 and its rich tag 155; honesty-small and train25-cr2-followup
-#   folded in too), kCacheVersion 29 (FE-B) and kQSnapCacheScheme 18 (train25-cr2-followup), with quality.h's mirrors.
-#   Re-derive ONCE with UPDATE_GOLDEN=1 after the train's last lane merges and replace this line with that entry.
+# 2026-10-08, train 26b final regeneration (all thirteen lanes merged, the path-gap name fix on top): RE-DERIVED ONCE with
+#   UPDATE_GOLDEN=1 on the merged tree (hash a1e54fc30b…9141af3). Watched text: kParserVer 156 (rich file tag 157; above
+#   FE-B's 154/155, honesty-small's and the cr2 follow-up's 145, cr-qd's 148), kCacheVersion 29 (FE-B's ref record),
+#   kQSnapCacheScheme 19 (the cr2 follow-up's dead-set move took 18 and cr-qd-kinds' defect-shape records also took 18 for a
+#   different scheme: renumbered 19, both quality.h notes kept), quality.h's mirrors 156/29, and cr-qd's defectSitesOf
+#   in the manifest. Replaces the PENDING line that stood here since the FE-B merge; the lane entries below are history.
 # 2026-10-08, lane FE-B fix round 2 (review B4): RE-DERIVED with UPDATE_GOLDEN=1 (hash 34d7ef2e81…a5bd559d). kParserVer
 #   152 -> 154 (binding spans and tombstones, type parameters; 153 is 152's rich tag); quality.h's mirror with it.
 #   kCacheVersion and kQSnapCacheScheme unchanged. The train renumbers if needed.
