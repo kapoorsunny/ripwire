@@ -8242,6 +8242,138 @@ inline std::pair<std::string, std::string> scopeDisclosure( const Scope& scope, 
     return out;
 }
 
+// ── defect-shape (the twelfth kind) ───────────────────────────────────────────────────────────────────
+// A site is NEW when its identity (facet + normalized text) occurs more often in the current tree than in
+// the baseline, REPO-WIDE: an untouched, moved or renamed defect is not new, an edited one is, and a swap
+// (one site fixed and another added in the same definition) still is. The excess of each identity is
+// credited to the anchors that hold more copies of it now than at the baseline, in anchor-key order
+// (deterministic). An anchor credited with a new site of a facet gets ONE row for that facet; was= and now=
+// count the anchor's sites of that facet on each side. format-arity gates on ANY origin — a placeholder /
+// argument mismatch is a defect, not debt; utf8-cut, dedup-first and vacuous-assert are report-only:
+// sev="minor" by facet, not by size. A file the baseline could not read judges none of its sites.
+// Called from computeDelta with its origin oracle (existedAtBaseline) and its locator (stampLoc).
+template<class ExistedFn, class StampFn>
+inline void appendDefectShapeRows( std::vector<Regression>& regs, const IngestResult& ing, const Graph& g, const Snapshot& base,
+                                   std::string_view root, ExistedFn&& existedAtBaseline, StampFn&& stampLoc )
+{
+    const std::vector<DefectSiteAt> nowSites = defectSitesOf( ing, root, nullptr );
+    const auto isRealSite = []( std::uint64_t v ) { return v != kDefectFilePresent && v != kDefectFileUnreadable; };
+    std::vector<std::uint64_t> baseVals, nowVals, baseUnreadable;
+    for( const DefectSiteKey& d : base.defectSites )
+    {
+        if( isRealSite( d.site ) )
+        {
+            baseVals.push_back( d.site );
+        }
+        else if( d.site == kDefectFileUnreadable )
+        {
+            baseUnreadable.push_back( d.anchor );
+        }
+    }
+    for( const DefectSiteAt& d : nowSites )
+    {
+        if( isRealSite( d.key.site ) )
+        {
+            nowVals.push_back( d.key.site );
+        }
+    }
+    std::sort( baseVals.begin(), baseVals.end() );
+    std::sort( nowVals.begin(), nowVals.end() );
+    std::sort( baseUnreadable.begin(), baseUnreadable.end() );
+    const auto countOf = []( const std::vector<std::uint64_t>& v, std::uint64_t x )
+    {
+        const auto r = std::equal_range( v.begin(), v.end(), x );
+        return static_cast<std::uint32_t>( r.second - r.first );
+    };
+    // the repo-wide excess still to credit, per identity
+    std::vector<std::pair<std::uint64_t, std::uint32_t>> excess;
+    for( std::size_t k = 0; k < nowVals.size(); )
+    {
+        const std::uint64_t v  = nowVals[k];
+        const std::uint32_t nN = countOf( nowVals, v );
+        const std::uint32_t nB = countOf( baseVals, v );
+        if( nN > nB )
+        {
+            excess.push_back( { v, nN - nB } );
+        }
+        k += nN;
+    }
+    const auto baseAnchorCount = [ & ]( std::uint64_t anchor, std::uint64_t site )
+    {
+        const auto r = std::equal_range( base.defectSites.begin(), base.defectSites.end(), DefectSiteKey{ anchor, site } );
+        return static_cast<std::uint32_t>( r.second - r.first );
+    };
+    const auto facetCount = []( const auto& sites, std::uint64_t anchor, defectshape::Facet f, auto keyOf )
+    {
+        std::uint32_t n = 0;
+        for( const auto& s : sites )
+        {
+            const DefectSiteKey& k = keyOf( s );
+            n += ( k.anchor == anchor && k.site != kDefectFilePresent && k.site != kDefectFileUnreadable && defectFacetOf( k.site ) == f ) ? 1u : 0u;
+        }
+        return n;
+    };
+    struct Credited
+    {
+        std::uint64_t      anchor = 0;
+        defectshape::Facet facet  = defectshape::Facet::FormatArity;
+        const DefectSiteAt* first = nullptr;
+    };
+    std::vector<Credited> credited;
+    for( std::size_t k = 0; k < nowSites.size(); )
+    {
+        const DefectSiteKey key = nowSites[k].key;
+        std::size_t         e   = k;
+        while( e < nowSites.size() && nowSites[e].key == key )
+        {
+            ++e;
+        }
+        const std::uint32_t headA = static_cast<std::uint32_t>( e - k );
+        const DefectSiteAt& at    = nowSites[k];
+        k                         = e;
+        if( !isRealSite( key.site ) || at.fileId >= ing.files.size()
+            || std::binary_search( baseUnreadable.begin(), baseUnreadable.end(), defectFileAnchor( relForHash( ing.files[ at.fileId ], root ) ) ) )
+        {
+            continue;
+        }
+        const std::uint32_t baseA = baseAnchorCount( key.anchor, key.site );
+        const auto ex = std::lower_bound( excess.begin(), excess.end(), std::pair<std::uint64_t, std::uint32_t>{ key.site, 0 } );
+        if( headA <= baseA || ex == excess.end() || ex->first != key.site || ex->second == 0 )
+        {
+            continue;
+        }
+        ex->second -= std::min( ex->second, headA - baseA );
+        const defectshape::Facet f = defectFacetOf( key.site );
+        const bool seen = std::any_of( credited.begin(), credited.end(), [ & ]( const Credited& c ) { return c.anchor == key.anchor && c.facet == f; } );
+        if( !seen )
+        {
+            credited.push_back( { key.anchor, f, &at } );
+        }
+    }
+    for( const Credited& c : credited )
+    {
+        const std::uint32_t was = facetCount( base.defectSites, c.anchor, c.facet, []( const DefectSiteKey& d ) -> const DefectSiteKey& { return d; } );
+        const std::uint32_t now = facetCount( nowSites, c.anchor, c.facet, []( const DefectSiteAt& d ) -> const DefectSiteKey& { return d.key; } );
+        const NodeId        owner = c.first->owner;
+        const std::string   rel( relForHash( ing.files[ c.first->fileId ], root ) );
+        const bool          isNew = ( owner != kNoNode )
+                                      ? !existedAtBaseline( c.anchor )
+                                      : !std::binary_search( base.defectSites.begin(), base.defectSites.end(), DefectSiteKey{ c.anchor, kDefectFilePresent } );
+        const std::string   sym = ( owner != kNoNode && owner < g.canonId.size() && !g.canonId[owner].empty() ) ? g.canonId[owner] : rel;
+        regs.push_back( { "defect-shape", sym, was, now, defectRowKey( c.anchor, c.facet ), !defectshape::facetGatesOnAnyOrigin( c.facet ),
+                          std::string( defectshape::facetName( c.facet ) ), isNew } );
+        if( owner != kNoNode )
+        {
+            stampLoc( owner );
+        }
+        else
+        {
+            regs.back().path = rel;
+            regs.back().line = c.first->line;
+        }
+    }
+}
+
 // current state vs baseline → only what got worse.
 //   complexity/verbosity/nesting/params: a symbol the change pushed/kept OVER the bar (now > baseline AND
 //     now > BAR; a NEW symbol counts with baseline 0). Each is a per-symbol metric whose overloads share a
@@ -8917,133 +9049,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
         }
     }
 
-    // ── defect-shape (the twelfth kind) ───────────────────────────────────────────────────────────────────
-    // A site is NEW when its identity (facet + normalized text) occurs more often in the current tree than in
-    // the baseline, REPO-WIDE: an untouched, moved or renamed defect is not new, an edited one is, and a swap
-    // (one site fixed and another added in the same definition) still is. The excess of each identity is
-    // credited to the anchors that hold more copies of it now than at the baseline, in anchor-key order
-    // (deterministic). An anchor credited with a new site of a facet gets ONE row for that facet; was= and now=
-    // count the anchor's sites of that facet on each side. format-arity gates on ANY origin — a placeholder /
-    // argument mismatch is a defect, not debt; utf8-cut, dedup-first and vacuous-assert are report-only:
-    // sev="minor" by facet, not by size. A file the baseline could not read judges none of its sites.
-    {
-        const std::vector<DefectSiteAt> nowSites = defectSitesOf( ing, root, nullptr );
-        const auto isRealSite = []( std::uint64_t v ) { return v != kDefectFilePresent && v != kDefectFileUnreadable; };
-        std::vector<std::uint64_t> baseVals, nowVals, baseUnreadable;
-        for( const DefectSiteKey& d : base.defectSites )
-        {
-            if( isRealSite( d.site ) )
-            {
-                baseVals.push_back( d.site );
-            }
-            else if( d.site == kDefectFileUnreadable )
-            {
-                baseUnreadable.push_back( d.anchor );
-            }
-        }
-        for( const DefectSiteAt& d : nowSites )
-        {
-            if( isRealSite( d.key.site ) )
-            {
-                nowVals.push_back( d.key.site );
-            }
-        }
-        std::sort( baseVals.begin(), baseVals.end() );
-        std::sort( nowVals.begin(), nowVals.end() );
-        std::sort( baseUnreadable.begin(), baseUnreadable.end() );
-        const auto countOf = []( const std::vector<std::uint64_t>& v, std::uint64_t x )
-        {
-            const auto r = std::equal_range( v.begin(), v.end(), x );
-            return static_cast<std::uint32_t>( r.second - r.first );
-        };
-        // the repo-wide excess still to credit, per identity
-        std::vector<std::pair<std::uint64_t, std::uint32_t>> excess;
-        for( std::size_t k = 0; k < nowVals.size(); )
-        {
-            const std::uint64_t v  = nowVals[k];
-            const std::uint32_t nN = countOf( nowVals, v );
-            const std::uint32_t nB = countOf( baseVals, v );
-            if( nN > nB )
-            {
-                excess.push_back( { v, nN - nB } );
-            }
-            k += nN;
-        }
-        const auto baseAnchorCount = [ & ]( std::uint64_t anchor, std::uint64_t site )
-        {
-            const auto r = std::equal_range( base.defectSites.begin(), base.defectSites.end(), DefectSiteKey{ anchor, site } );
-            return static_cast<std::uint32_t>( r.second - r.first );
-        };
-        const auto facetCount = []( const auto& sites, std::uint64_t anchor, defectshape::Facet f, auto keyOf )
-        {
-            std::uint32_t n = 0;
-            for( const auto& s : sites )
-            {
-                const DefectSiteKey& k = keyOf( s );
-                n += ( k.anchor == anchor && k.site != kDefectFilePresent && k.site != kDefectFileUnreadable && defectFacetOf( k.site ) == f ) ? 1u : 0u;
-            }
-            return n;
-        };
-        struct Credited
-        {
-            std::uint64_t      anchor = 0;
-            defectshape::Facet facet  = defectshape::Facet::FormatArity;
-            const DefectSiteAt* first = nullptr;
-        };
-        std::vector<Credited> credited;
-        for( std::size_t k = 0; k < nowSites.size(); )
-        {
-            const DefectSiteKey key = nowSites[k].key;
-            std::size_t         e   = k;
-            while( e < nowSites.size() && nowSites[e].key == key )
-            {
-                ++e;
-            }
-            const std::uint32_t headA = static_cast<std::uint32_t>( e - k );
-            const DefectSiteAt& at    = nowSites[k];
-            k                         = e;
-            if( !isRealSite( key.site ) || at.fileId >= ing.files.size()
-                || std::binary_search( baseUnreadable.begin(), baseUnreadable.end(), defectFileAnchor( relForHash( ing.files[ at.fileId ], root ) ) ) )
-            {
-                continue;
-            }
-            const std::uint32_t baseA = baseAnchorCount( key.anchor, key.site );
-            const auto ex = std::lower_bound( excess.begin(), excess.end(), std::pair<std::uint64_t, std::uint32_t>{ key.site, 0 } );
-            if( headA <= baseA || ex == excess.end() || ex->first != key.site || ex->second == 0 )
-            {
-                continue;
-            }
-            ex->second -= std::min( ex->second, headA - baseA );
-            const defectshape::Facet f = defectFacetOf( key.site );
-            const bool seen = std::any_of( credited.begin(), credited.end(), [ & ]( const Credited& c ) { return c.anchor == key.anchor && c.facet == f; } );
-            if( !seen )
-            {
-                credited.push_back( { key.anchor, f, &at } );
-            }
-        }
-        for( const Credited& c : credited )
-        {
-            const std::uint32_t was = facetCount( base.defectSites, c.anchor, c.facet, []( const DefectSiteKey& d ) -> const DefectSiteKey& { return d; } );
-            const std::uint32_t now = facetCount( nowSites, c.anchor, c.facet, []( const DefectSiteAt& d ) -> const DefectSiteKey& { return d.key; } );
-            const NodeId        owner = c.first->owner;
-            const std::string   rel( relForHash( ing.files[ c.first->fileId ], root ) );
-            const bool          isNew = ( owner != kNoNode )
-                                          ? !existedAtBaseline( c.anchor )
-                                          : !std::binary_search( base.defectSites.begin(), base.defectSites.end(), DefectSiteKey{ c.anchor, kDefectFilePresent } );
-            const std::string   sym = ( owner != kNoNode && owner < g.canonId.size() && !g.canonId[owner].empty() ) ? g.canonId[owner] : rel;
-            regs.push_back( { "defect-shape", sym, was, now, defectRowKey( c.anchor, c.facet ), !defectshape::facetGatesOnAnyOrigin( c.facet ),
-                              std::string( defectshape::facetName( c.facet ) ), isNew } );
-            if( owner != kNoNode )
-            {
-                stampLoc( owner );
-            }
-            else
-            {
-                regs.back().path = rel;
-                regs.back().line = c.first->line;
-            }
-        }
-    }
+    appendDefectShapeRows( regs, ing, g, base, root, existedAtBaseline, stampLoc );   // the twelfth kind (see its doc)
 
     // ── §D#4-2 short-horizon churn (GitClear +15% "new code rewritten within two weeks") ───────────────────
     // A symbol flags iff THREE independent gates all hold (signal-to-noise round, 2026-07-13):
