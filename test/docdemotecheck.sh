@@ -262,6 +262,16 @@ grep -q 'doc_tier="' "$TMP/conceptc.xml" \
 diff -q "$TMP/concept.xml" "$ROOT/test/docdemotegolden_for.xml" >/dev/null \
     && ok "(f) conceptual --for byte-identical to the pre-change golden" \
     || no "(f) conceptual --for drifted from test/docdemotegolden_for.xml"
+# (f) one row spelling: every r= row of a --for answer omits a zero cx=/ccx=/in= (the lens legend: absent = 0), the rows
+# the code-above-docs reorder moved and re-headed (serialize.h reorderDocsAfterCode) included. This routed question
+# moves the two notes/paging_design.md rows below the code.
+if [ -s "$TMP/concept.xml" ] && grep -q '<ctx ' "$TMP/concept.xml"; then
+    zrows="$( grep -oE '<d [^>]* r="[0-9]+"[^>]*>' "$TMP/concept.xml" | grep -cE ' (cx|ccx|in)="0"' )"
+    if [ "$zrows" = "0" ]; then ok "(f) no --for row spells a zero cx=/ccx=/in= (moved rows included)"
+    else no "(f) $zrows --for row(s) still spell a zero cx=/ccx=/in= (a re-headed row lost the lens spelling)"; fi
+else
+    no "(f) conceptual --for produced no <ctx> root, so the row-spelling arm proves nothing"
+fi
 # (f) present-only via clause: the header's via="name" reading rides only when a row carries via="name". On this
 # fixture the one hop whose only callee is name-only (request_page -> evict_one) takes no <h> slot (the hop-slot rule,
 # test/forsigspancheck.sh (H)), so no row is left to carry the attribute and the clause must not ride either.

@@ -173,7 +173,7 @@ import sys, json, re
 w, c = [ json.loads( l ) for l in sys.stdin.read().splitlines()[:2] ]
 A = re.compile( r"\s([\w:.-]+)=\"([^\"]*)\"" )
 def rows( t ):
-    m = re.search( r"<sigs>.*?</sigs><tail[^>]*>.*?</tail>", t, re.S ); return m.group( 0 ) if m else None
+    m = re.search( r"<sigs\b[^>]*>.*?</sigs><tail[^>]*>.*?</tail>", t, re.S ); return m.group( 0 ) if m else None   # <sigs> may carry docs_after_code=
 ab = re.search( r"<about\b[^>]*/>", w ); rt = re.search( r"<ctx\b[^>]*>", c )
 if not ab or "legend=\"ref\"" not in ab.group( 0 ): print( "NOREF" ); sys.exit()
 wa = { k: v for k, v in A.findall( ab.group( 0 ) ) if k not in ( "legend", "dict", "dictv" ) }

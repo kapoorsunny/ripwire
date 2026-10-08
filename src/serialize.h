@@ -5469,7 +5469,9 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             cut.docsAfterCode = reorderDocsAfterCode( entries,
                 [ & ]( const SigEntry& e ) { return ing.symbols[ e.id ].lang == Lang::Markdown; },
                 [ & ]( SigEntry& e, std::uint32_t newRank )
-                { e.head = sigRowHead( ing, e.id, SigRowFacts{ metrics, fanIn, e.lensRun.c_str(), e.pureSig ? " pure=\"1\"" : "", newRank, topRowNext }, esc, rootArg ); } );
+                // the moved row keeps the row spelling it was charged and shown with (lean-answers' zero elision included)
+                { e.head = sigRowHead( ing, e.id, SigRowFacts{ metrics, fanIn, e.lensRun.c_str(), e.pureSig ? " pure=\"1\"" : "", newRank, topRowNext,
+                                                               spelling.elideZeroMetrics }, esc, rootArg ); } );
         }
         if( cutOut )
         {
