@@ -4278,9 +4278,11 @@ inline std::uint32_t defEndLine( const Symbol& s, const std::vector<std::uint32_
 // l= stays the NAME's line.
 inline constexpr std::string_view kForCompactEndLineLegend =
     "; d e= its last line (absent=unknown, never 0; l= the name's line)";
+// The parenthesis is a list of examples, not the full set (a module-scope row has no e= either; CHANGELOG says so). Listing it
+// would move every full-legend golden (docdemote, route, anchor, relevancefloor, compactlegend pins) for a cosmetic gain: deferred.
 inline constexpr std::string_view kForEndLineLegend =
     "; e= on a d row: the 1-based line where that definition ends, body-inclusive; absent when the extent is not known "
-    "(extent_suspect, docs, config, module-scope), never 0; l= is the line of the definition's name, so a definition can start above l=";
+    "(extent_suspect, docs, config), never 0; l= is the line of the definition's name, so a definition can start above l=";
 
 // The " e=\"N\"" run, spliced into a rendered <d …> head right after its l= value (the head always opens `<d l="N"`,
 // sigRowHead). Kept OUT of the head the budget ledger measures, so the ranked set a row budget admits is the one it
