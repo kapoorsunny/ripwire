@@ -68,7 +68,8 @@ inline constexpr NodeId kNoNode = 0xFFFFFFFFu;
 // NamedType / Alias / FuncType (honesty-small-068) are APPENDED after ModuleScope so no existing kind renumbers. They
 // split the old `@definition.type` → Struct bucket where a grammar's syntax PROVES the type's form, which today is Go
 // alone: `type N string` / `type L[T any] []T` (a defined type over a non-struct, non-interface, non-func form, or over
-// another named type) is t="type", `type F func(...)` is t="functype", `type A = B` is t="alias". A Go struct or
+// another named type) is t="type", `type F func(...)` is t="functype", `type A = B` is t="alias" (a floor: a Go 1.24
+// generic alias `type A[T any] = B` reads t="type", because the grammar gives it no type_alias node). A Go struct or
 // interface keeps t="struct"/t="iface". Every other language's @definition.type capture still maps to Struct (C/C++
 // typedef and enum, TS/Swift/Dart aliases, Java/C#/PHP/GDScript enums, Elixir @type) — a disclosed floor, not a claim
 // that those are structs. The three kinds BEHAVE as Struct did everywhere a predicate reads the kind

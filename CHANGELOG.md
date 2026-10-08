@@ -767,7 +767,8 @@ says the search was incomplete: `searched=` (the symbols it reached), `gaps="dec
 `gap_syms=` with up to three `<gap t= n= p= gaps=>` rows (nearest `from=` first, `gap_syms_capped="1"` past that) and a
 `next=` that expands their bodies. A `<gap>` row is where the search could not see, never a hop. Ambiguous calls are not
 counted (every candidate has an edge the search follows), nor are calls to names defined nowhere in the tree. When the
-search met no such call the answer is unchanged, byte for byte. The legend dictionary gains three entries. Gate:
+search met no such call the answer is unchanged, byte for byte. The legend dictionary gains three entries. A floor:
+the `next=` names a gap row by file and name, so where one file holds two definitions of that name it serves both. Gate:
 `test/pathgapcheck.sh`.
 
 ### Fixed — a Go named type's `t=` says what it is: `type`, `functype` or `alias`, not `struct`
@@ -779,7 +780,9 @@ Every Go `type_spec` was labelled `t="struct"`, so `type TestName string` and `t
 `type ( … )` blocks and generic types follow the same rule. The three new kinds behave as `struct` did everywhere else (a
 conversion `TestName( s )` keeps its caller edge), `--graph-query`'s `kind()` accepts them, and the map's `--legend=full`
 gains a clause for them only on a tree that has one. Only Go is split: other languages' typedefs, aliases and enums still
-read `t="struct"`. `kParserVer` 143 → 145, so every ingest cache is re-indexed once. Gate: `test/gokindcheck.sh`.
+read `t="struct"`. A floor: a Go 1.24 generic alias `type A[T any] = B` reads `t="type"`, not `t="alias"`, because
+the grammar gives it no alias node. `kParserVer` moves (see the versions note), so every ingest cache is re-indexed once.
+Gate: `test/gokindcheck.sh`.
 
 ### Fixed — a count the index cannot vouch for is marked a floor beside the number; safe-delete rows carry the call line
 
@@ -1306,7 +1309,7 @@ per page instead. Gate: `test/impactdepthcheck.sh`.
 
 ### Changed — the versions this release moves, stated once
 
-`kParserVer` 124 → 148 (the function-literal fix takes 128; #338 and #325 take 129; the body-less C/C++ type-specifier
+`kParserVer` 124 → 156 (the function-literal fix takes 128; #338 and #325 take 129; the body-less C/C++ type-specifier
 span fix and the TypeScript `await f<T>(x)` / `!f<T>(x)` calls each took a number of their own on their branches, as did
 the false-edge resolution (134, 135), the value-reference rows (140) and the Ruby method-lookup changes (#373: one per
 step from 130 to 137 — bare-word calls, mixins, typed receivers, RSpec targets, Rails declared calls, Rake and Jbuilder
@@ -1314,7 +1317,9 @@ files, RSpec matcher chains, class objects — then 142 and 145 for its rebase a
 change); 141 sat above every number a branch build of unreleased work had used, and the review fixes to the global-object
 shadow and the value-reference slot text take 143, above 141's full-use file tag 142. The Ruby method lookup lands at
 148, renumbered from its branch's 145: other branch builds in flight have used up to 147, and 148's full-use file tag is
-149, so no cache such a build wrote is read as this release's), `kCacheVersion` 25 → 28
+149. The Go named-type kinds and the train 25 re-review's extraction fixes each took 145 on their branches and land
+together at 156: branch builds in flight have used up to 154, whose full-use file tag is 155, so no cache such a build
+wrote is read as this release's), `kCacheVersion` 25 → 28
 (the function-literal fix's record changes, then the false-edge fix's member-call fields; the Ruby branch's appended
 binding kinds need no bump of their own) and `kQSnapCacheScheme` 15 → 17
 (the `--quality-delta` error-masking and placeholder changes, then the dead kind agreeing with `--dead-code` on functions
