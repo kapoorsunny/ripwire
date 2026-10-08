@@ -14,7 +14,7 @@ namespace App {
         public void ForEachVar(List<Barrel> bs) { foreach (var tank in bs) { tank.Spill(); } }
         public void LambdaParam(List<Barrel> bs) { bs.ForEach(tank => tank.Spill()); }
         public void PatternVar(object o) { if (o is Barrel tank) { tank.Spill(); } }
-        public void OutVar(Dictionary<int, Barrel> d) { if (d.TryGetValue(1, out var tank)) { tank.Spill(); } }
+        public void OutVar(Dictionary<int, Barrel> d) { var found = d.TryGetValue(1, out var tank); if (found) tank.Spill(); }
         public void SwitchCase(object o) { switch (o) { case Barrel tank: tank.Spill(); break; } }
         public void Deconstruct((Barrel, Barrel) p) { var (tank, other) = p; tank.Spill(); }
         public void CatchUse() { try { } catch (Exception tank) { tank.Spill(); } }

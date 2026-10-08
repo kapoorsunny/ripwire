@@ -5,7 +5,7 @@ import java.util.List;
 // Review B4: Tank and Barrel both define spill(), and the class's field `tank` is a Tank.
 interface Spiller { void spill(); }
 class Tank implements Spiller { public void spill() {} }
-class Barrel implements Spiller { public void spill() {} }
+class Barrel implements Spiller, AutoCloseable { public void spill() {} public void close() {} }
 record P(Barrel b) {}
 
 // (a) a binding that hides the field — a loop, lambda, catch or resource variable, a pattern variable — and a local seen
@@ -16,7 +16,7 @@ class Scope {
     void lambdaParam(List<Barrel> bs) { bs.forEach(tank -> tank.spill()); }
     void typedLambda(List<Barrel> bs) { bs.forEach((Barrel tank) -> tank.spill()); }
     void catchUse() { try { } catch (RuntimeException tank) { tank.spill(); } }
-    void tryRes() throws Exception { try (Barrel tank = new Barrel()) { tank.spill(); } }
+    void tryRes() throws Exception { try (Barrel tank = new Barrel()) { tank.spill(); tank.close(); } }
     void patternVar(Object o) { if (o instanceof Barrel tank) { tank.spill(); } }
     void negatedPattern(Object o) { if (!(o instanceof Barrel tank)) return; tank.spill(); }
     void switchPattern(Object o) { switch (o) { case Barrel tank -> tank.spill(); default -> {} } }

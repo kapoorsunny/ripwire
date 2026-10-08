@@ -4109,6 +4109,17 @@ struct BindCtx
 };
 
 // ── FE-B receiver-evidence capture (model.h LocalBindKind::RecvType / MemberType / MethodAlias) ──────────────────────────
+// is node kind `t` one of `kinds`
+inline bool kindIn( const char* t, std::initializer_list<std::string_view> kinds ) noexcept
+{
+    return std::find( kinds.begin(), kinds.end(), std::string_view( t ) ) != kinds.end();
+}
+// an identifier in any grammar's spelling
+inline bool identifierKind( const char* t ) noexcept
+{
+    return kindIn( t, { "identifier", "type_identifier", "simple_identifier" } );
+}
+
 // The class a written TYPE names, final segment — "" for anything that names no single class (an array, a union, a
 // string annotation, a generic's argument). Unwraps the annotation wrappers each grammar puts around the type.
 inline std::string_view annotatedClass( TSNode node, std::string_view src )
@@ -4116,7 +4127,7 @@ inline std::string_view annotatedClass( TSNode node, std::string_view src )
     for( int guard = 0; guard < 8 && !ts_node_is_null( node ); ++guard )
     {
         const char* t = ts_node_type( node );
-        if( kindIs( t, "identifier" ) || kindIs( t, "type_identifier" ) || kindIs( t, "simple_identifier" ) )
+        if( identifierKind( t ) )
         {
             return nodeTextOf( node, src );
         }
@@ -4223,10 +4234,6 @@ inline std::string_view constructedBy( TSNode value, Lang lang, std::string_view
     return constructedClass( value, lang, src );
 }
 
-inline bool identifierKind( const char* t ) noexcept
-{
-    return kindIs( t, "identifier" ) || kindIs( t, "type_identifier" ) || kindIs( t, "simple_identifier" );
-}
 
 // FE-B (review B4b): the names one type parameter declares, visible over [start, end): the leading identifier(s) after any
 // annotation, modifier or variance (Java/C#/Kotlin/Swift/TS `T`, Go `A, B any`), or Python 3.12's `type`-wrapped name.
@@ -4316,8 +4323,14 @@ inline void noteGoReceiverTypeParameters( BindCtx& cx, TSNode method )
 // is `name`, written at byte `at`, a type parameter of a generic that encloses it
 inline bool namesTypeParameter( const BindCtx& cx, std::string_view name, std::uint32_t at ) noexcept
 {
-    return std::any_of( cx.typeParams.begin(), cx.typeParams.end(),
-                        [ & ]( const TypeParamScope& p ) { return p.name == name && p.start <= at && at < p.end; } );
+    for( const TypeParamScope& p : cx.typeParams )
+    {
+        if( at >= p.start && at < p.end && p.name == name )
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 // the class a written type names at byte `at` — "" when it names none, or names a type parameter (`<Tank> … Tank t`)
@@ -4350,7 +4363,7 @@ inline TSNode ancestorOfKind( TSNode n, std::initializer_list<std::string_view> 
     TSNode p = ts_node_is_null( n ) ? TSNode{} : ts_node_parent( n );
     for( int guard = 0; guard < 64 && !ts_node_is_null( p ); ++guard )
     {
-        if( std::find( kinds.begin(), kinds.end(), std::string_view( ts_node_type( p ) ) ) != kinds.end() )
+        if( kindIn( ts_node_type( p ), kinds ) )
         {
             return p;
         }
@@ -4474,7 +4487,7 @@ inline TSNode namedChildOfKind( TSNode node, std::initializer_list<std::string_v
     for( std::uint32_t i = 0, k = ts_node_named_child_count( node ); i < k; ++i )
     {
         const TSNode c = ts_node_named_child( node, i );
-        if( std::find( kinds.begin(), kinds.end(), std::string_view( ts_node_type( c ) ) ) != kinds.end() )
+        if( kindIn( ts_node_type( c ), kinds ) )
         {
             hit = c;
             if( !last )
