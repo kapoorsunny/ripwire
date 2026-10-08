@@ -394,7 +394,7 @@ case "$promptBytes" in ''|*[!0-9]*) exit 0;; esac
 # newline in `rest` and missed the case match below — the guard then fell through to actually invoke the
 # classifier (a real subprocess), log status="abstain" instead of status="skip-system", and delete an
 # existing session's routing-pending file, none of which a harness/system event should ever cause. This
-# bash parameter-expansion form strips the FULL leading run of [:space:] bytes (space/tab/newline/CR) from
+# bash parameter-expansion form strips the FULL leading run of whitespace bytes (space/tab/newline/VT/FF/CR) from
 # the whole string in one pass, not line by line.
 # ---- BEGIN MIRRORED BLOCK rw_is_harness_event (issue #381) ------------------------------------------------
 # KEEP BYTE-IDENTICAL in hooks/ripwire-claude-route.sh and hooks/ripwire-codex-route.sh; test/routehookcheck.sh
@@ -415,7 +415,9 @@ rw_is_harness_event()
     return 1
 }
 # ---- END MIRRORED BLOCK rw_is_harness_event ---------------------------------------------------------------
-lead="${prompt%%[![:space:]]*}"
+# The lead strip is the six ASCII bytes src/taskroute.h's looksLikeSystemEvent strips (space \t \n \v \f \r), written
+# out: bash's [:space:] also matches U+00A0 and other Unicode spaces in a UTF-8 locale, which the classifier keeps.
+lead="${prompt%%[!$' \t\n\v\f\r']*}"
 rest="${prompt#"$lead"}"
 if rw_is_harness_event "$rest"
 then

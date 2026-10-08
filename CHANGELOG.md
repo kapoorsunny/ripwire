@@ -851,7 +851,9 @@ and the `--help-task` classifier now treat a prompt that starts with `<channel` 
 `<system-reminder>`: no classification, a `skip-system` log row. `<channelz>`, `<agent-messages>` and a prompt that merely
 mentions a wrapper mid-sentence still route; a prompt that itself starts with a literal `<channel>` or `<agent-message>`
 fragment (a pasted RSS fragment without its prolog, say) is treated as a harness event and is not routed. The
-classifier's leading-whitespace strip now also covers `\v` and `\f`, as the hooks' strip always did. `meter.conf`
+classifier's leading-whitespace strip now also covers `\v` and `\f`, as the hooks' strip always did, and the hooks'
+strip is now those same six ASCII bytes in every locale: it used bash's `[:space:]`, which in a UTF-8 locale also
+stripped a leading U+00A0 (and other Unicode spaces), so a hook skipped a prompt the classifier routes. `meter.conf`
 parsing, in `resolve_arm` of both router hooks and in the meter, no longer loses a final line that has no newline
 and no longer reads a CRLF value (`arm=control\r`) as `treatment`. `bench/routing_ab_report.py` prints per-arm counts, says `NO CONTROL ARM` when an arm has no prompts, and marks the 2026-09-02
 registration window void (it had no control arm); the readout clock restarts at this release, and the report prints

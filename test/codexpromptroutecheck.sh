@@ -167,6 +167,17 @@ chan_case "near-miss <channels>"          cx7 "<channels> $CHT" route
 chan_case "near-miss <agent-messages>"    cx8 "<agent-messages> $CHT" route
 chan_case "mid-sentence <channel> mention" cx9 "what does <channel source=\"x\"> mean? $CHT" route
 chan_case "mid-sentence <agent-message> mention" cx10 "what does <agent-message from=\"w\"> mean? $CHT" route
+# A Unicode space before the wrapper is not stripped (D-N1): the hook's strip is the six ASCII bytes, as src/taskroute.h's,
+# never bash's locale-dependent [:space:] (which matches U+00A0 in a UTF-8 locale on macOS bash 3.2). Run under a UTF-8
+# locale; without one installed the arm SKIPs by name.
+UTF8LOC=""
+for _l in en_US.UTF-8 C.UTF-8; do locale -a 2>/dev/null | grep -qix "$_l" && { UTF8LOC="$_l"; break; }; done
+if [ -z "$UTF8LOC" ]; then
+    echo "  SKIP  U+00A0 arms: no UTF-8 locale installed (locale -a lists neither en_US.UTF-8 nor C.UTF-8)"
+else
+    LC_ALL="$UTF8LOC" LANG="$UTF8LOC" chan_case "U+00A0 before <channel> under $UTF8LOC routes" cx14 "$( printf '\302\240<channel source="x">%s' "$CHT" )" route
+    LC_ALL="$UTF8LOC" LANG="$UTF8LOC" chan_case "U+00A0 before <agent-message> under $UTF8LOC routes" cx15 "$( printf '\302\240 <agent-message from="w">%s' "$CHT" )" route
+fi
 
 OFF="$( printf '%s\n' "{\"prompt\":\"$PROMPT\",\"cwd\":\"$TMP/repo\",\"session_id\":\"route-off\"}" | \
     PATH="$TMP/bin:$PATH" RIPWIRE_HOME="$TMP/off" RIPWIRE_ROUTE_METER=0 "$HOOK" )"

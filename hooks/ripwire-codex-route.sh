@@ -316,7 +316,9 @@ rw_is_harness_event()
     return 1
 }
 # ---- END MIRRORED BLOCK rw_is_harness_event ---------------------------------------------------------------
-lead="${prompt%%[![:space:]]*}"
+# The lead strip is the six ASCII bytes src/taskroute.h's looksLikeSystemEvent strips (space \t \n \v \f \r), written
+# out: bash's [:space:] also matches U+00A0 and other Unicode spaces in a UTF-8 locale, which the classifier keeps.
+lead="${prompt%%[!$' \t\n\v\f\r']*}"
 rest="${prompt#"$lead"}"
 if rw_is_harness_event "$rest"
 then

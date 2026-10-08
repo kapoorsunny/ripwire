@@ -180,7 +180,8 @@ inline constexpr std::array<HarnessEventTag, 4> kHarnessEventTags{ {
 inline bool looksLikeSystemEvent( std::string_view task ) noexcept
 {
     std::size_t i = 0;
-    // The six bytes the hooks' bash `[:space:]` strip removes: space and \t \n \v \f \r (kept equal, issue #381).
+    // The six bytes the prompt hooks' lead strip removes, `[!$' \t\n\v\f\r']`: space and \t \n \v \f \r. ASCII only, in
+    // every locale on both sides (issue #381; routehookcheck N10d/N10e, codexpromptroutecheck U+00A0 arms).
     while( i < task.size() && ( task[i] == ' ' || ( task[i] >= '\t' && task[i] <= '\r' ) ) )
     {
         ++i;

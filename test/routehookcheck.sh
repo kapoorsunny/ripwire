@@ -710,11 +710,31 @@ chan_route "N9c channel mention: <channel ...> mid-sentence still routes" chn3 "
 chan_route "N9d agent-message near-miss: <agent-messages> is not the wrapper" chn4 "<agent-messages> $CHROUT"
 chan_route "N9e agent-message mention: mid-sentence still routes"         chn5 "what does <agent-message from=\"w\"> mean here? $CHROUT"
 chan_route "N9f channel near-miss: a bare word 'channel' in prose routes"  chn6 "channel the energy: $CHROUT"
-# Leading VERTICAL TAB / FORM FEED: bash's [:space:] strip removes them, and src/taskroute.h's strip must remove
+# Leading VERTICAL TAB / FORM FEED: the hook's lead strip removes them, and src/taskroute.h's strip must remove
 # the same bytes (it used to stop at space/tab/LF/CR, so `--help-task` routed a prompt the hook skipped).
 chan_skip  "N10 channel: a leading \\v before <channel> skips"           chn7 "$( printf '\v<channel source="x">%s</channel>' "$CHROUT" )"
 chan_skip  "N10b channel: a leading \\f before <agent-message> skips"    chn8 "$( printf '\f <agent-message from="w">%s</agent-message>' "$CHROUT" )"
 chan_route "N10c channel: \\v then a near-miss <channelz> still routes" chn9 "$( printf '\v<channelz> %s' "$CHROUT" )"
+# A Unicode space before the wrapper is NOT stripped (D-N1): the strip is the six ASCII bytes above, written out as
+# `[!$' \t\n\v\f\r']`, because bash's `[:space:]` also matches U+00A0, U+2003, U+3000 … in a UTF-8 locale (macOS bash
+# 3.2), and src/taskroute.h's strip stops at ASCII. So the hook skipped, under a UTF-8 locale only, a prompt --help-task
+# routes. The arm runs the hook under a UTF-8 locale; without one installed it SKIPs by name.
+UTF8LOC=""
+for _l in en_US.UTF-8 C.UTF-8; do locale -a 2>/dev/null | grep -qix "$_l" && { UTF8LOC="$_l"; break; }; done
+NBSP="$( printf '\302\240' )"
+if [ -z "$UTF8LOC" ]; then
+    echo "  SKIP  N10d/N10e: no UTF-8 locale installed (locale -a lists neither en_US.UTF-8 nor C.UTF-8)"
+else
+    for _case in "N10d:nbsp1:${NBSP}<channel source=\"x\">$CHROUT</channel>" "N10e:nbsp2:${NBSP} <agent-message from=\"w\">$CHROUT</agent-message>"; do
+        _lab="${_case%%:*}"; _r="${_case#*:}"; _ses="${_r%%:*}"; _pr="${_r#*:}"
+        _hd="$TMP/hc_$_ses"; mkdir -p "$_hd"
+        _co="$( route_run "$_hd" "$WITH_RIPWIRE" "$( promptjson "$_ses" "$NREPO" "$_pr" )" RIPWIRE_METER_ARM=treatment LC_ALL="$UTF8LOC" LANG="$UTF8LOC" )"
+        _ht="$( "$BIN" "$NREPO" --help-task="$_pr" 2>/dev/null | grep -c 'status="recommend"' )"
+        printf '%s' "$_co" | grep -Fq -- '--expand' && [ "$( rowget "$_hd/routing.jsonl" 1 status )" = "recommend" ] && [ "$_ht" -gt 0 ] \
+            && ok "$_lab: a U+00A0 before the wrapper is not stripped under LC_ALL=$UTF8LOC: the hook routes, as --help-task does" \
+            || no "$_lab: under LC_ALL=$UTF8LOC the hook and --help-task disagree: out=[$_co] status=[$( rowget "$_hd/routing.jsonl" 1 status )] help-task-recommend=[$_ht]"
+    done
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 # O9 — rw_is_ripwire_call: ONE block, three files, and the shapes an agent actually types (PR #215 item 6)
