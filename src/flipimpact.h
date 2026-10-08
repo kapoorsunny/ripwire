@@ -71,7 +71,7 @@
 #include "serialize.h"          // escapeXml
 #include "testmap.h"            // M21(b): TestRunnerIndex / runAttrDisclosed — the ONE run= hint the tests_to_run family shares
 #include "pageview.h"           // §P8: pageWindow / effectiveRowCap / secondaryCutAttrs — the ONE paging contract
-#include "nextverb.h"           // P3: nextAttrXml / kNextAttrMaxBytes — the ONE pasteable follow-up
+#include "nextverb.h"           // P3: nextAttrXml — the ONE pasteable follow-up
 #include "infra/Diagnostics.h"  // DISCLOSE
 
 #include "btree.hpp"      // gtl::btree_map — sorted iteration (house rule: never std::map)

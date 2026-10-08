@@ -2453,7 +2453,7 @@ $ ./build/ripwire . --lint-rules=test/lintrulesfix/rules
 </lint>
 ```
 
-**Shaped by:** `--lint-catalog`, `--lint-select`, `--lint-ignore`, `--sarif`
+**Shaped by:** `--lint-catalog`, `--lint-select`, `--lint-ignore`, `--lint-max-per-rule`, `--sarif`
 
 ### `--lint-select=PREFIX[,...]`
 
@@ -2506,6 +2506,34 @@ $ ./build/ripwire . --lint --lint-ignore=naming-,cache-
 ... [17 more line(s); run it to see the whole thing]
 ```
 
+### `--lint-max-per-rule=N`
+
+**Answers:** (with --lint / --lint-rules) set each rule's match budget, below or above the default 5000.
+
+The default is a runaway guard, not a target. A rule that spends its budget carries count_capped="1" (its count= is a FLOOR) and the root names the call that counts the rest: findings_next= (SARIF: run properties findingsNext, --sarif kept) re-runs only the floored rules under a 10x budget; a re-run still floored names its own. Raising it costs time and memory in proportion to the matches kept
+
+**Try it**
+
+_A rule that spends its own match budget (here 4, set BELOW the default 5000 so the floor shows on this repo): goto carries count_capped="1", its count= is a FLOOR, and the root names the call that counts the rest — findings_next= re-runs only the floored rules under a 10x budget._
+
+```
+$ ./build/ripwire . --lint --lint-select=goto --lint-max-per-rule=4
+<!-- ripwire lint schema=ripwire.lint/v1: AST-only checks, facts not gates: <rule name= count= shown_rows= rows_capped= count_capped=> of <f rule= p= in=>. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). findings_capped=/rows_capped=/count_capped=: 1 = cut. counts_floor=1: every count is a FLOOR, never a total. root=: p= relative to it. findings=N: findings over the printed rules; a floor when findings_capped=1. findings_next=: the call counting the floored rules' rest (count_capped=1 rules only, 10x per-rule budget). -->
+<lint schema="ripwire.lint/v1" findings="4" shown="4" capped="1" total="4" has_more="0" next_offset="4" offset="0" limit="0" counts_floor="1" findings_capped="1" findings_next="--lint --lint-select=goto --lint-max-per-rule=40" selected="1 of 39" select="goto" root=".">
+<rule name="goto" count="4" shown_rows="4" rows_capped="0" count_capped="1"/>
+<f rule="goto" p="src/clones.h:909" in="findClonesType3">goto done;</f>
+<f rule="goto" p="src/infra/timsort.hpp:508" in="mergeLo">goto epilogue;</f>
+<f rule="goto" p="src/infra/timsort.hpp:517" in="mergeLo">goto epilogue;</f>
+<f rule="goto" p="src/infra/timsort.hpp:534" in="mergeLo">goto epilogue;</f>
+</lint>
+```
+
+**Caveats (stated by the binary):**
+
+- The default is a runaway guard, not a target.
+- A rule that spends its budget carries count_capped="1" (its count= is a FLOOR) and the root names the call that counts the rest: findings_next= (SARIF: run properties findingsNext, --sarif kept) re-runs only the floored rules under a 10x budget;
+- a re-run still floored names its own.
+
 ### `--sarif`
 
 **Answers:** (with --lint / --lint-rules) the SAME findings as SARIF 2.1.0 instead of the native XML <lint> block — the shape github/codeql-action/upload-sarif consumes for code scanning.
@@ -2531,7 +2559,7 @@ $ ./build/ripwire . --lint --sarif
 ... [21 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--legend`
+**Shaped by:** `--lint-max-per-rule`, `--legend`
 
 **Caveats (stated by the binary):**
 
@@ -4434,7 +4462,7 @@ $ ./build/ripwire . --callers=rankGraphTeleport --format=bogus
 
 **Answers:** legend posture for every XML verb — compact is the default;
 
-full restores the prose output legend posture for EVERY XML verb. The DEFAULT is compact: the legend is a FIXED ~3 KB of prose per call in its full form, so its share is a function of ANSWER SIZE, not of the verb: at least 40% of a small --callers/--uses/--impact/--affected answer (and more on --callees and --edit-check), a little of a large --for bundle — and the callers who pay it are agents, scripts and harnesses making repeated calls. READING ONE MAP AS A HUMAN, or need a definition's reasoning (a term you do not recognise, a floor or cap explained)? pass --legend=full: it restores the full prose legend, byte-identical to the default of 0.6.1 and earlier. compact keeps every row byte and every data/completeness attribute (counts_floor= capped= shown= total= has_more= next_offset= est_tokens= at= root= graph_ambiguous= …), adds a versioned schema id on the root (schema="ripwire.<verb>/v1") and replaces the explanatory prose with ONE legend defining exactly the attributes the answer carries — the meanings live here and in the full legend. DATA comments stay (the map header, pack-task's body-omitted rows, +more). Per call this drops 2.8-5.8 KB on the navigation verbs (--edit-check's legend 7.4 KB -> 0.9 KB). --for compacts too (ripwire.for/v1 header); under --token-budget it never costs a row --legend=full would keep. The MCP twin is the argument legend, compact by default there as well, legend:"full" restores the prose. Runs with nothing to compact ignore the default; an ASKED --legend=compact refuses there, naming the verb: prose/markdown/JSON answers (--situ --recall --report --mermaid --html --plan-lanes --sarif --eval* --json), where --legend=full is a no-op, and the writers and servers (edit verbs, --note-add, --quality-baseline/--quality-ack, --index-out, --export, the server transports), which refuse either posture. ref is the MCP server's SESSION posture, not a CLI one: once a session reads the resource ripwire://legend-dict, answers list rows first, carry each definition once per session and end with <about legend="ref" dict= dictv=/>. A CLI run has no session to hold a definition, so --legend=ref refuses; --legend-dict prints them all.
+full restores the prose output legend posture for EVERY XML verb. The DEFAULT is compact: the legend is a FIXED ~3 KB of prose per call in its full form, so its share is a function of ANSWER SIZE, not of the verb: at least 40% of a small --callers/--uses/--impact/--affected answer (and more on --callees and --edit-check), a little of a large --for bundle — and the callers who pay it are agents, scripts and harnesses making repeated calls. READING ONE MAP AS A HUMAN, or need a definition's reasoning (a term you do not recognise, a floor or cap explained)? pass --legend=full: it restores the full prose legend, byte-identical to the default of 0.6.1 and earlier. compact keeps every row byte and every data/completeness attribute (counts_floor= capped= shown= total= has_more= next_offset= est_tokens= at= root= graph_ambiguous= …), adds a versioned schema id on the root (schema="ripwire.<verb>/v1") and replaces the explanatory prose with ONE legend defining exactly the attributes the answer carries — the meanings live here and in the full legend. DATA comments stay (the map header, pack-task's body-omitted rows, +more). Per call this drops 2.8-5.8 KB on the navigation verbs (--edit-check's legend 7.4 KB -> 0.9 KB). --for compacts too (ripwire.for/v1 header); under --token-budget it never costs a row --legend=full would keep, unless its own header is the larger one and the row pays for <sigs next=> to fit. The MCP twin is the argument legend, compact by default there as well, legend:"full" restores the prose. Runs with nothing to compact ignore the default; an ASKED --legend=compact refuses there, naming the verb: prose/markdown/JSON answers (--situ --recall --report --mermaid --html --plan-lanes --sarif --eval* --json), where --legend=full is a no-op, and the writers and servers (edit verbs, --note-add, --quality-baseline/--quality-ack, --index-out, --export, the server transports), which refuse either posture. ref is the MCP server's SESSION posture, not a CLI one: once a session reads the resource ripwire://legend-dict, answers list rows first, carry each definition once per session and end with <about legend="ref" dict= dictv=/>. A CLI run has no session to hold a definition, so --legend=ref refuses; --legend-dict prints them all.
 
 **Try it**
 
@@ -4456,7 +4484,7 @@ $ ./build/ripwire . --quality-delta --legend=full
 **Caveats (stated by the binary):**
 
 - READING ONE MAP AS A HUMAN, or need a definition's reasoning (a term you do not recognise, a floor or cap explained)? pass --legend=full: it restores the full prose legend, byte-identical to the default of 0.6.1 and earlier.
-- under --token-budget it never costs a row --legend=full would keep.
+- under --token-budget it never costs a row --legend=full would keep, unless its own header is the larger one and the row pays for <sigs next=> to fit.
 - ref is the MCP server's SESSION posture, not a CLI one: once a session reads the resource ripwire://legend-dict, answers list rows first, carry each definition once per session and end with <about legend="ref" dict= dictv=/>.
 
 ### `--legend-dict[=roster]`

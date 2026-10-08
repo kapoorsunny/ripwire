@@ -585,9 +585,45 @@ ALLOW="$( awk "BEGIN{printf \"%d\", $TBF*2.36*1.15}" )"
 "$BIN" src --for="$FOR_TASK" --token-budget=$TBF --detail=20 --with-graph --no-cache >"$TMP/f_tb.out" 2>"$TMP/f_tb.err"
 rc_ftb=$?
 FTB="$( bytes_of "$TMP/f_tb.out" )"
-{ [ "$rc_ftb" -eq 0 ] && [ "$FTB" -le "$ALLOW" ]; } 2>/dev/null \
-    && ok "#11 A7 --for --token-budget=$TBF --detail=20 --with-graph: $FTB B within the $ALLOW B allowance (exit 0, SHAPED)" \
-    || no "#11 A7 --for --token-budget=$TBF --detail=20 --with-graph: $FTB B vs the $ALLOW B allowance, exit $rc_ftb — the budget does not bound the appended sections"
+# THE <sigs> UNPAID TWIN (knob-honesty-068; orchestrator rulings 2026-10-07, PROCESS rules 4/5). A capped <sigs> under a
+# hard ceiling carries next= — the call that recovers its cut — and pays for it from its rows ONLY where that makes the
+# answer fit (ruling C3). Where it cannot (the rank 1..4 floor has nothing left to shed, or the answer lands past its ceiling
+# paid or not) no row is dropped for it: the recovery handle ALWAYS ships, unpaid, and the document may then land past the
+# allowance, and only if it says so. This is not a wider allowance: every condition of the old bound still holds for
+# everything except the disclosed handle. sigs_unpaid_twin FILE ALLOW → exit 0 iff ALL of: the root carries
+# over_ceiling="1"; the legend carries the unpaid clause defining it; <sigs> is capped and carries next="--for=…";
+# est_tokens is positive and prices the delivered bytes inside the 2.00-4.20 B/tok band (honest: it moved with the handle);
+# and the document WITHOUT the handle and its label (the next= attribute, over_ceiling="1", the clause) is within ALLOW —
+# the old bound, intact — or carries the ladder's last-rung disclosure (the header floor alone exceeds the budget: the one
+# overshoot the old bound already admitted). The rows are the ones the cut alone leaves (the C3 arm below pins them).
+sigs_unpaid_twin(){ python3 - "$1" "$2" <<'PYF'
+import sys, re
+d = open( sys.argv[ 1 ], 'rb' ).read().decode( 'utf-8', 'replace' ); allow = int( sys.argv[ 2 ] )
+clause = ' [over_ceiling=1 also when the sigs next= rides unpaid: no row is dropped to pay for it on an answer that would not fit either way]'
+root = re.search( r'<ctx [^>]*>', d ); sigs = re.search( r'<sigs [^>]*>', d )
+why = []
+if not root or ' over_ceiling="1"' not in root.group( 0 ): why.append( 'no root over_ceiling="1"' )
+if clause not in d: why.append( 'no unpaid clause' )
+nxt = re.search( r' next="--for=[^"]*"', sigs.group( 0 ) ) if sigs else None
+if not sigs or ' capped="1"' not in sigs.group( 0 ): why.append( '<sigs> not capped' )
+if not nxt: why.append( '<sigs> carries no next=' )
+est = re.search( r' est_tokens="(\d+)"', root.group( 0 ) ) if root else None
+b = len( d.encode( 'utf-8' ) )
+if not est or int( est.group( 1 ) ) <= 0 or not ( 200 <= b * 100 // int( est.group( 1 ) ) <= 420 ): why.append( 'est_tokens absent or out of band' )
+rest = b - ( len( nxt.group( 0 ) ) if nxt else 0 ) - len( ' over_ceiling="1"' ) - len( clause )
+lastRung = '[over_ceiling= is 1 on the root: the header floor' in d
+if rest > allow and not lastRung: why.append( f'{rest} B without the handle > {allow} B (and no last-rung disclosure)' )
+print( '; '.join( why ) if why else f'{b} B, {rest} B without the handle <= {allow} B, est_tokens={est.group( 1 )}' )
+sys.exit( 1 if why else 0 )
+PYF
+}
+if { [ "$rc_ftb" -eq 0 ] && [ "$FTB" -le "$ALLOW" ]; } 2>/dev/null; then
+    ok "#11 A7 --for --token-budget=$TBF --detail=20 --with-graph: $FTB B within the $ALLOW B allowance (exit 0, SHAPED)"
+elif [ "$rc_ftb" -eq 0 ] && a7why="$( sigs_unpaid_twin "$TMP/f_tb.out" "$ALLOW" )"; then
+    ok "#11 A7 --for --token-budget=$TBF --detail=20 --with-graph: the <sigs> unpaid twin — $a7why, labelled over_ceiling=\"1\" with next= (exit 0, SHAPED)"
+else
+    no "#11 A7 --for --token-budget=$TBF --detail=20 --with-graph: $FTB B vs the $ALLOW B allowance, exit $rc_ftb — the budget does not bound the appended sections${a7why:+ (unpaid twin: $a7why)}"
+fi
 # and without an explicit --token-budget the bodies keep their own budget: the bundle must NOT have shrunk
 { [ "$( bytes_of "$TMP/f_for_detail.out" )" -gt "$ALLOW" ]; } 2>/dev/null \
     && ok "#11 A7 no --token-budget: --detail keeps its --pack-budget-bytes budget (unbudgeted bundle unshrunk)" \
@@ -624,23 +660,36 @@ for i in range( 4 ):
     with open( os.path.join( out, f"mod{i}.cpp" ), "w" ) as fh:
         fh.write( "\n".join( lines ) )
 PYG
-a7s_bad=""; a7s_badn=0; a7s_runs=0; a7s_inside_labelled=0
+a7s_bad=""; a7s_badn=0; a7s_runs=0; a7s_inside_labelled=0; a7s_floor=0
 # RE-ANCHORED 2026-09-13 (PR #215): the default sweep starts at 760, not 1200. --for's rung zero now triggers on the
 # EXACT ceiling (verbs_for.h), so a document 1..15% over its budget drops its three explanatory clauses before the
 # allowance is consulted; on this corpus the late-label band (over_ceiling="1" INSIDE the allowance — the residual
 # after that drop) therefore sits at 780..810 instead of inside 1200..1500, and the control below would otherwise be
 # inert. Swept 700..3300 step 10 on the new binary: default hits at 780 790 800 810, none on the --detail=20 arm.
-for spec in "default:760:1500:" "detail_graph:2880:3080:--detail=20 --with-graph"; do
-    s_label="${spec%%:*}"; s_rest="${spec#*:}"; s_from="${s_rest%%:*}"; s_rest="${s_rest#*:}"; s_to="${s_rest%%:*}"; s_args="${s_rest#*:}"
-    for (( N = s_from; N <= s_to; N += 10 )); do
+# RE-ANCHORED 2026-10-07 (knob-honesty-068, orchestrator ruling C3): a capped, CHARGED <sigs> whose answer is past its ceiling
+# paid or not is now served with the rows the cut alone leaves and its next= unpaid — bigger than the paid answer, so the
+# capped documents that sat in the late-label band (dd6e4c8e: the --detail=20 arm's 2880..3080, est_tokens > N inside the
+# allowance) now cross the allowance on the ladder's disclosed last rung, and no capped document on this corpus is left in
+# the band (swept 700..1500 and 2880..3080 step 10). The band itself is untouched by the ruling: an UNCAPPED block owes no
+# continuation, so the third spec — a name-exact task serving ONE row — keeps a document whose header floor lands in it
+# (480..488 at the time of writing; step 4 so a band 9 budgets wide is always crossed). Fields: label:from:to:step:task:args.
+for spec in "default:760:1500:10:serialize the map:" "detail_graph:2880:3080:10:serialize the map:--detail=20 --with-graph" \
+            "named_one_row:400:600:4:serializeRow0_3:"; do
+    s_label="${spec%%:*}"; s_rest="${spec#*:}"; s_from="${s_rest%%:*}"; s_rest="${s_rest#*:}"; s_to="${s_rest%%:*}"; s_rest="${s_rest#*:}"
+    s_step="${s_rest%%:*}"; s_rest="${s_rest#*:}"; s_task="${s_rest%%:*}"; s_args="${s_rest#*:}"
+    for (( N = s_from; N <= s_to; N += s_step )); do
         # shellcheck disable=SC2086
-        ( cd "$A7S" && "$BIN" corpus --for="serialize the map" --token-budget=$N $s_args --no-cache ) >"$A7S/o.xml" 2>/dev/null
+        ( cd "$A7S" && "$BIN" corpus --for="$s_task" --token-budget=$N $s_args --no-cache ) >"$A7S/o.xml" 2>/dev/null
         s_rc=$?
         a7s_runs=$(( a7s_runs + 1 ))
         s_b="$( bytes_of "$A7S/o.xml" )"
         s_a="$( awk "BEGIN{printf \"%d\", $N*2.36*1.15}" )"
         s_root="$( grep -aoE '^<ctx [^>]*>' "$A7S/o.xml" | head -1 )"
-        if [ "$s_rc" -ne 0 ] || { [ "$s_b" -gt "$s_a" ] && ! grep -aqF '[over_ceiling= is 1 on the root: the header floor' "$A7S/o.xml"; }; then
+        # past the allowance: the ladder's last rung says so, or (knob-honesty-068) the <sigs> unpaid twin above holds in full
+        if [ "$s_rc" -eq 0 ] && [ "$s_b" -gt "$s_a" ] && ! grep -aqF '[over_ceiling= is 1 on the root: the header floor' "$A7S/o.xml" \
+            && sigs_unpaid_twin "$A7S/o.xml" "$s_a" >/dev/null; then
+            a7s_floor=$(( a7s_floor + 1 ))
+        elif [ "$s_rc" -ne 0 ] || { [ "$s_b" -gt "$s_a" ] && ! grep -aqF '[over_ceiling= is 1 on the root: the header floor' "$A7S/o.xml"; }; then
             a7s_badn=$(( a7s_badn + 1 ))
             [ "$a7s_badn" -le 6 ] && a7s_bad="$a7s_bad $s_label@$N=${s_b}/${s_a}B(exit $s_rc)"
         elif [ "$s_b" -le "$s_a" ] && [ "${s_root#* over_ceiling=\"1\"}" != "$s_root" ]; then
@@ -649,13 +698,55 @@ for spec in "default:760:1500:" "detail_graph:2880:3080:--detail=20 --with-graph
     done
 done
 [ "$a7s_badn" -eq 0 ] \
-    && ok "#11 A7 sweep: $a7s_runs budgets over a git-less corpus (default 760..1500, --detail=20 --with-graph 2880..3080, step 10) — every document within N x 2.36 x 1.15 at exit 0, or on the ladder's disclosed last rung" \
+    && ok "#11 A7 sweep: $a7s_runs budgets over a git-less corpus (default 760..1500, --detail=20 --with-graph 2880..3080, step 10; one-row named task 400..600, step 4) — every document within N x 2.36 x 1.15 at exit 0, or on the ladder's disclosed last rung, or the disclosed <sigs> unpaid twin ($a7s_floor)" \
     || no "#11 A7 sweep: $a7s_badn of $a7s_runs budgets deliver past the allowance with no ladder rung fired (first:$a7s_bad) — a byte spliced in after the ladder priced the document"
 # control: the sweep must cross the band the defect lives in — a root that says over_ceiling="1" while the document
 # still fits the allowance (est_tokens > N at 2.50 B/tok, bytes <= 2.714 B/tok). No such budget = inert, re-anchor.
 [ "$a7s_inside_labelled" -gt 0 ] \
     && ok "#11 A7 sweep control: $a7s_inside_labelled budget(s) carry a root over_ceiling=\"1\" INSIDE the allowance — the sweep crosses the late-label band" \
     || no "#11 A7 sweep control: no budget carried over_ceiling=\"1\" inside the allowance — the sweep no longer reaches the est_tokens > N band, re-anchor its ranges"
+# A7 UNPAID TWIN, EXERCISED EVERY RUN (knob-honesty-068; rulings 2026-10-07). The A7 arm and the sweep accept the twin only
+# as an alternative, so a fixture that stopped reaching it would leave it untested. On this git-less corpus at
+# --token-budget=780 the default bundle's <sigs> sits at its rank 1..4 floor: the answer the cut alone leaves FITS (the
+# pre-continuation binary, 255dc199, serves it at est_tokens=774 with no label), its next= cannot be paid in rows, and the
+# document lands past the allowance only by the handle — the twin must hold, with no last-rung disclosure to lean on.
+( cd "$A7S" && "$BIN" corpus --for="serialize the map" --token-budget=780 --no-cache ) >"$A7S/floor.xml" 2>/dev/null; fl_rc=$?
+fl_a="$( awk 'BEGIN{printf "%d", 780*2.36*1.15}' )"
+if [ "$fl_rc" -eq 0 ] && ! grep -aqF '[over_ceiling= is 1 on the root: the header floor' "$A7S/floor.xml" \
+   && fl_why="$( sigs_unpaid_twin "$A7S/floor.xml" "$fl_a" )"; then
+    ok "#11 A7 unpaid twin @780: $fl_why — next= ships at the floor and the overshoot is labelled over_ceiling=\"1\" with its clause"
+else
+    no "#11 A7 unpaid twin @780 (exit $fl_rc): ${fl_why:-the ladder last rung fired, so the twin is not the only disclosure} — the <sigs> floor did not ship its next= with a labelled, honestly priced overshoot"
+fi
+# C3 (orchestrator ruling 2026-10-07): NEVER DROP ROWS TO PAY FOR next= WHEN THE ANSWER IS OVER ITS CEILING ANYWAY. At 790 the
+# answer the cut alone leaves is past its ceiling already (255dc199 serves 5 rows there at est_tokens=952, last rung fired);
+# paying from rows (dd6e4c8e: 4 rows, est_tokens=885) still lands over, so it bought nothing. The answer must keep the cut's
+# own rows — at least 255dc199's 5 (re-pin from a pre-continuation binary if row bytes change; smaller rows only raise it) —
+# and MORE than the paid near miss at 850 serves (4 rows: there paying is what makes the answer fit), with next= riding
+# unpaid and over_ceiling="1" + the unpaid clause on the root. RED on dd6e4c8e (4 rows).
+( cd "$A7S" && "$BIN" corpus --for="serialize the map" --token-budget=790 --no-cache ) >"$A7S/c3.xml" 2>/dev/null; c3_rc=$?
+( cd "$A7S" && "$BIN" corpus --for="serialize the map" --token-budget=850 --no-cache ) >"$A7S/paid.xml" 2>/dev/null; pd_rc=$?
+sigs_shown(){ grep -aoE '<sigs [^>]*>' "$1" | tail -1 | grep -oE ' shown="[0-9]+"' | tr -dc '0-9'; }
+c3_sh="$( sigs_shown "$A7S/c3.xml" )"; pd_sh="$( sigs_shown "$A7S/paid.xml" )"
+c3_root="$( grep -aoE '^<ctx [^>]*>' "$A7S/c3.xml" | head -1 )"
+if [ "$c3_rc" -eq 0 ] && [ -n "$c3_sh" ] && [ -n "$pd_sh" ] && [ "$c3_sh" -ge 5 ] && [ "$c3_sh" -gt "$pd_sh" ] \
+   && grep -aqE '<sigs [^>]* capped="1"[^>]* next="--for=' "$A7S/c3.xml" && [ "${c3_root#* over_ceiling=\"1\"}" != "$c3_root" ] \
+   && grep -aqF 'next= rides unpaid: no row is dropped to pay for it' "$A7S/c3.xml"; then
+    ok "#11 A7 C3 @790: over its ceiling either way, the answer keeps the cut's own $c3_sh rows (>= 255dc199's 5, > the paid 850 answer's $pd_sh) — next= unpaid, over_ceiling=\"1\" + the unpaid clause"
+else
+    no "#11 A7 C3 @790 (exit $c3_rc): shown=${c3_sh:-?} (want >= 5 and > the paid 850 answer's ${pd_sh:-?}), next= + over_ceiling=\"1\" + the unpaid clause — rows were dropped to pay for a handle that cannot make the answer fit"
+fi
+# Its near miss, 850 — the PAYABLE case, unchanged: paying is what makes the answer fit (255dc199: 5 rows, est_tokens=911,
+# over), so the handle is paid (the block sheds its bytes above the floor) — next= rides inside the allowance, and neither
+# over_ceiling="1" nor the unpaid clause appears (a label that rode on every capped answer would pass the arms above alone).
+pd_b="$( bytes_of "$A7S/paid.xml" )"; pd_a="$( awk 'BEGIN{printf "%d", 850*2.36*1.15}' )"
+pd_root="$( grep -aoE '^<ctx [^>]*>' "$A7S/paid.xml" | head -1 )"
+if [ "$pd_rc" -eq 0 ] && [ "$pd_b" -le "$pd_a" ] && grep -aqE '<sigs [^>]* capped="1"[^>]* next="--for=' "$A7S/paid.xml" \
+   && [ "${pd_root#* over_ceiling=\"1\"}" = "$pd_root" ] && ! grep -aqF 'next= rides unpaid' "$A7S/paid.xml"; then
+    ok "#11 A7 unpaid twin near miss @850: the capped <sigs> pays for its next= — $pd_b B <= $pd_a B, no over_ceiling=, no unpaid clause"
+else
+    no "#11 A7 unpaid twin near miss @850 (exit $pd_rc): $pd_b B vs $pd_a B — expected a paid next= inside the allowance with no label"
+fi
 
 # A9/A10 — the header's own spliced attributes are inside the number. IDENTITY, not a band: for a bundle with
 # no --detail bodies, est_tokens is markup-only, so it must equal round(delivered bytes / 2.50) EXACTLY

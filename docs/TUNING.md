@@ -189,7 +189,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kLintMaxPerRule` = `5000`
 
-`src/lintrules.h` — discloses: **none** — probe value `40000` — **4 verb(s) respond**
+`src/lintrules.h` — discloses: `count_capped` — probe value `40000` — **4 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |

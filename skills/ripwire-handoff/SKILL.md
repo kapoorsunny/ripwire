@@ -20,9 +20,11 @@ fast, accurate brief — not a wall of source code.
 `<dir>` = repo root. `SUBSYSTEM` = the area in plain words (e.g. "ingest pipeline",
 "graph ranking", "MCP server loop").
 
-1. **Task-relevant symbols** — `ripwire <dir> --for="SUBSYSTEM" --top-k=20`
+1. **Task-relevant symbols** — `ripwire <dir> --for="SUBSYSTEM" --signatures-only`
    Output: `<sigs>` ranked by relevance. The top 10 are the symbols the recipient most needs
    to know. Note their file paths, complexity (`cx=`), and reuse count (`in=`).
+   (`--top-k` does not narrow `--for` — the binary says so on stderr and serves the whole list;
+   `--signatures-only` skips the inline bodies, since step 2 expands the ones you pick.)
 
 2. **Expand the key symbols** — `ripwire <dir> --expand=SYM1,SYM2,SYM3 --legend=compact`
    (Pick the top 3 by rank from step 1.)

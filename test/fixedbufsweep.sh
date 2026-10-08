@@ -280,12 +280,14 @@ NUMERIC_ONLY = {
                                       #   "{}" of one std::uint32_t, ten digits worst case against 15 usable + NUL, no %s and
                                       #   nothing escaped, so it does not join the string-interpolating population
     ( "src/serialize.h", "lineAttr" ): 1,
-    ( "src/serialize.h", "nb" ): 4,   # row 6 (2026-09-12): appendCalleeNameRow's `"\" l=\"{}\"/>"` buffer went with the merge.
+    ( "src/serialize.h", "nb" ): 6,   # row 6 (2026-09-12): appendCalleeNameRow's `"\" l=\"{}\"/>"` buffer went with the merge.
                                       #   cut-fix lane A (2026-09-23): +2, sigsOpenTag's nb[96] — ' shown="{}" total="{}" capped="1"'
                                       #   (31 B literal + two size_t at 20 digits = 71 B worst case, against 95 usable + NUL) and
                                       #   ' docs_dropped="{}"' (16 B + 20 digits = 36 B). Counts only, no %s, nothing escaped.
                                       #   lane/for-spine-span-068 (2026-10-04): +1, the same nb[96]'s ' docs_after_code="{}"'
                                       #   (19 B + 20 digits = 39 B). A count, no %s, nothing escaped.
+                                      #   knob-honesty-068 (2026-10-07): +2 in the same nb[96] — ' next_offset="{}"' (15 B + 20
+                                      #   digits = 35 B) and ' next_budget_tokens="{}"' (22 B + 20 digits = 42 B). Counts only.
     ( "src/serialize.h", "precAttr" ): 1,
     ( "src/serialize.h", "rankAttr" ): 1,
     ( "src/serialize.h", "rc" ): 1,
@@ -607,7 +609,11 @@ if not bad:
 #            rows, a second inAttr[24] site and a third tail[192] site, all in the branch that omits a zero cx=/ccx=/in=.
 #            Each formats one integer or pre-formatted numeric attributes; classified above. Re-derived, not summed.
 #            train 26b (lean-answers merged onto the train's 352/242/242/107): re-derived on the merged tree.
-EXPECTED = { "mentions": 356, "calls": 246, "sites": 246, "rows": 109, "widthforms": 0 }
+#            2026-10-07 (lane/knob-honesty-068): +2 calls/+2 mentions/+2 sites, rows unchanged — sigsOpenTag's existing nb[96]
+#            formats the cut's resume index (' next_offset="{}"') and the MCP machine continuation (' next_budget_tokens="{}"'):
+#            one size_t each, no string argument (35 B / 42 B worst case against 95 usable + NUL).
+#            train 26b (knob-honesty merged onto the train's 356/246/246/109): re-derived on the merged tree.
+EXPECTED = { "mentions": 358, "calls": 248, "sites": 248, "rows": 109, "widthforms": 0 }
 #            2026-09-30 (#325 ruby_bases_unscoped=): +2 calls/+2 mentions/+2 sites, rows unchanged — graphGaugeAttrXml/Json (graphlegend.h) each format the absent-at-zero Ruby gauge into the SAME local buf[160]: one size_t, no string argument (21 + 20 digits worst case).
 #            2026-09-04 (capture-audit L6, H9): +1 call/+1 mention, sites/rows UNCHANGED — re-read, not
 #            re-counted. packConnect gained ONE snprintf into a new `char connectCeiling[32]` for the

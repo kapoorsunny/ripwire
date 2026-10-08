@@ -509,12 +509,16 @@ using atomdetail::atomsSpecs;
 // and text tests over the captures. Deterministic: astQuery returns (file path, startByte, endByte,
 // tag) order and every filter below is order-preserving, so no hash iteration, thread arrival order,
 // or wall clock can reach a row.
-inline AtomsRun atomsOfConfusionFromCaptures( const IngestResult& ing, std::size_t maxPerRule, std::vector<AstMatch> ms )
+// knob-honesty-068: `queryBudget` is the engine budget the captures were collected under — the default kAtomsQueryBudget,
+// or the scaled one a raised --lint-max-per-rule asks for (lintPackQueryBudget) — so the exclusion stream's saturation is
+// judged against the budget that actually cut it.
+inline AtomsRun atomsOfConfusionFromCaptures( const IngestResult& ing, std::size_t maxPerRule, std::vector<AstMatch> ms,
+                                              std::size_t queryBudget = kAtomsQueryBudget )
 {
     using namespace atomdetail;
 
     AtomsRun              run;
-    const Exclusions      ex   = collectExclusions( ing, ms, kAtomsQueryBudget );
+    const Exclusions      ex   = collectExclusions( ing, ms, queryBudget );
     std::vector<AstMatch> kept = applyExclusions( ing, ms, ex );
     std::vector<AstMatch> rows = collapseNestedTernaries( ing, kept );
 

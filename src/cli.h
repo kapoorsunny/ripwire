@@ -155,6 +155,9 @@ struct Config
                                                              // these (or "*" for all) — modifies --lint / --lint-rules; refused alone.
     std::string_view lintIgnore;                            // --lint-ignore=PREFIX[,...]: drop rules whose name starts with one of these
                                                              // (or "*" to drop everything) — applied AFTER --lint-select narrows the set.
+    int              lintMaxPerRule = 0;                    // --lint-max-per-rule=N: each rule's raw-capture budget (0 = kLintMaxPerRule, the
+                                                             // default runaway guard). knob-honesty-068: the floored answer's findings_next= names
+                                                             // it, so a count_capped="1" floor is one pasteable call from its total.
     std::vector<std::string> expand;                       // --expand=NAME,...: emit full def bodies for these symbols; NAME:START-END slices to 1-based lines START..END of the def (octocode partial-fetch)
     std::vector<std::string> outline;                      // --outline=NAME,...: control-flow skeletons (L3 scoped snippet)
     std::string_view forTask;                              // --for=TASK: the task lens — ranked signatures inventory + metrics, framed for reuse
@@ -1649,6 +1652,12 @@ inline constexpr char kHelpHead[] =
         "                               (with --lint / --lint-rules) DROP rules whose name starts with one of these PREFIXes (or '*' to\n"
         "                               drop everything, e.g. paired with --lint-select elsewhere to isolate one family) — applied AFTER\n"
         "                               --lint-select narrows the set; same unresolvable-PREFIX refusal and root disclosure as --lint-select\n"
+        "    --lint-max-per-rule=N      (with --lint / --lint-rules) set each rule's match budget, below or above the default 5000.\n"
+        "                               The default is a runaway guard, not a target. A rule that spends its budget carries\n"
+        "                               count_capped=\"1\" (its count= is a FLOOR) and the root names the call that counts the rest:\n"
+        "                               findings_next= (SARIF: run properties findingsNext, --sarif kept) re-runs only the floored\n"
+        "                               rules under a 10x budget; a re-run still floored names its own. Raising it costs time and\n"
+        "                               memory in proportion to the matches kept\n"
         "    --sarif                    (with --lint / --lint-rules) the SAME findings as SARIF 2.1.0 instead of the native XML\n"
         "                               <lint> block — the shape github/codeql-action/upload-sarif consumes for code scanning.\n"
         "                               Pure re-serialization (zero new analysis); results count == the native run's findings\n"
@@ -2583,7 +2592,8 @@ inline constexpr char kHelpTail[] =
         "                               here and in the full legend. DATA comments stay (the map header, pack-task's\n"
         "                               body-omitted rows, +more). Per call this drops 2.8-5.8 KB on the navigation verbs\n"
         "                               (--edit-check's legend 7.4 KB -> 0.9 KB). --for compacts too (ripwire.for/v1 header);\n"
-        "                               under --token-budget it never costs a row --legend=full would keep. The MCP twin\n"
+        "                               under --token-budget it never costs a row --legend=full would keep, unless its\n"
+        "                               own header is the larger one and the row pays for <sigs next=> to fit. The MCP twin\n"
         "                               is the argument legend, compact by default there as well, legend:\"full\" restores\n"
         "                               the prose. Runs with nothing to compact ignore the default; an ASKED --legend=compact\n"
         "                               refuses there, naming the verb: prose/markdown/JSON answers (--situ --recall --report\n"
@@ -3460,6 +3470,9 @@ inline constexpr IntFlag kIntFlags[] =
     { "--pack-top-n=",       &Config::packTopN,      false, kIntFlagMax,       "a positive integer",         "--pack-top-n=10",
       "ripwire: --pack-top-n is deprecated — use --pack-task/--detail instead (unchanged behavior for now)\n" },
     { "--detail=",           &Config::detail,        true,  kIntFlagMax,       "a non-negative integer (0 = off)", "--detail=2" },
+    // knob-honesty-068: the per-rule lint budget (kLintMaxPerRule is the default); a modifier of --lint/--lint-rules,
+    // refused alone (validateLintSelectionModifierGuards) — the floored answer's findings_next= is the call that spells it.
+    { "--lint-max-per-rule=", &Config::lintMaxPerRule, false, kIntFlagMax,     "a positive integer",         "--lint-max-per-rule=50000" },
     // --cochange-recur=K: K is a count of SUB-WINDOWS, so it is bounded by kCoRecurSubWindows in practice;
     // the parser accepts any positive integer and the verb reports zero pairs above the ceiling rather than
     // refusing — an empty result under a disclosed min_recur= is a truthful answer, not an error.
@@ -3513,7 +3526,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 26;   // +2 lane/lean-answers-068 (2026-10-07): --whereis-listing= and --mcp-legend= (closed-value arms, same shape as --grep-in=); +1 #350 (2026-09-28): --max-memory= (byte-size arm, same shape as --max-file-size=); +1: --color-by= (enum-value arm); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (repeatable-value arms, same shape as --exclude=); +1 R-H: --grep-in= (closed-value arm, same shape as --grep-scope=); +1 lane/flag-biggest-first (2026-09-23): --readability (deprecation-warning alias, same shape as --stable/--most-important-last/--no-auto-order) — its kBoolFlags row is renamed to --biggest-first (same Config::readability member), so the old spelling moves OUT of the table and becomes a hand-written arm, per the house rule that deprecation-warning aliases stay hand-written
-inline constexpr std::size_t kTotalFlagArms = 217;  // +2 lane/lean-answers-068 (2026-10-07): --whereis-listing= and --mcp-legend= (hand-written closed-value arms, see kHandWrittenFlagArms); +1 lane/mcp-tool-profile-065 (2026-09-26): --mcp-tools= (kViewFlags row) — list only a subset of the MCP tools (names and/or the core/full profiles); +1 #350 (2026-09-28): --max-memory= (hand-written byte-size arm, see kHandWrittenFlagArms); +1 lane/flag-biggest-first (2026-09-23): --readability renamed to --biggest-first, kept working as a hand-written deprecated alias (see kHandWrittenFlagArms); +1 lane/r1-for-sections-stub (2026-09-19, L2/B1): --sections= (kViewFlags row) — the closed-set opt-in that restores the <lego>/<compose> sections --for collapses to a counted stub by default; +1 --lsp (kBoolFlags row, 2026-09-15): the navigation LSP server stdio entry point — Phase 1 PoC, docs/LSP.md; +1 lane/recent-scope (2026-09-12, C1-b): --in= (kViewFlags row) — the directory-scoped <recent scope=> block of --rank-by=churn-decay; +2 P4 (capture-audit 2026-09-04, lane L7): --zoom-levels= (kIntFlags row, the printed-levels ceiling) and --include-builtins (kBoolFlags row, the external-surface builtin opt-in); +1 P9 (capture-audit 2026-09-04, lane L8): --no-post-check (kBoolFlags row, the edit receipt's folded verification opt-out); +1 lane/ca-L2 (2026-09-04, H11): --allow-dirty (kBoolFlags row) — the explicit consent --quality-baseline needs before it pins a floor on a tree that differs from HEAD; +1 lane/n6-c (2026-09-03): --no-ignore (kBoolFlags row, the .gitignore-by-default escape hatch); +1 lane/af-scope (2026-08-29): --scope= (kViewFlags row, the quality-delta ownership partition); +1 --quality-delta= (kViewFlags, R-I ref-pair form); +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms); +1 R-H: --grep-in= (hand-written arm); +1 R2: --pattern= (kViewFlags row, the code-shaped structural search); +1 lane/safe-delete (2026-08-21): --safe-delete= (kViewFlags row, the composed "can I delete this?" read); +1 lane/compact-conceptual (2026-08-22): --auto-bodies (kBoolFlags row, the compact-conceptual-serving opt-out); +5 CLI edit bridge (2026-08-27): --replace-symbol-body=/--insert-before-symbol=/--insert-after-symbol=/--edit-payload=/--edit-target-file= (kViewFlags rows); +1 --handles (kBoolFlags row, grep edit handles); +1 --legend= (kViewFlags row, compact schema dialect); +3 edit-plan: --edit-plan= (kViewFlags) and --dry-run/--apply (kBoolFlags rows); +1 --agent= (kViewFlags row, the --doctor Codex surface); +1 lane/paper-slice (2026-08-28): --slice= (kViewFlags row, the ARISE-motivated def-use slice); +1 lane/af-planlint (2026-08-29): --plan-lint= (kViewFlags row, the PLAN-format structure gate, P3.2); +2 lane/or-arise (2026-08-30): --slice-flow= (kViewFlags row) and --slice-depth= (kIntFlags row) — the ARISE rung-2 cross-statement data-flow slice; +1 lane/at-seed (2026-08-30): --at= (kViewFlags row) — the FILE:LINE enclosing-chain report, with the @FILE:LINE selector spelling resolved in graph.h (no flag arm of its own); +1 CARD-1 phase 2 (2026-08-31): --pin-census= (kViewFlags row) — the eval-only S6-C silent-pin census, written beside the map and never into it
+inline constexpr std::size_t kTotalFlagArms = 218;  // +1 knob-honesty-068 (2026-10-07): --lint-max-per-rule= (kIntFlags row) — the per-rule lint budget a floored answer's findings_next= names; +2 lane/lean-answers-068 (2026-10-07): --whereis-listing= and --mcp-legend= (hand-written closed-value arms, see kHandWrittenFlagArms); +1 lane/mcp-tool-profile-065 (2026-09-26): --mcp-tools= (kViewFlags row) — list only a subset of the MCP tools (names and/or the core/full profiles); +1 #350 (2026-09-28): --max-memory= (hand-written byte-size arm, see kHandWrittenFlagArms); +1 lane/flag-biggest-first (2026-09-23): --readability renamed to --biggest-first, kept working as a hand-written deprecated alias (see kHandWrittenFlagArms); +1 lane/r1-for-sections-stub (2026-09-19, L2/B1): --sections= (kViewFlags row) — the closed-set opt-in that restores the <lego>/<compose> sections --for collapses to a counted stub by default; +1 --lsp (kBoolFlags row, 2026-09-15): the navigation LSP server stdio entry point — Phase 1 PoC, docs/LSP.md; +1 lane/recent-scope (2026-09-12, C1-b): --in= (kViewFlags row) — the directory-scoped <recent scope=> block of --rank-by=churn-decay; +2 P4 (capture-audit 2026-09-04, lane L7): --zoom-levels= (kIntFlags row, the printed-levels ceiling) and --include-builtins (kBoolFlags row, the external-surface builtin opt-in); +1 P9 (capture-audit 2026-09-04, lane L8): --no-post-check (kBoolFlags row, the edit receipt's folded verification opt-out); +1 lane/ca-L2 (2026-09-04, H11): --allow-dirty (kBoolFlags row) — the explicit consent --quality-baseline needs before it pins a floor on a tree that differs from HEAD; +1 lane/n6-c (2026-09-03): --no-ignore (kBoolFlags row, the .gitignore-by-default escape hatch); +1 lane/af-scope (2026-08-29): --scope= (kViewFlags row, the quality-delta ownership partition); +1 --quality-delta= (kViewFlags, R-I ref-pair form); +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms); +1 R-H: --grep-in= (hand-written arm); +1 R2: --pattern= (kViewFlags row, the code-shaped structural search); +1 lane/safe-delete (2026-08-21): --safe-delete= (kViewFlags row, the composed "can I delete this?" read); +1 lane/compact-conceptual (2026-08-22): --auto-bodies (kBoolFlags row, the compact-conceptual-serving opt-out); +5 CLI edit bridge (2026-08-27): --replace-symbol-body=/--insert-before-symbol=/--insert-after-symbol=/--edit-payload=/--edit-target-file= (kViewFlags rows); +1 --handles (kBoolFlags row, grep edit handles); +1 --legend= (kViewFlags row, compact schema dialect); +3 edit-plan: --edit-plan= (kViewFlags) and --dry-run/--apply (kBoolFlags rows); +1 --agent= (kViewFlags row, the --doctor Codex surface); +1 lane/paper-slice (2026-08-28): --slice= (kViewFlags row, the ARISE-motivated def-use slice); +1 lane/af-planlint (2026-08-29): --plan-lint= (kViewFlags row, the PLAN-format structure gate, P3.2); +2 lane/or-arise (2026-08-30): --slice-flow= (kViewFlags row) and --slice-depth= (kIntFlags row) — the ARISE rung-2 cross-statement data-flow slice; +1 lane/at-seed (2026-08-30): --at= (kViewFlags row) — the FILE:LINE enclosing-chain report, with the @FILE:LINE selector spelling resolved in graph.h (no flag arm of its own); +1 CARD-1 phase 2 (2026-08-31): --pin-census= (kViewFlags row) — the eval-only S6-C silent-pin census, written beside the map and never into it
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -4260,15 +4273,28 @@ inline void validateSarifModifierGuards( Config& c ) noexcept
 // is validated inside runLint, not here — see resolveLintSelection's own header for why.
 inline void validateLintSelectionModifierGuards( Config& c ) noexcept
 {
-    if( !c.lintSelect.empty() && !c.lint && c.lintRulesDir.empty() )
+    if( c.lint || !c.lintRulesDir.empty() )
     {
-        rw::emitRaw( stderr, "ripwire: --lint-select=PREFIX modifies --lint or --lint-rules=DIR — pass one (e.g. ripwire <dir> --lint --lint-select=cache-)\n" );
-        c.ok = false;
+        return;   // every modifier below has its verb
     }
-    if( !c.lintIgnore.empty() && !c.lint && c.lintRulesDir.empty() )
+    // one row per lint modifier, refused in this order (knob-honesty-068 folded the third into a table, not a third copy)
+    struct LintModifierGuard
     {
-        rw::emitRaw( stderr, "ripwire: --lint-ignore=PREFIX modifies --lint or --lint-rules=DIR — pass one (e.g. ripwire <dir> --lint --lint-ignore=naming-)\n" );
-        c.ok = false;
+        bool        given;
+        const char* refusal;
+    };
+    const LintModifierGuard guards[] = {
+        { !c.lintSelect.empty(), "ripwire: --lint-select=PREFIX modifies --lint or --lint-rules=DIR — pass one (e.g. ripwire <dir> --lint --lint-select=cache-)\n" },
+        { !c.lintIgnore.empty(), "ripwire: --lint-ignore=PREFIX modifies --lint or --lint-rules=DIR — pass one (e.g. ripwire <dir> --lint --lint-ignore=naming-)\n" },
+        { c.lintMaxPerRule > 0,  "ripwire: --lint-max-per-rule=N modifies --lint or --lint-rules=DIR — pass one (e.g. ripwire <dir> --lint --lint-max-per-rule=50000)\n" },
+    };
+    for( const LintModifierGuard& g : guards )
+    {
+        if( g.given )
+        {
+            rw::emitRaw( stderr, g.refusal );
+            c.ok = false;
+        }
     }
 }
 
@@ -4282,7 +4308,8 @@ inline void validateLintSelectionModifierGuards( Config& c ) noexcept
 // it are agents, scripts and harnesses making repeated calls. `--legend=full` restores the full prose legend
 // byte-for-byte (compactlegendcheck (A) pins it against the pre-L1 bytes). --for is no longer exempt: its compact
 // header is its own dialect (verbs_for.h), and under a --token-budget it never loses a row --legend=full keeps
-// (compactlegendcheck (P1) asserts rows(default) ⊇ rows(--legend=full)).
+// (compactlegendcheck (P1) asserts rows(default) ⊇ rows(--legend=full)) — with ONE ruled exemption (knob-honesty-068 round 3,
+// option B): a default whose header is larger than full's, that fits its budget and paid the row for its <sigs next=> (P1-B).
 inline constexpr std::string_view kLegendPostures[]     = { "full", "compact" };
 inline constexpr std::string_view kDefaultLegendPosture = "compact";
 static_assert( std::ranges::contains( kLegendPostures, kDefaultLegendPosture ), "the default is a registered posture" );

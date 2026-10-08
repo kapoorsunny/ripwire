@@ -679,6 +679,8 @@ add(S4B, f"{BIN} . --lint-catalog", "The built-in rule registry — one row per 
 add(S4B, f"{BIN} . --legend-dict", "The session legend dictionary the MCP server serves as ripwire://legend-dict/full — one definition per line, headed by its dictv= version; no corpus needed. =roster lists the completeness attributes it defines.")
 add(S4B, f"{BIN} . --lint --lint-select=cache-", "Run ONLY one rule family; the root carries selected=\"K of N\" so a filtered zero is never confusable with an unfiltered one.")
 add(S4B, f"{BIN} . --lint --lint-ignore=naming-,cache-", "DROP two families, applied after selection; the raw select=/ignore= you passed rides on the root.")
+add(S4B, f"{BIN} . --lint --lint-select=goto --lint-max-per-rule=4", "A rule that spends its own match budget (here 4, set BELOW the default 5000 so the floor shows on this repo): goto carries count_capped=\"1\", its count= is a FLOOR, and the root names the call that counts the rest — findings_next= re-runs only the floored rules under a 10x budget.")
+add(S4B, f"{BIN} . --lint --lint-select=goto --lint-max-per-rule=40", "Pasting that findings_next=: the same rule under a 10x budget counts its true total — no count_capped=, no findings_next=.")
 add(S4B, f"{BIN} . --lint --lint-select=cach-", "An unresolvable PREFIX refuses (exit 1) with a did-you-mean from a real edit distance (one character off cache-).")
 add(S4B, f"{BIN} . --lint --lint-select=nosuchfamily", "A PREFIX with no near miss at all: the refusal points at --lint-catalog instead of guessing.")
 add(S4B, f"{BIN} . --lint --sarif", "The SAME findings as SARIF 2.1.0 (what github/codeql-action/upload-sarif consumes) — pure re-serialization, results count == the native run's.",

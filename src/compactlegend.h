@@ -227,6 +227,8 @@ inline constexpr std::string_view kCompactProsePrefixes[] =
     "<!-- rank_by=",                   // --rank-by's k= semantics block
     "<!-- max_tokens=",                // --max-tokens' fit_bytes block
     "<!-- with-profile: ",             // --with-profile's heat_* block
+    "<!-- lint findings_next=",        // --lint's present-only knob-honesty-068 clause (verbs_lint.h); the lint-keyed
+                                       // findings_next completeness row restates it
     "<!-- lint nest_refused=",         // --lint's present-only #157 clause (verbs_lint.h); kCompactAttributeReadings'
                                        // lint-keyed nest_refused row restates it. NOT the bare "<!-- nest_refused=":
                                        // --skipped's own clause of that opener is kept in the default dialect.
@@ -1172,6 +1174,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "nest_refused", "nest_refused=K: K corpus files a pre-parse nesting guard refused; never walked, not in eligible_files= (the skipped verb names them)", false, "match", MapHeaderRead::No, {}, "match" },
     { "nest_refused", "nest_refused=K: K corpus files a pre-parse nesting guard refused; never walked, in neither eligible_files= nor skipped_files=", false, "pattern", MapHeaderRead::No, {}, "pattern" },
     { "nest_refused", "nest_refused=K: K corpus files a pre-parse nesting guard refused, corpus-wide (not narrowed to a language any rule here declares); no rule walked them (the skipped verb names them)", false, "lint", MapHeaderRead::No, {}, "lint" },
+    // knob-honesty-068: the present-only findings_next= on a floored <lint> root (its full clause is prose this dialect strips)
+    { "findings_next", "findings_next=: the call counting the floored rules' rest (count_capped=1 rules only, 10x per-rule budget)", false, "lint", MapHeaderRead::No, {}, "lint" },
     // verify: src/verbs_navigate.h (the verify root)
     { "claim", "claim=/shape=: the claim as given and its shape; from_defs=/to_defs=: defs each name resolved to", false, "verify", MapHeaderRead::No, {}, "verify" },   // also defines shape= from_defs= to_defs=
     { "hops", "hops=N: call edges on the witness path (a confirmed reach claim only)", false, "verify", MapHeaderRead::No, {}, "verify" },

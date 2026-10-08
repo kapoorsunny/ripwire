@@ -134,7 +134,7 @@ Discloses: **none**
 
 ### `src/cli.h`
 
-Discloses: `capped`, `bridges_capped`, `files_capped`, `inc_capped`, `mention_idents_capped`, `mention_syms_capped`, `modules_capped`, `rows_capped`, `sibs_capped`, `syms_capped`, `tests_capped`, `unflagged_capped`, `untested_capped`
+Discloses: `capped`, `bridges_capped`, `count_capped`, `files_capped`, `inc_capped`, `mention_idents_capped`, `mention_syms_capped`, `modules_capped`, `rows_capped`, `sibs_capped`, `syms_capped`, `tests_capped`, `unflagged_capped`, `untested_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
@@ -571,7 +571,7 @@ Discloses: **none**
 
 ### `src/lintrules.h`
 
-Discloses: **none**
+Discloses: `count_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |

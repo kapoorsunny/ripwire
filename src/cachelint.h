@@ -292,7 +292,10 @@ using cachedetail::cacheSpecs;
 // built-in [AST] checks and the atoms pack (astQueryGrouped, src/ingest.h). The pack does not run its own
 // pass: `--lint` is its only caller, and a second full read+parse of the corpus to ask this pack's
 // questions of trees the same run already built was most of what made the verb slow.
-inline CacheRun cacheFriendliness( const IngestResult& ing, std::size_t maxPerRule, std::vector<AstMatch> ms )
+// knob-honesty-068: `queryBudget` is the engine budget the captures were collected under (kCacheQueryBudget by default; scaled
+// with a raised --lint-max-per-rule, lintPackQueryBudget), so the loop stream's saturation is judged against the budget that cut it.
+inline CacheRun cacheFriendliness( const IngestResult& ing, std::size_t maxPerRule, std::vector<AstMatch> ms,
+                                   std::size_t queryBudget = kCacheQueryBudget )
 {
     using namespace cachedetail;
 
@@ -306,7 +309,7 @@ inline CacheRun cacheFriendliness( const IngestResult& ing, std::size_t maxPerRu
     // Loop containment universe, then the fence: the loop stream is stripped and the three in-loop
     // rules keep only rows a loop region contains.
     const LoopIndex loops( ing, ms );
-    const bool loopStreamSaturated = loops.loopRows >= kCacheQueryBudget;
+    const bool loopStreamSaturated = loops.loopRows >= queryBudget;
     std::vector<AstMatch> eligible;
     eligible.reserve( ms.size() );
     for( AstMatch& m : ms )

@@ -424,6 +424,11 @@ struct ForLensJsonInputs
     bool                               notesDegraded;
     // code above docs (serialize.h reorderDocsAfterCode): the XML twin's verdict, REQUIRED for the same reason
     bool                               docsAfterCode;
+    // knob-honesty-068: what the "sigs_next" continuation echoes (serialize.h SigsCutContinuation) — REQUIRED like the two
+    // above: a capped JSON bundle names the call that serves its cut rows exactly as the XML twin's <sigs next=> does.
+    std::string_view                  task;
+    int                               packTopN;
+    std::string_view                  rankFlags;   // forRankShapingFlags( cfg ), owned by the caller for the call's duration
 };
 
 // The lens bundle's opening keys. Every note is absent-unless-present — the same silence-means-nothing-
@@ -1320,6 +1325,12 @@ struct ForLensRootFinish
     std::size_t      tokenBudget          = 0;
     int              maxTokens            = 0;
     bool             bodyCeiling          = false;
+    // knob-honesty-068 (orchestrator rulings 2026-10-07): a charged <sigs> continuation rode unpaid — the rank 1..4 floor could
+    // not give its bytes up, or no row was dropped for it because the answer lands past its ceiling paid or not (ruling C3) —
+    // (SigsCutReport::continuationUnpaidBytes) AND the document lands past its ceiling: byte allowance or budget_tokens.
+    // Decided by the caller on the finished document (a value, never a search of the text); labels it over_ceiling="1"
+    // with kForSigsUnpaidOverCeilingNote, which is true where kOverCeilingLegend's est_tokens reading may not be.
+    bool             sigsUnpaidOver       = false;
 };
 
 // PR #215 review: the finished header AND the number it prints, handed back together. finishForLensHeader
@@ -1403,9 +1414,13 @@ inline ForLensPricedHeader finishForLensHeaderPriced( std::string header, const 
     // clause unconditionally would charge every budgeted bundle for an attribute it does not carry. Monotone —
     // adding bytes only RAISES est_tokens — so one extra stage is exact and the flag never oscillates. The
     // definition rides the legend of the document that carries the attribute.
-    if( forLensOverCeiling( f.lastRungFired, f.tokenBudget, f.maxTokens, f.bodyCeiling, priced.first ) )
+    const bool namedCeilingOver = forLensOverCeiling( f.lastRungFired, f.tokenBudget, f.maxTokens, f.bodyCeiling, priced.first );
+    if( namedCeilingOver || f.sigsUnpaidOver )
     {
-        spliceBefore( header, " -->", /*fromEnd=*/true, f.overCeilingLegend );
+        // each clause rides only where its reading is true: the est_tokens/last-rung one when that predicate holds, the
+        // <sigs> unpaid one when the recovery handle rode unpaid on an answer past its ceiling (knob-honesty-068) — both when both hold
+        spliceBefore( header, " -->", /*fromEnd=*/true, namedCeilingOver ? f.overCeilingLegend : std::string_view() );
+        spliceBefore( header, " -->", /*fromEnd=*/true, f.sigsUnpaidOver ? rw::kForSigsUnpaidOverCeilingNote : std::string_view() );
         overAttr = " over_ceiling=\"1\"";
         priced   = priceFixpoint( header.size() + f.nonHeaderMarkupBytes, overAttr.size() );
     }
@@ -1446,7 +1461,11 @@ inline std::string forLensJsonTailStanza( const rw::FileTail& tail, std::size_t 
     return stanza;
 }
 
-inline int emitForLensJson( std::FILE* out, const std::string& header, const ForLensJsonInputs& in )
+// knob-honesty-068 (orchestrator ruling C3, completed 2026-10-08): one RENDER of the --json bundle. `sigsNextPayFromRows` is
+// the charged "sigs_next" payment mode (serialize.h SigsCutContinuation::payFromRows); with `sigsNextTryOther` set, a render
+// whose capped, charged bundle lands past its ceiling writes NOTHING and asks for the other mode (emitForLensJson below).
+inline int emitForLensJsonPass( std::FILE* out, const std::string& header, const ForLensJsonInputs& in, bool sigsNextPayFromRows,
+                                bool* sigsNextTryOther )
 {
     using namespace rw;
 
@@ -1489,6 +1508,10 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
                                   + kJsonEnvelopeBytes + kJsonSurfaceCountsBytes
                                   + ( in.noteIndex ? kJsonNotesStanzaBytes : 0 );
     const std::size_t sigsBudget = bundleBudget > fixedBytes ? bundleBudget - fixedBytes : 1;
+    // knob-honesty-068: the cut's continuation. This dialect serves no bodies, so its sig side IS the ceiling: charged under
+    // an explicit --token-budget, exempt at the default (the XML twin's rule, SigsCutContinuation)
+    const rw::SigsCutContinuation cutNext{ in.task, in.packTopN, in.rankFlags, fixedBytes, /*charged=*/in.tokenBudget > 0, /*json=*/true,
+                                           /*pasteHandle=*/true, /*ledgerGapBytes=*/0u, sigsNextPayFromRows };
 
     const JsonSigLens lens{ /*metrics=*/true, in.fanIn, in.impure, in.churnPerFile, in.cloneMember,
                             in.tested, in.amp, /*rankAdaptivePayload=*/true, in.noteIndex,
@@ -1501,7 +1524,8 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
                           in.rootArg, /*hasRelevanceFloor=*/true,        // LB-A: same admission rule as the XML twin (R-R: root-relative p/id)
                           outDroppedPositive,                            // A2: exact count, see droppedPositiveCount (serialize.h)
                           outShownIds,                                   // lane 2: the emitted rows' ids — the tail excludes these files
-                          outCut ); };                                   // cut-fix lane A: the XML tag's shown/total/docs_dropped
+                          outCut ); };                                   // cut-fix lane A: the XML tag's shown/total/docs_dropped;
+                                                                         //   knob-honesty-068: carries cutNext IN ("sigs_next")
 
     // §B1.4: built once, used on both the degrade path below and the normal return — these three are plain
     // size_t values already computed by the caller (no rendering, no redaction seam), so unlike est_tokens
@@ -1528,6 +1552,7 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
 
     bool        sigsCapped         = false;   // the LADDER's verdict: decides the budget_bytes= stanza
     rw::SigsCutReport sigsCut;               // cut-fix lane A: what the array cut (gate or ladder) — "capped" and the sigs_* keys
+    sigsCut.continuationRequest = &cutNext;  // knob-honesty-068: IN — "sigs_next" / "sigs_next_offset" on a capped array
     std::size_t sigsDroppedPositive = 0;   // A2: set only by the memstream-buffered render below (nullptr on the ENOMEM degrade path)
     std::vector<rw::NodeId> jsonShownIds;   // lane 2: the sigs rows actually emitted (the XML twin's shownSigIds)
     std::string sigsJson;
@@ -1591,6 +1616,11 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     if( sigsCut.isCapped )
     {
         sigsCutStanza += ",\"sigs_shown\":" + std::to_string( sigsCut.shown ) + ",\"sigs_total\":" + std::to_string( sigsCut.total );
+        if( rw::sigsCutHasNextOffset( sigsCut ) )   // knob-honesty-068: the resume index, then the call serving the cut rows
+        {
+            sigsCutStanza += ",\"sigs_next_offset\":" + std::to_string( sigsCut.lastShownRank );
+        }
+        sigsCutStanza += rw::nextFieldJson( sigsCut.next, "sigs_next" );
     }
     if( sigsCut.docsDropped > 0 )
     {
@@ -1682,6 +1712,13 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
         overCeiling = ",\"over_ceiling\":true";
     }
     ASSUME( overCeiling.size() == 0 || overCeiling.size() == 20 );   // the 20 the charge above reserved for it
+    // knob-honesty-068 (ruling C3, completed): a capped, charged bundle past its ceiling in THIS payment mode is not served from
+    // this render. Write nothing; the caller tries the other mode (emitForLensJson: unpaid, then paid, then unpaid served).
+    if( sigsNextTryOther != nullptr && cutNext.charged && sigsCut.hasContinuation && !overCeiling.empty() )
+    {
+        *sigsNextTryOther = true;
+        return 0;
+    }
     std::fputs( header.c_str(), out );
     std::fwrite( kJsonBundleSigsKey.data(), 1, kJsonBundleSigsKey.size(), out );
     std::fwrite( surfaceCountsStanza.data(), 1, surfaceCountsStanza.size(), out );
@@ -1696,6 +1733,42 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     std::fwrite( sigsJson.data(), 1, sigsJson.size(), out );
     std::fputs( "}", out );
     return 0;
+}
+
+// The --json bundle (orchestrator ruling C3, completed 2026-10-08): a charged "sigs_next" is paid for in rows ONLY where that is
+// what makes the bundle fit — runForLens's three modes over one ranking: unpaid (served when it fits), paid (served when IT
+// fits), unpaid again (served over its ceiling, over_ceiling disclosed: no row dropped for a handle that cannot make it fit).
+// A render that hands back wrote nothing; the redaction tally is put back to its entry value before each later render, so the
+// rows the summary counts are the ones written. Rendering only — the ranking is the caller's.
+inline int emitForLensJson( std::FILE* out, const std::string& header, const ForLensJsonInputs& in )
+{
+    if( in.tokenBudget == 0 )   // only an explicit --token-budget charges the handle, so only then can a render hand back
+    {
+        return emitForLensJsonPass( out, header, in, /*sigsNextPayFromRows=*/true, nullptr );
+    }
+    const std::optional<rw::RedactCounts> tallyAtEntry = in.redact != nullptr ? std::optional<rw::RedactCounts>( *in.redact ) : std::nullopt;
+    const auto restoreTally = [ & ]
+    {
+        if( tallyAtEntry )
+        {
+            *in.redact = *tallyAtEntry;
+        }
+    };
+    bool      unpaidOver = false;
+    const int unpaidRc   = emitForLensJsonPass( out, header, in, /*sigsNextPayFromRows=*/false, &unpaidOver );
+    if( !unpaidOver )
+    {
+        return unpaidRc;
+    }
+    restoreTally();
+    bool      paidOver = false;
+    const int paidRc   = emitForLensJsonPass( out, header, in, /*sigsNextPayFromRows=*/true, &paidOver );
+    if( !paidOver )
+    {
+        return paidRc;
+    }
+    restoreTally();
+    return emitForLensJsonPass( out, header, in, /*sigsNextPayFromRows=*/false, nullptr );
 }
 
 // ── T3: the terminal-by-default auto <bodies> section (pre-registered: docs/EVALS.md §4) ─────────────────
@@ -1838,6 +1911,20 @@ void restrictBodiesToRouteAnchor( const rw::IngestResult& ing, std::vector<rw::N
 // SIG posture and keeps the legacy whole-ceiling claim — the frozen share would trim the rows the caller
 // literally asked for down to the ladder floor. A free function over runForLens' locals (the
 // ForLensHeaderParts precedent) — runForLens is already one of the largest functions in this file.
+// knob-honesty-068: the flags that change WHICH rows the lens ranks (and so total=/the order <sigs> cuts), pre-spelled for the
+// capped block's continuation (serialize.h SigsCutContinuation::rankFlags) — the re-run must rank the same list.
+inline std::string forRankShapingFlags( const rw::Config& cfg )
+{
+    std::string f;
+    f += cfg.anchor         ? " --anchor"           : "";
+    f += cfg.noRoute        ? " --no-route"         : "";
+    f += cfg.adaptive       ? " --adaptive"         : "";
+    f += cfg.noMentionBoost ? " --no-mention-boost" : "";
+    f += cfg.cochangeBoost  ? " --cochange-boost"   : "";
+    f += cfg.noDocMention   ? " --no-doc-mention"   : "";
+    return f;
+}
+
 std::size_t forSigSideCeiling( bool autoBundleMode, int packTopN, std::size_t bundleBudget )
 {
     if( autoBundleMode && packTopN == 0 )
@@ -2284,7 +2371,11 @@ inline std::string renderForHdrRowsXml( const rw::IngestResult& ing, const std::
     return x;
 }
 
-std::optional<int> runForLens( const MainDispatch& d )
+// knob-honesty-068 (orchestrator ruling C3, completed 2026-10-08): one RENDER of the --for lens over the ranking runForLens
+// computed once (`lr`). `sigsNextPayFromRows` is the charged <sigs> continuation's payment mode (serialize.h
+// SigsCutContinuation::payFromRows); with `sigsNextTryOther` set, a run whose capped, charged document lands past its ceiling
+// writes NOTHING to stdout and asks for the run in the other payment mode (runForLens below decides which answer ships).
+std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, bool sigsNextPayFromRows, bool* sigsNextTryOther )
 {
     using namespace rw;
     const Config&                     cfg          = d.cfg;
@@ -2328,8 +2419,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // ROUTING + anchoring + the B8 mention anchor + the opt-in B3 co-change prior all live in
         // computeLensRanking (shared with runPackTask so the ranking is defined once). Compose order with
         // --anchor: ROUTE picks the base lens rank, then ANCHOR expands it; mention/co-change run after.
-        LensRanking        lr        = computeLensRanking( d, cfg.forTask, forCompactPosture( cfg ),
-                                                           /*fullDistribution=*/!cfg.candidates );   // deep-tail: the bundle serves the file-grain tail; candidates has no tail and keeps the H2 pruning
+        // (the ranking itself — computeLensRanking — runs ONCE, in runForLens: every payment-mode render shares it)
         std::vector<float> lensRank  = std::move( lr.rank );
         const bool         forBodyCeiling   = cfg.maxTokens > 0 && cfg.detail > 0;   // the kShapingVerbs carve-out, read once (e= and the docs reorder share it via serialize.h explicitCeilingTighterThanDefault)
         // code above docs (filter.h): the routed path on a question that does not ask about docs — the shown set's REORDER
@@ -2852,7 +2942,8 @@ std::optional<int> runForLens( const MainDispatch& d )
                                                                    &forClone, testedPtr, ampPtr, redactPtr,
                                                                    cfg.packBudgetBytes, cfg.tokenBudget, notesPtr,
                                                                    legoTotal, composeTotal, routesTotal, flRootArg,
-                                                                   &forFileTail, d.notesDegraded, forDocsAfterCode } );
+                                                                   &forFileTail, d.notesDegraded, forDocsAfterCode, cfg.forTask,
+                                                                   cfg.packTopN, forRankShapingFlags( cfg ) } );
             // §B0: this early return skipped the end-of-function tally below, so a --for --json run redacted
             // SILENTLY — the one stderr line that tells the user a secret was in their tree never appeared.
             reportRedactions( stderr, redactCounts );
@@ -3017,6 +3108,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // tokens: 995 vs 816). So the compact charge is capped at the FULL dialect's charge for the same header, computed by the
         // same rule: rows(default) ⊇ rows(full) by construction, and a default that pays more header than full never gets more
         // room for rows than full had.
+        std::size_t compactLedgerGapBytes = 0;   // knob-honesty-068: how much MORE sig room this compact header was given than full's
         if( compactLegendOn )
         {
             ForLensHeaderParts fullParts = headerParts;
@@ -3029,7 +3121,10 @@ std::optional<int> runForLens( const MainDispatch& d )
                                               + ( headerParts.endLinePresent ? rw::kForEndLineLegend.size() : 0u );
             std::size_t       fullCharged     = fullExempt > fullHeaderBytes ? fullHeaderBytes : fullHeaderBytes - fullExempt;
             fullCharged -= std::min( fullCharged, rw::forZeroNoteBytes( fullHeader ) );   // lean-answers: exempt, as above
-            chargedHeaderBytes = std::min( chargedHeaderBytes, fullCharged );
+            chargedHeaderBytes    = std::min( chargedHeaderBytes, fullCharged );
+            // knob-honesty-068, train 26b: the gap is read AFTER both exemptions (the e= clause and lean's zero note) on
+            // BOTH headers, so it measures only the sig room the compact dialect was given beyond its honest cost
+            compactLedgerGapBytes = fullCharged - chargedHeaderBytes;   // >= 0 by the min above
         }
         const std::size_t fixedBytes = chargedHeaderBytes + legoStr.size() + composeStr.size() + routeStr.size() + 6;   // + "</ctx>"
         // the auto bundle's SECTION SPLIT — the sig side's claim is capped so an explicit ceiling wider
@@ -3089,8 +3184,30 @@ std::optional<int> runForLens( const MainDispatch& d )
         // headerStr is already flushed to stdout by the time that path runs and cannot be edited retroactively
         // (the same reason est_tokens is "omitted", not "wrong", on that path — see its DISCLOSE).
         std::size_t forDroppedPositive = 0;
+        // knob-honesty-068: a capped <sigs> names the call that serves it uncut (serialize.h SigsCutContinuation, where the
+        // two regimes are argued): CHARGED exactly when an explicit ceiling's sig side is the whole ceiling (nothing
+        // downstream can pay, and the ceiling is hard); exempt at the default and when the sig side is frozen at the
+        // default's share (forSigSideCeiling), so those ranked sets — and forbudgetmonotoncheck's identity — are untouched.
+        // A charged one is paid from the rows byte for byte (serialize.h paySigsContinuationFromRows), so a capped bundle never
+        // grows past the bytes the cut alone left it. THE COMPACT DIALECT ALSO PAYS FROM FULL'S ROOM: its sig ledger charges
+        // less header than it emits and leans on the header rungs to land inside the ceiling, so a charged one also reserves
+        // the room the compact charge was given beyond full's (compactLedgerGapBytes) — in the plan, so only a block the ladder
+        // already trims pays it: a PAID capped compact answer serves the rows the full one does and lands no further over its
+        // ceiling (compactlegendcheck P4). (Rows a PAID full answer would serve: where full's UNPAID answer fits and the compact
+        // one's does not — a compact header larger than full's, round 3 — full keeps a row the compact answer pays; that is the
+        // one exemption compactlegendcheck (P1-B) rules, orchestrator option B.) An uncapped answer is untouched. AT THE FLOOR (rank 1..4, nothing left to shed) the
+        // handle still ships and an overshoot is labelled (rootFinish.sigsUnpaidOver below; orchestrator ruling 2026-10-07).
+        // AND ONLY WHERE PAYING IS WHAT MAKES IT FIT (ruling C3, completed 2026-10-08): runForLens renders unpaid first
+        // (sigsNextPayFromRows=false: no ledger gap, no payment — the rows the cut alone leaves) and pays only when that
+        // answer lands past its ceiling and the paid one does not.
+        const bool                    forSigsNextCharged = cfg.tokenBudget > 0 && sigSideCeiling == bundleBudget;
+        const std::string             forRankFlags       = forRankShapingFlags( cfg );
+        const rw::SigsCutContinuation forSigsNext{ cfg.forTask, cfg.packTopN, forRankFlags, fixedBytes, forSigsNextCharged, /*json=*/false,
+                                                   /*pasteHandle=*/true, /*ledgerGapBytes=*/forSigsNextCharged ? compactLedgerGapBytes : 0u,
+                                                   sigsNextPayFromRows };
         bool        forSigsCapped      = false;   // did the H1 ladder trim <sigs>? — decides the budget_bytes= legend clause below
         rw::SigsCutReport forSigsCut;             // cut-fix lane A: the <sigs> tag's shown/total/docs_dropped — its clauses below
+        forSigsCut.continuationRequest = &forSigsNext;   // knob-honesty-068: IN — the capped block's continuation
         sigsPreRendered = preRender( [ & ]( std::FILE* sm )
             {
                 packSignatures( sm, ing, lensRank, forTopN, cfg.packBudgetBytes, true, fanInPtr, impurePtr, redactPtr,
@@ -3104,7 +3221,8 @@ std::optional<int> runForLens( const MainDispatch& d )
                                 &shownSigIds,                                // lane 2: the rows actually emitted — the tail excludes THESE files
                                 &forSigsCapped,                              // did the ladder fire? — the budget_bytes= clause rides only then
                                 forTopRowNext,                               // L-W: the widening page on a thin answer, else the body
-                                &forSigsCut,                                 // cut-fix lane A: which cut readings the tag owes
+                                &forSigsCut,                                 // cut-fix lane A: which cut readings the tag owes;
+                                                                             //   knob-honesty-068: carries forSigsNext IN
                                 SigRowSpelling{ .elideZeroMetrics = true } );   // lean-answers lane: zero cx=/ccx=/in= omitted (legend: absent = 0)
             },
             sigsStr );
@@ -3184,7 +3302,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // cut-fix lane A: the <sigs> tag's two cut readings (docs_dropped=, shrunk-not-dropped) ride the same splice, present
         // only when the tag carries the case (serialize.h sigsCutLegendNotes), so the reserve below already covers them.
         const std::string sigsCeilingNote   = ( forDefaultCeiling ? std::string( rw::kForBudgetBytesNote ) : std::string() )
-            + rw::sigsCutLegendNotes( forSigsCut );   // + the docs reorder's reading (docs_after_code=)
+            + rw::sigsCutReportLegend( forSigsCut );   // + the continuation's and the docs reorder's readings (docs_after_code=)
         // ── the INDEXING-cap disclosure (mention.h CapDisclosure), at the same splice point and for the
         // same reason: a --for header is charged against the payload ceiling, so a disclosure folded into
         // the notes above is paid for in ranked rows. Measured on sixteen real invocations, that cost three
@@ -3570,6 +3688,24 @@ std::optional<int> runForLens( const MainDispatch& d )
                                                                        /*hasRouteAttr=*/!routeNoteRaw.empty(), kNotes );
             headerStr                = std::move( chosen.header );
             rootFinish.lastRungFired = ( chosen.rung == rw::CeilingRung::OverCeiling );
+            // knob-honesty-068 (orchestrator rulings 2026-10-07): the recovery handle ALWAYS ships. Read off the FINISHED
+            // document (the header this ladder chose + every byte stdout receives): does it land past its ceiling — the byte
+            // allowance, or the token budget the root names? The label only adds bytes, so a document over before it is over
+            // after it.
+            const ForLensPricedHeader asChosen  = finishForLensHeaderPriced( headerStr, rootFinish );
+            const bool                landsOver = asChosen.header.size() + emittedNonHeaderBytes > ladderCeiling
+                                               || asChosen.estTokens > cfg.tokenBudget;
+            // C3 (completed): a capped, charged answer that lands past its ceiling in THIS payment mode is not served from this
+            // run — nothing has reached stdout yet: hand back and let runForLens try the other mode (unpaid → paid: does paying
+            // make it fit? paid → unpaid: it did not, so no row is dropped for the handle).
+            if( sigsNextTryOther != nullptr && forSigsNextCharged && forSigsCut.hasContinuation && ( landsOver || rootFinish.lastRungFired ) )
+            {
+                *sigsNextTryOther = true;
+                return std::nullopt;
+            }
+            // the handle rode unpaid (the floor could not give its bytes up, or this is the unpaid run) and the document lands
+            // past its ceiling: over_ceiling="1" + kForSigsUnpaidOverCeilingNote
+            rootFinish.sigsUnpaidOver = forSigsCut.continuationUnpaidBytes > 0 && landsOver;
         }
         headerStr = finishForLensHeader( std::move( headerStr ), rootFinish );
 
@@ -3583,11 +3719,14 @@ std::optional<int> runForLens( const MainDispatch& d )
         }
         else
         {
+            rw::SigsCutReport degradeSigsCut;   // knob-honesty-068: carries the continuation request IN, as on the buffered path
+            degradeSigsCut.continuationRequest = &forSigsNext;
             packSignatures( stdout, ing, lensRank, forTopN, cfg.packBudgetBytes, true, fanInPtr, impurePtr, redactPtr,
                             &forChurn, &forClone, testedPtr, ampPtr, /*rankAdaptivePayload=*/true, sigsBudget, notesPtr, flRootArg,
                             rw::forLensRules( forDocsAfterCode, forEndLines ), nullptr, nullptr, nullptr,   // the degrade path selects identically
                             forTopRowNext,                                           // L-W: same next= rule on the degrade path
-                            nullptr, SigRowSpelling{ .elideZeroMetrics = true } );   // lean-answers lane: the same row spelling
+                            &degradeSigsCut,                                         // knob-honesty-068: and the same <sigs next=>
+                            SigRowSpelling{ .elideZeroMetrics = true } );            // lean-answers lane: the same row spelling
         }
         if( legoPreRendered )
         {
@@ -3658,6 +3797,49 @@ std::optional<int> runForLens( const MainDispatch& d )
         return 0;
     }
     return std::nullopt;
+}
+
+// The --for lens (orchestrator ruling C3, completed 2026-10-08: drop a row to pay for a charged <sigs> next= ONLY when dropping
+// it is what makes the answer fit). The ranking runs once; the render runs in up to three payment modes over it, each deciding
+// on its FINISHED document before the first byte reaches stdout:
+//   1. unpaid: every row the cut leaves + the handle. Fits (or nothing is capped and charged): served, no row dropped.
+//   2. paid: rows dropped to pay for the handle. Fits: served, because paying is what made it fit.
+//   3. unpaid again, served whatever its size: it cannot fit either way, so it keeps the cut's rows, the handle rides unpaid,
+//      over_ceiling="1" + kForSigsUnpaidOverCeilingNote.
+// So the served answer never has fewer rows than an alternative that also fits. The redaction tally is put back to its entry
+// value before every render, so the summary counts the rows written once. A render that hands back wrote nothing.
+std::optional<int> runForLens( const MainDispatch& d )
+{
+    const rw::Config& cfg = d.cfg;
+    if( cfg.forTask.empty() )
+    {
+        return std::nullopt;
+    }
+    rw::LensRanking lr = computeLensRanking( d, cfg.forTask, forCompactPosture( cfg ),
+                                             /*fullDistribution=*/!cfg.candidates );   // deep-tail: the bundle serves the file-grain tail; candidates has no tail and keeps the H2 pruning
+    // only an explicit --token-budget charges the handle (forSigsNextCharged), so only then can a render hand back
+    if( cfg.tokenBudget == 0 )
+    {
+        return runForLensPass( d, std::move( lr ), /*sigsNextPayFromRows=*/true, nullptr );
+    }
+    const rw::RedactCounts tallyAtEntry = d.redactCounts;
+    bool                   unpaidOver   = false;
+    std::optional<int>     rc           = runForLensPass( d, lr, /*sigsNextPayFromRows=*/false, &unpaidOver );
+    if( !unpaidOver )
+    {
+        return rc;
+    }
+    ASSUME( !rc );   // the unpaid render that handed back wrote nothing
+    d.redactCounts = tallyAtEntry;
+    bool paidOver  = false;
+    rc             = runForLensPass( d, lr, /*sigsNextPayFromRows=*/true, &paidOver );
+    if( !paidOver )
+    {
+        return rc;
+    }
+    ASSUME( !rc );   // the paid render that handed back wrote nothing
+    d.redactCounts = tallyAtEntry;
+    return runForLensPass( d, std::move( lr ), /*sigsNextPayFromRows=*/false, nullptr );
 }
 
 std::optional<int> runTargetedViews( const MainDispatch& d )

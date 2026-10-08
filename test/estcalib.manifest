@@ -11,5 +11,5 @@ expand 541 542 455 --expand=billableTotal
 # for-named-noe is its e=-free twin (RIPWIRE_FOR_ENDLINES=never, byte-identical to the pre-e= answer). Other rows: 2026-09-12 pins.
 for-named 962 958 1290 --for=billableTotal
 for-named-noe 898 893 1195 RIPWIRE_FOR_ENDLINES=never --for=billableTotal
-for-budgeted 419 415 598 --for=dedupe --token-budget=400
+for-budgeted 488 483 692 --for=dedupe --token-budget=400
 pack-task 882 862 1104 --pack-task=dedupe

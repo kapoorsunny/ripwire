@@ -1009,6 +1009,44 @@ definitions is served, and one whose pages list the same definitions keeps the s
 (A-default), `compactlegendcheck` (re-pinned with the measured bytes; a listing=all twin pin), `mcpmanifestcheck`.
 
 
+### Fixed — every disclosed cut names the call that recovers it: `--for`'s `<sigs>`, `--lint`'s per-rule floor, `--impact`'s import tier
+
+Three cuts were disclosed and still dead ends — counted, with no pasteable call that serves the rest:
+
+- **`--for` (and the MCP `for` twin, and `--for --json`).** A `<sigs shown= total= capped="1">` block cut by the payload
+  ceiling or an explicit `--token-budget` now carries `next=` — the same ranked lens re-run with the signatures given the
+  whole ceiling, sized from the untrimmed block so nothing is cut (`--for=TASK --signatures-only [ranking flags]
+  [--pack-top-n=N] --token-budget=T`) — and, when rows were dropped, `next_offset=`: the candidate index the cut starts at
+  (the last printed row's rank, so a slot that prints no row cannot skew it). `--json` carries `"sigs_next"` and
+  `"sigs_next_offset"`. The MCP twin carries no CLI argv (an MCP client re-calls the tool): `next_budget_tokens=T` names
+  the `budget_tokens` a re-call needs, beside the same `next_offset=`. Nothing consumes `next_offset=` yet
+  (`--for --offset=N` pages the file-grain list, a different one; `next=` re-runs the list), and its clause says so.
+  Present-only legend clauses define each. At the
+  default ceiling, and at any explicit ceiling wide enough that the signature side is frozen at the default's, they are
+  exempt from the signature trim — the rows shown are the ones they were. Under a tighter explicit ceiling (a hard one)
+  `next=` rides alone, and rows pay for it ONLY where paying is what makes the answer fit: the answer with every row the
+  cut leaves plus `next=` is served whenever it fits; only when it lands past its ceiling are rows dropped to pay (a
+  capped compact answer then serves the rows a paid full one keeps — fewer than `--legend=full` serves only where the
+  compact header is the larger one and full fits unpaid), and that paid answer is served only when it fits. Past
+  the ceiling either way (the rank 1..4 floor has nothing left to give, or the MCP `for` answer, whose header overshoots
+  `budget_tokens` on its own), no row is dropped for it — the answer keeps the rows the cut alone leaves, `next=` still
+  ships (the call that recovers a cut is never the thing cut), and the root says `over_ceiling="1"`, with a clause naming
+  the cause where the answer's own ceiling was otherwise met. Measured on 20 queries at a 2000-token budget: the CLI keeps
+  every row on 19 (the 20th was over its ceiling and now pays one row to fit), `--json` on all 20, MCP `for` on all 20
+  (19 of them over their ceiling either way); at 4000, MCP `for` pays on the 6 answers that fit only by paying.
+  No budget, ceiling or token conversion changed.
+- **`--lint` / `--lint-rules` and `--sarif`.** A rule that spends its per-rule match budget (`count_capped="1"`) now makes
+  the root carry `findings_next=` (SARIF: `runs[0].properties.findingsNext`, which keeps `--sarif`): only the floored
+  rules, under a 10x budget, through the new `--lint-max-per-rule=N` (sets each rule's budget either way; the default
+  stays 5000). A re-run still floored names its own.
+- **`--impact`.** A cut import tier dropped `importers_next=` when `--impact=SYM --limit=N` passed 120 bytes, so a long
+  selector lost its only continuation with no marker. It is now always emitted in full, like every other `next=`.
+
+Also: the `ripwire-handoff` skill passed `--top-k=20` to `--for`, which does not read it; it now spells
+`--signatures-only`. Gates: `forrankordercheck` (9), `lintbudgetcheck` (5), `impactimportcheck` (#9d), `estchargecheck`
+(#11 A7 unpaid twin), `compactlegendcheck` (P4 floor twin, P1-B), `forrankordercheck` (10) and (11), `fordisclosurecheck` (#2c).
+
+
 ### Added — MCP `grep` rows carry the matched text and a `fetch_body` handle (CLI parity)
 
 The MCP `grep` hit row was `{file, line, in}`: no matched text, so an agent re-read every file it had just searched, and

@@ -5,6 +5,7 @@
 #include <system_error> // std::errc — from_chars' result
 #include <cstdio>      // stdout / stderr — the two streams the shims below name
 #include <format>      // std::format_string — the shims' format contract (see test/printffmtparitycheck.sh)
+#include "nextverb.h"   // nextFlag — findings_next='s pasteable spelling (knob-honesty-068)
 #include "infra/emit.h" // rw::emitTo — THE emitter: std::print where the library has <print>, std::format+fputs
                        // where it does not, chosen by feature test and DISCLOSED as emit= on --version. The
                        // pilot conversion used to spell the fallback here; the choice now lives in one header.
@@ -497,6 +498,61 @@ RuleTally tallyLintRule( const std::vector<LintOut>& outs, const std::string& ru
 // reason: mergeAtomsPack below fills it too.
 struct RuleCap { std::string rule; bool isUserRule; };
 
+// knob-honesty-068: THE FLOORED ANSWER'S CONTINUATION. A rule that spent its per-rule budget (count_capped="1") used to be a
+// dead end: disclosed as a floor, with no call that counts the rest, because the budget had no flag. findings_next= is that
+// call — the floored rules ONLY (by --lint-select, so the re-run spends nothing on rules that were already totals), under a
+// 10x budget (lintNextMaxPerRule), keeping --lint-rules=DIR when a user rule floored and --naming-locals when it was on (it
+// changes the naming-* counts), and --sarif on a SARIF run (its findingsNext). A re-run that is still floored names its own,
+// so the chain ends. `emitted` is the H8
+// predicate: a rule the selection dropped never floors this answer, so it never joins the call. "" ⇒ nothing floored.
+// Spelled IN FULL whatever its length (nextverb.h: a next= is never dropped or truncated); nextFlag quotes a value a
+// shell would split (a rules directory with a space, a user rule id with a quote).
+template <class EmittedFn>
+std::string lintFindingsNext( const rw::Config& cfg, const std::vector<RuleCap>& saturatedRules, EmittedFn&& emitted, std::size_t spentPerRule )
+{
+    std::vector<std::string> names;
+    names.reserve( saturatedRules.size() );
+    for( const RuleCap& rc : saturatedRules )
+    {
+        if( emitted( rc ) && std::find( names.begin(), names.end(), rc.rule ) == names.end() )
+        {
+            names.push_back( rc.rule );   // a built-in and a user rule of one name select as one PREFIX
+        }
+    }
+    if( names.empty() )
+    {
+        return {};
+    }
+    std::string joined;
+    for( const std::string& n : names )
+    {
+        joined += joined.empty() ? "" : ",";
+        joined += n;
+    }
+    std::string inv;
+    if( cfg.lint )
+    {
+        inv += "--lint";
+    }
+    if( !cfg.lintRulesDir.empty() )
+    {
+        inv += inv.empty() ? "" : " ";
+        inv += rw::nextFlag( "--lint-rules=", cfg.lintRulesDir );
+    }
+    if( cfg.namingLocals )
+    {
+        inv += " --naming-locals";
+    }
+    inv += " " + rw::nextFlag( "--lint-select=", joined );
+    inv += " --lint-max-per-rule=" + std::to_string( rw::lintNextMaxPerRule( spentPerRule ) );
+    if( cfg.sarif )
+    {
+        inv += " --sarif";   // the SARIF run's findingsNext re-runs in the dialect it was read from (rv-knob-honesty-068 N4)
+    }
+    ENSURES( !inv.empty() && inv.front() == '-', "a findings_next= is a pasteable flag list (--lint or --lint-rules leads)" );
+    return inv;
+}
+
 // --with-profile (the SYZYGY advice-mode pairing: static shape × PMU weight — Hundt et al., CGO 2006,
 // already cited in fieldaffinity.h): one parsed row of the #PROF_TSV block a RIPWIRE_PROFILE build's
 // report emits (profileScope.h::print_tsv — scope, file, line, then whatever data columns that run's
@@ -705,15 +761,28 @@ buildHeatAnnotations( std::string_view withProfile, const rw::IngestResult& ing,
 // passes that run after it -- lintSymbolLevelChecks and the naming lens -- each opened the very files this
 // walk had just read and closed, one at a time on the main thread, to look at spans of the same text. They
 // now read from here and fall back to their own open only for a file the walk skipped.
+// knob-honesty-068: the atoms/cache packs collect under an ENGINE budget 20x the per-rule one (kAtomsQueryBudget /
+// kCacheQueryBudget = 100000 against kLintMaxPerRule = 5000), because their exclusion and loop-context streams must outrun
+// the rows they emit. A raised --lint-max-per-rule keeps that ratio, or a pack row would stay floored by an engine budget
+// the flag cannot reach and its findings_next= would promise a total no re-run delivers. At the default this is exactly
+// the two constants, so a default run is byte-identical.
+inline std::size_t lintPackQueryBudget( std::size_t packDefault, std::size_t maxPerRule ) noexcept
+{
+    constexpr std::size_t kEngineRatio = 20;
+    static_assert( rw::atoms::kAtomsQueryBudget == kEngineRatio * rw::kLintMaxPerRule && rw::cachelint::kCacheQueryBudget == kEngineRatio * rw::kLintMaxPerRule,
+                   "lintPackQueryBudget keeps the packs' default engine:per-rule ratio — re-derive kEngineRatio with the constants" );
+    return maxPerRule > packDefault / kEngineRatio ? maxPerRule * kEngineRatio : packDefault;
+}
+
 std::vector<std::vector<rw::AstMatch>> builtInLintCaptures( const rw::IngestResult& ing, const std::vector<rw::AstQuerySpec>& checks,
-                                                            std::vector<std::string>& keptBytes )
+                                                            std::vector<std::string>& keptBytes, std::size_t maxPerRule = rw::kLintMaxPerRule )
 {
     PROFILE_SCOPE_DESCRIBE( "lint: astQueryGrouped (built-in + atoms + cache + unreachable)" );
     const std::vector<rw::AstQuerySpec> atomChecks  = rw::atoms::atomsSpecs();
     const std::vector<rw::AstQuerySpec> cacheChecks = rw::cachelint::cacheSpecs();
-    return rw::astQueryGrouped( ing, { { &checks,      rw::kLintMaxPerRule,              nullptr },
-                                       { &atomChecks,  rw::atoms::kAtomsQueryBudget,     nullptr },
-                                       { &cacheChecks, rw::cachelint::kCacheQueryBudget, nullptr },
+    return rw::astQueryGrouped( ing, { { &checks,      maxPerRule,                                                       nullptr },
+                                       { &atomChecks,  lintPackQueryBudget( rw::atoms::kAtomsQueryBudget, maxPerRule ),     nullptr },
+                                       { &cacheChecks, lintPackQueryBudget( rw::cachelint::kCacheQueryBudget, maxPerRule ), nullptr },
                                        { nullptr,      rw::kUnreachableMaxHits,          nullptr, rw::AstWalk::UnreachableCode } },
                                 &keptBytes );
 }
@@ -721,9 +790,10 @@ std::vector<std::vector<rw::AstMatch>> builtInLintCaptures( const rw::IngestResu
 // the pack can emit. Lifted out of runLint for the same reason lintSymbolLevelChecks was.
 void mergeAtomsPack( const rw::IngestResult& ing, std::vector<rw::AstMatch>& ms,
                      std::vector<RuleCap>& saturatedRules, std::vector<std::string>& allRuleNames,
-                     std::vector<rw::AstMatch> captures )
+                     std::vector<rw::AstMatch> captures, std::size_t maxPerRule )
 {
-    const rw::atoms::AtomsRun pack = rw::atoms::atomsOfConfusionFromCaptures( ing, rw::kLintMaxPerRule, std::move( captures ) );
+    const rw::atoms::AtomsRun pack = rw::atoms::atomsOfConfusionFromCaptures( ing, maxPerRule, std::move( captures ),
+                                                                              lintPackQueryBudget( rw::atoms::kAtomsQueryBudget, maxPerRule ) );
     for( const rw::AstMatch& hit : pack.findings )      { ms.push_back( hit ); }
     for( const std::string& tag : pack.saturatedTags )  { saturatedRules.push_back( { tag, false } ); }
     for( const std::string_view rule : rw::atoms::kAtomRuleNames ) { allRuleNames.emplace_back( rule ); }
@@ -734,9 +804,10 @@ void mergeAtomsPack( const rw::IngestResult& ing, std::vector<rw::AstMatch>& ms,
 // disclosures, and its rule names for the tally. Same shape as mergeAtomsPack for the same reasons.
 void mergeCachePack( const rw::IngestResult& ing, std::vector<rw::AstMatch>& ms,
                      std::vector<RuleCap>& saturatedRules, std::vector<std::string>& allRuleNames,
-                     std::vector<rw::AstMatch> captures )
+                     std::vector<rw::AstMatch> captures, std::size_t maxPerRule )
 {
-    const rw::cachelint::CacheRun pack = rw::cachelint::cacheFriendliness( ing, rw::kLintMaxPerRule, std::move( captures ) );
+    const rw::cachelint::CacheRun pack = rw::cachelint::cacheFriendliness( ing, maxPerRule, std::move( captures ),
+                                                                           lintPackQueryBudget( rw::cachelint::kCacheQueryBudget, maxPerRule ) );
     for( const rw::AstMatch& hit : pack.findings )      { ms.push_back( hit ); }
     for( const std::string& tag : pack.saturatedTags )  { saturatedRules.push_back( { tag, false } ); }
     for( const std::string_view rule : rw::cachelint::kCacheRuleNames ) { allRuleNames.emplace_back( rule ); }
@@ -748,9 +819,9 @@ void mergeCachePack( const rw::IngestResult& ing, std::vector<rw::AstMatch>& ms,
 // the naming rules are symbol-level built-ins that were declared there before the pack existed. Lifted out
 // of runLint for the same reason mergeAtomsPack and lintSymbolLevelChecks were.
 void mergeNamingLens( const rw::IngestResult& ing, std::vector<rw::AstMatch>& ms, std::vector<RuleCap>& saturatedRules, bool namingLocals,
-                      const std::vector<std::string>* preRead )
+                      const std::vector<std::string>* preRead, std::size_t maxPerRule )
 {
-    for( std::string& namingRule : rw::naminglens::appendNamingFindings( ing, rw::kLintMaxPerRule, ms, namingLocals, preRead ) )
+    for( std::string& namingRule : rw::naminglens::appendNamingFindings( ing, maxPerRule, ms, namingLocals, preRead ) )
     {
         saturatedRules.push_back( { std::move( namingRule ), false } );
     }
@@ -1032,6 +1103,9 @@ void emitRunLintSarif( const MainDispatch& d,
     props.totalCount      = lintSel.totalCount;
     props.select.assign( cfg.lintSelect );
     props.ignore.assign( cfg.lintIgnore );
+    props.findingsNext    = lintFindingsNext( cfg, saturatedRules, [ & ]( const RuleCap& rc )
+                                              { return !lintSel.active || rw::lintcatalog::lintSelectionKeeps( lintSel, rc.rule ); },
+                                              rw::lintMaxPerRuleOf( cfg.lintMaxPerRule ) );
     rw::sarif::emitLintSarif( stdout, sarifRules, sarifFindings, props, d.root );
 }
 
@@ -1555,6 +1629,8 @@ std::optional<int> runLint( const MainDispatch& d )
         std::vector<AstMatch> ms;   // combined findings (built-in tags + user rule ids); shared by both sources
 
         std::vector<RuleCap> saturatedRules;   // see the RuleCap declaration at file scope for why the key is a PAIR
+        // knob-honesty-068: the per-rule budget this run spends (--lint-max-per-rule=N, else kLintMaxPerRule)
+        const std::size_t    lintMaxPerRule = rw::lintMaxPerRuleOf( cfg.lintMaxPerRule );
 
         // All BUILT-IN rule names in declaration order — drives the per-rule tally in the XML header.
         // Symbol-level checks are appended after the query-based checks; order matches the conceptual list.
@@ -1589,7 +1665,7 @@ std::optional<int> runLint( const MainDispatch& d )
         // The corpus text the one grouped walk read, kept alive for the symbol-level passes below so they
         // do not re-open the same files a second and third time. Lives exactly as long as this lint block.
         std::vector<std::string>           corpusBytes;
-        std::vector<std::vector<AstMatch>> grouped = builtInLintCaptures( ing, checks, corpusBytes );
+        std::vector<std::vector<AstMatch>> grouped = builtInLintCaptures( ing, checks, corpusBytes, lintMaxPerRule );
         ms = std::move( grouped[0] );
         for( const AstQuerySpec& check : checks )       // saturation is measured on the RAW captures, before the post-filters below thin them
         {
@@ -1601,7 +1677,7 @@ std::optional<int> runLint( const MainDispatch& d )
                     ++rawForRule;
                 }
             }
-            if( rawForRule >= kLintMaxPerRule )
+            if( rawForRule >= lintMaxPerRule )
             {
                 saturatedRules.push_back( { check.tag, false } );
             }
@@ -1803,9 +1879,9 @@ std::optional<int> runLint( const MainDispatch& d )
         // Each merges its own findings, its own floor disclosures and — for the packs whose rule list is
         // owned by the pack — its own rule names. All run here, inside the one --lint guard, so the sort
         // below covers every built-in finding regardless of its source.
-        { PROFILE_SCOPE_DESCRIBE( "lint: mergeAtomsPack" ); mergeAtomsPack( ing, ms, saturatedRules, allRuleNames, std::move( grouped[1] ) ); }
-        { PROFILE_SCOPE_DESCRIBE( "lint: mergeNamingLens" ); mergeNamingLens( ing, ms, saturatedRules, cfg.namingLocals, &corpusBytes ); }
-        { PROFILE_SCOPE_DESCRIBE( "lint: mergeCachePack" ); mergeCachePack( ing, ms, saturatedRules, allRuleNames, std::move( grouped[2] ) ); }
+        { PROFILE_SCOPE_DESCRIBE( "lint: mergeAtomsPack" ); mergeAtomsPack( ing, ms, saturatedRules, allRuleNames, std::move( grouped[1] ), lintMaxPerRule ); }
+        { PROFILE_SCOPE_DESCRIBE( "lint: mergeNamingLens" ); mergeNamingLens( ing, ms, saturatedRules, cfg.namingLocals, &corpusBytes, lintMaxPerRule ); }
+        { PROFILE_SCOPE_DESCRIBE( "lint: mergeCachePack" ); mergeCachePack( ing, ms, saturatedRules, allRuleNames, std::move( grouped[2] ), lintMaxPerRule ); }
 
         // Re-sort the combined findings (AST + symbol-level) for deterministic output.
         std::sort( ms.begin(), ms.end(), [ & ]( const AstMatch& x, const AstMatch& y )
@@ -1839,7 +1915,7 @@ std::optional<int> runLint( const MainDispatch& d )
                 lintPrintErr( "ripwire: --lint-rules={}: no rules loaded\n", cfg.lintRulesDir );
                 return 1;
             }
-            const auto [ userFindings, saturatedUserRuleIds, uncompiledIds, regexRefused, regexUndecided ] = runLintRules( ing, userRules );
+            const auto [ userFindings, saturatedUserRuleIds, uncompiledIds, regexRefused, regexUndecided ] = runLintRules( ing, userRules, lintMaxPerRule );
             if( refuseUndecidedMatchRegex( "--lint-rules", regexRefused, regexUndecided, undecidedPredicateFirstSite( cfg, ing, regexUndecided ),
                                            "rules loaded from " + std::string( cfg.lintRulesDir ) + " whose queries carry a #match?/#not-match? predicate: "
                                                + rulesWithMatchPredicate( userRules ) ) )
@@ -1950,6 +2026,9 @@ std::optional<int> runLint( const MainDispatch& d )
             return !lintSel.active || rw::lintcatalog::lintSelectionKeeps( lintSel, rc.rule );
         };
         const bool anyRuleCapped = std::any_of( saturatedRules.begin(), saturatedRules.end(), lintRuleEmitted );
+        // knob-honesty-068: the call that counts the floored rules' rest, over the SAME emitted-rules predicate (H8)
+        const std::string findingsNext = lintFindingsNext( cfg, saturatedRules, lintRuleEmitted, lintMaxPerRule );
+        ASSUME( findingsNext.empty() != anyRuleCapped, "findings_next= rides exactly the answers findings_capped=\"1\" floors (one predicate)" );
 
         // §L7: per-rule LANGUAGE applicability — a rule whose registered languages (lintcatalog.h) never
         // intersect the corpus' own languages is not "measured zero", it is structurally inert here.
@@ -2048,6 +2127,13 @@ std::optional<int> runLint( const MainDispatch& d )
                     "malformed or misspelled pattern) — its count=\"0\" never ran at all, a different claim from applicable=\"0\" above "
                     "(a well-formed query whose declared language just is not in this corpus) and from an ordinary count=\"0\" (a "
                     "well-formed query that ran and found nothing); absent ⇒ the query compiled. -->" );
+        if( !findingsNext.empty() )
+        {
+            // present-only (absent ⇒ nothing floored), like the nest_refused= clause below; compactlegend.h restates it
+            lintPrintOut( "<!-- lint findings_next= on the root is the one call that counts the floored rules' rest: only the rules "
+                        "that carry count_capped=\"1\", under a 10x per-rule budget (the lint-max-per-rule flag; the default budget is a "
+                        "runaway guard, not a target); a re-run still floored names its own. -->" );
+        }
         if( lintNestRefused )
         {
             lintPrintOut( "<!-- lint nest_refused= on the root counts corpus files a pre-parse nesting guard refused before any rule's walk "
@@ -2079,7 +2165,8 @@ std::optional<int> runLint( const MainDispatch& d )
                         pageDisclosure( lintPageBuf, sizeof( lintPageBuf ), shownCount, outs.size(), lintPage.end,
                                        cfg.pageLimit, cfg.pageOffset, /*discloseCap=*/true, kXmlPageSyntax,
                                        /*collectionCapped=*/ anyRuleCapped ),   // H8: a floored rule floors findings=
-                        anyRuleCapped ? " findings_capped=\"1\"" : "", heatJoinedAttr, lintRootExtra, lintRootAttr );
+                        anyRuleCapped ? " findings_capped=\"1\"" + rw::nextAttrXml( findingsNext, "findings_next" ) : std::string(),
+                        heatJoinedAttr, lintRootExtra, lintRootAttr );
         }
         if( cfg.lint )
         { // built-in per-rule tally (order → deterministic)

@@ -5460,6 +5460,47 @@ ripwire.at/v1 <at>: enclosing-definition chain at p=:l=: sym= innermost, chain= 
 … [724 more display lines; full output is 67006 bytes on 1 raw line(s)]
 `````
 
+## `./build/ripwire . --lint --lint-select=goto --lint-max-per-rule=4`
+
+*A rule that spends its own match budget (here 4, set BELOW the default 5000 so the floor shows on this repo): goto carries count_capped="1", its count= is a FLOOR, and the root names the call that counts the rest — findings_next= re-runs only the floored rules under a 10x budget.*
+
+`````
+<!-- ripwire lint schema=ripwire.lint/v1: AST-only checks, facts not gates: <rule name= count= shown_rows= rows_capped= count_capped=> of <f rule= p= in=>. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). findings_capped=/rows_capped=/count_capped=: 1 = cut. counts_floor=1: every count is a FLOOR, never a total. root=: p= relative to it. findings=N: findings over the printed rules; a floor when findings_capped=1. findings_next=: the call counting the floored rules' rest (count_capped=1 rules only, 10x per-rule budget). -->
+<lint schema="ripwire.lint/v1" findings="4" shown="4" capped="1" total="4" has_more="0" next_offset="4" offset="0" limit="0" counts_floor="1" findings_capped="1" findings_next="--lint --lint-select=goto --lint-max-per-rule=40" selected="1 of 39" select="goto" root=".">
+<rule name="goto" count="4" shown_rows="4" rows_capped="0" count_capped="1"/>
+<f rule="goto" p="src/clones.h:909" in="findClonesType3">goto done;</f>
+<f rule="goto" p="src/infra/timsort.hpp:508" in="mergeLo">goto epilogue;</f>
+<f rule="goto" p="src/infra/timsort.hpp:517" in="mergeLo">goto epilogue;</f>
+<f rule="goto" p="src/infra/timsort.hpp:534" in="mergeLo">goto epilogue;</f>
+</lint>
+`````
+
+## `./build/ripwire . --lint --lint-select=goto --lint-max-per-rule=40`
+
+*Pasting that findings_next=: the same rule under a 10x budget counts its true total — no count_capped=, no findings_next=.*
+
+`````
+<!-- ripwire lint schema=ripwire.lint/v1: AST-only checks, facts not gates: <rule name= count= shown_rows= rows_capped= count_capped=> of <f rule= p= in=>. window: shown= capped= (capped=1 cut). rows_capped=: 1 = cut. root=: p= relative to it. findings=N: findings over the printed rules; a floor when findings_capped=1. -->
+<lint schema="ripwire.lint/v1" findings="15" shown="15" capped="0" selected="1 of 39" select="goto" root=".">
+<rule name="goto" count="15" shown_rows="15" rows_capped="0"/>
+<f rule="goto" p="src/clones.h:909" in="findClonesType3">goto done;</f>
+<f rule="goto" p="src/infra/timsort.hpp:508" in="mergeLo">goto epilogue;</f>
+<f rule="goto" p="src/infra/timsort.hpp:517" in="mergeLo">goto epilogue;</f>
+<f rule="goto" p="src/infra/timsort.hpp:534" in="mergeLo">goto epilogue;</f>
+<f rule="goto" p="src/infra/timsort.hpp:541" in="mergeLo">goto epilogue;</f>
+<f rule="goto" p="src/infra/timsort.hpp:551" in="mergeLo">goto epilogue;</f>
+<f rule="goto" p="src/infra/timsort.hpp:558" in="mergeLo">goto epilogue;</f>
+<f rule="goto" p="src/infra/timsort.hpp:633" in="mergeHi">goto epilogue;</f>
+<f rule="goto" p="src/infra/timsort.hpp:644" in="mergeHi">goto epilogue;</f>
+<f rule="goto" p="src/infra/timsort.hpp:663" in="mergeHi">goto epilogue;</f>
+<f rule="goto" p="src/infra/timsort.hpp:670" in="mergeHi">goto epilogue;</f>
+<f rule="goto" p="src/infra/timsort.hpp:683" in="mergeHi">goto epilogue;</f>
+<f rule="goto" p="src/infra/timsort.hpp:689" in="mergeHi">goto epilogue;</f>
+<f rule="goto" p="test/sliceflowsensfix/disclosed.cpp:22" in="cd03">goto done;</f>
+<f rule="goto" p="test/unreachablefix/dead.cpp:48" in="withGoto">goto done;</f>
+</lint>
+`````
+
 ## `./build/ripwire . --lint --lint-select=cach-`
 
 *An unresolvable PREFIX refuses (exit 1) with a did-you-mean from a real edit distance (one character off cache-).*
