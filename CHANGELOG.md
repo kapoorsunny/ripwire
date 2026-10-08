@@ -18,22 +18,23 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 ### Changed — leaner answers: `--whereis` lists definitions, two lossless row spellings, the MCP legend once per session
 
 Measured on 90 rung-0 answers of a comparison table (eight repos, three in-sample and five held out), base vs this
-build: 631,732 → 611,785 B for the lossless changes alone (−3.2%), 567,512 B with the `--whereis` default (−10.2%).
+build: 631,732 → 611,785 B for the lossless changes alone (−3.2%), 568,600 B with the `--whereis` default (−10.0%).
 Every gold item the base answers supplied is still supplied (502 of 502), and decoding the lossless spellings gives
 the base answer back element for element on all 90.
 
-- **`--whereis=SYM` lists the definitions and counts the references, when that answer is shorter.** Every
-  `kind="def"` row is listed; the `kind="ref"` rows are counted in one
-  `<refs count="N" next="--whereis=SYM --whereis-listing=refs"/>` element whose `next=` lists exactly those rows. The
-  default serves this page only when it is strictly shorter, in bytes, than the whole hit list (compared as written and
+- **`--whereis=SYM` lists the definitions and counts the references, when that answer is shorter.** Every `kind="def"`
+  row is listed; the `kind="ref"` rows are counted in one `<refs count="N" next="--whereis=SYM
+  --whereis-listing=refs"/>` element whose `next=` lists exactly those rows. The default serves this page only when it
+  is strictly shorter, in bytes, than the `--whereis-listing=all` page under the same row cap (compared as written and
   in the compact legend); otherwise it lists every hit. On a symbol with few references (one to three on a 60-symbol
   sample) the count and its legend reading cost more than the rows they replace, and the default never serves a page
   that lists fewer rows in more bytes (an explicit `--whereis-listing=defs` is served as asked).
   `--whereis-listing=defs|refs|all` (MCP `listing`) picks the rows; `all` is the whole hit list. An answer with no
   reference row, or no definition row (the mentions are then the answer), lists every hit. `kind="def"` is the
-  parser's label: a definition it does not model (a Ruby `define_method`, a `setattr`, a name bound by assignment)
-  is among the counted references, and the legend says so. Median where-defined answer 10,455 → 1,424 B. `shown=`/`capped=`/`--limit`/`--offset` and `<more hits=>`
-  window the listed rows; `hits=` counts every row; `complete=` reads the listing.
+  parser's label: a definition it does not model (a Ruby `define_method`, a `setattr`, a name bound by assignment) is
+  among the counted references, and the legend says so. Median where-defined answer 10,455 → 1,560 B.
+  `shown=`/`capped=`/`--limit`/`--offset` and `<more hits=>` window the listed rows; `hits=` counts every row;
+  `complete=` reads the listing.
 - **Lossless:** a `--whereis` row on HEAD's commit omits `tip=`/`date=` (they read `at=` and the new root
   `head_date=`); a `--for` lens row omits `cx=`/`ccx=`/`in=` when 0 (the legend says an absent one is 0; the rows
   kept by the byte budget are unchanged). Median per class: how-it-works −0.24 KB, orient-for −0.26 KB,
@@ -45,8 +46,9 @@ the base answer back element for element on all 90.
   CLI and the HTTP transport are unchanged. A ten-call session on one repo: 45,463 → 32,622 B (inline) → 29,679 B.
 - **Manifest.** The `tools/list` manifest grows 46,732 → 46,846 B: whereis declares `listing`.
 
-Gates: `crossrefcheck` (LEAN L1–L10 and listing=all twins), `completecheck`, `legendrefcheck` (J),
-`mcptwinclaimscheck` (A-default), `compactlegendcheck` (re-pinned with the measured bytes), `mcpmanifestcheck`.
+Gates: `crossrefcheck` (LEAN L1–L14 — L11–L14 the shorter-page default: one ref, 73 refs, the exact tie and one byte
+either side, the MCP twin — and listing=all twins), `completecheck`, `legendrefcheck` (J), `mcptwinclaimscheck`
+(A-default), `compactlegendcheck` (re-pinned with the measured bytes; a listing=all twin pin), `mcpmanifestcheck`.
 
 
 ### Added — MCP `grep` rows carry the matched text and a `fetch_body` handle (CLI parity)

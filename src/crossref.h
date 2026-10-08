@@ -3092,8 +3092,9 @@ inline void writeWhereisListedPage( std::FILE* out, const WhereResult& res, std:
                        "absent exactly when this page reached the end of the hit list. "
                        // lean-answers lane — the default LISTING and the tip/date hoist, defined where they appear.
                        "LISTING: by default only the kind=\"def\" rows are listed (listing=\"defs\" on the root) when that page is "
-                       "STRICTLY shorter in bytes than the page listing every hit (compared unpaged, as written and in the compact "
-                       "dialect); otherwise the default lists every hit. Under listing=\"defs\" the "
+                       "STRICTLY shorter in bytes than the listing=all page under the same row cap (both compared without limit= or "
+                       "offset=, as written and in the compact dialect, so every page of one answer lists the same rows); "
+                       "otherwise the default lists every hit. Under listing=\"defs\" the "
                        "kind=\"ref\" rows are COUNTED by the trailing refs element: count= is exactly the number of kind=\"ref\" "
                        "rows in the hit list, none of them printed here, and its next= lists exactly those rows (listing=\"refs\", "
                        "the same rows byte for byte that listing=all prints). listing= is absent when every hit is listed: the hit "
