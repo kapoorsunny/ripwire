@@ -1802,6 +1802,281 @@ inline void priceForTaskRoot( std::string& doc, std::size_t budgetTokens )
     rw::spliceRootAttrs( doc, rootAttrs );
 }
 
+// knob-honesty-068 (orchestrator ruling C3, 2026-10-07): MCP `for`'s ASSEMBLY — everything from the sigs render to the
+// finished, UNPRICED document (est_tokens= / over_ceiling= are spliced once, on the chosen one, by forTaskText) — as one pass
+// forTaskText runs once or twice over a single ranking (paid, then unpaid when the paid answer still lands over). The pass
+// takes its own copies of what it edits (the header, the lego/compose strings, the lego scope and its pre-cap count), so a
+// second pass starts from the same state as the first. A free function, not a lambda: forTaskText is already the largest
+// function in this file, and the assembly is a step of its own.
+struct McpForAssembly
+{
+    std::optional<std::string> doc;   // nullopt: the answer buffer lost bytes (internal error)
+    rw::SigsCutReport          cut;
+};
+struct McpForAssemblyInputs   // forTaskText's locals the assembly reads, by reference; all outlive the call
+{
+    const IngestResult&                        ing;
+    const std::vector<float>&                  lensRank;
+    int                                        forTopN;
+    const std::vector<std::uint32_t>&          fanIn;
+    const std::vector<char>&                   impure;
+    RedactCounts*                              redact;
+    std::size_t                                sigsBudget;
+    std::size_t                                fixedBytes;
+    std::size_t                                budgetTokens;
+    const notes::NoteIndex&                    noteIndex;
+    const notes::NoteIndex*                    notesPtr;
+    std::string_view                           flRootArg;
+    const std::string&                         task;
+    const std::string&                         mcpTopRowNext;
+    const std::vector<rw::ForNamedHeaderRow>&  mcpForHdrRows;
+    const std::string&                         routeStr;
+    std::size_t                                composePreCapCount;
+    const std::string&                         sections;
+};
+inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, bool payFromRows, std::string headerStr, std::string legoStr,
+                                      std::string composeStr, std::vector<std::vector<NodeId>> legoScoped, std::size_t legoPreCapCount )
+{
+    const IngestResult&                       ing                = in.ing;
+    const std::vector<float>&                 lensRank           = in.lensRank;
+    const int                                 forTopN            = in.forTopN;
+    const std::vector<std::uint32_t>&         fanIn              = in.fanIn;
+    const std::vector<char>&                  impure             = in.impure;
+    RedactCounts* const                       redact             = in.redact;
+    const std::size_t                         sigsBudget         = in.sigsBudget;
+    const std::size_t                         fixedBytes         = in.fixedBytes;
+    const std::size_t                         budgetTokens       = in.budgetTokens;
+    const notes::NoteIndex&                   noteIndex          = in.noteIndex;
+    const notes::NoteIndex* const             notesPtr           = in.notesPtr;
+    const std::string_view                    flRootArg          = in.flRootArg;
+    const std::string&                        task               = in.task;
+    const std::string&                        mcpTopRowNext      = in.mcpTopRowNext;
+    const std::vector<rw::ForNamedHeaderRow>& mcpForHdrRows      = in.mcpForHdrRows;
+    const std::string&                        routeStr           = in.routeStr;
+    const std::size_t                         composePreCapCount = in.composePreCapCount;
+    const std::string&                        sections           = in.sections;
+    const auto renderToString = [ ]( auto&& emitFn ) -> std::string { return captureXml( emitFn ); };   // forTaskText's own seam
+    rw::MemoryStream stream;
+    std::FILE* const mem = stream.open();
+    if( !mem )
+    {
+        return McpForAssembly{};   // the answer buffer could not be opened: an internal error, never "not found"
+    }
+    const rw::SigsCutContinuation mcpSigsNext{ task, 0, std::string_view(), fixedBytes,
+                                               /*charged=*/budgetTokens > 0, /*json=*/false, /*pasteHandle=*/false,
+                                               /*ledgerGapBytes=*/0u, payFromRows };
+    // A2 (survey card, 2026-09-03): sigs render into their OWN buffer (rather than streaming straight into
+    // `mem` the way this call used to) so droppedPositive is known BEFORE headerStr is written — headerStr,
+    // once flushed to `mem`, cannot be edited retroactively (the same reason the CLI twin's degrade path
+    // never gets the attribute). Byte-for-byte the same content this call always produced.
+    std::size_t mcpDroppedPositive = 0;
+    bool        mcpSigsCapped      = false;   // did the H1 ladder trim <sigs>? — decides the budget_bytes= disclosure below
+    rw::SigsCutReport mcpSigsCut;             // cut-fix lane A: the <sigs> tag's cut readings, spliced below as the CLI twin does
+    mcpSigsCut.continuationRequest = &mcpSigsNext;   // knob-honesty-068: IN — the capped block's machine continuation
+    std::vector<rw::NodeId> mcpShownIds;   // lane 2: the sigs rows actually emitted — the tail excludes these files, not the whole surface
+    std::string sigsStr = renderToString( [ & ]( std::FILE* m2 )
+    {
+        packSignatures( m2, ing, lensRank, forTopN, 0 /* no byte budget in MCP (0 = unlimited) */, true, &fanIn, &impure, redact,
+                        nullptr, nullptr, nullptr, nullptr,   // Q3 lens vectors — the MCP verb has no git/clone pass (as before)
+                        /*rankAdaptivePayload=*/true,         // B0.3: same rank-adaptive payload rule as the CLI --for lens
+                        sigsBudget,                           // H1: global payload budget (trim ladder; payload="capped" marker)
+                        notesPtr,                             // L3: field-notes surfacing (inert when null)
+                        flRootArg,                            // R-E: root-relative p=, same argument the CLI twin passes
+                        /*hasRelevanceFloor=*/true,           // LB-A: shrink past the zero-score tail, never pad
+                        &mcpDroppedPositive,                  // A2: exact count, see droppedPositiveCount (serialize.h)
+                        &mcpShownIds,                         // lane 2: see verbs_for.h shownSigIds
+                        &mcpSigsCapped,                       // the ladder's own verdict — see the budget_bytes= splice below
+                        mcpTopRowNext,                        // L-W: the widening page on a thin answer, else the body
+                        &mcpSigsCut );                        // cut-fix lane A: docs_dropped= / shrunk readings;
+                                                              //   knob-honesty-068: carries mcpSigsNext IN
+    } );
+    // A2: same insert-before-"-->" splice as the CLI twin (verbs_for.h) — absent entirely on the (overwhelming)
+    // no-drop path, so headerStr's bytes are unchanged there (byte-identical to the pre-A2 output). Bare
+    // spelling (no bracket note), same economy and same reasoning as the CLI twin — byte-consistent between
+    // the two dialects, the way every other --for header fragment in this function already is.
+    if( mcpDroppedPositive > 0 )
+    {
+        const std::size_t closeAt = headerStr.rfind( " -->" );
+        if( closeAt != std::string::npos )
+        {
+            char nb[ 40 ];
+            rw::formatTo( nb, sizeof( nb ), " dropped_positive=\"{}\"", mcpDroppedPositive );
+            headerStr.insert( closeAt, nb ); // else: unexpected shape, header left as-is
+        }
+    }
+    // budget_bytes= — the CLI twin's disclosure (verbs_for.h, where the full argument lives), on this
+    // surface for the §P8 reason every other fragment in this function is: one element name, one attribute
+    // order, both surfaces. This dialect is budgeted by DEFAULT exactly as the CLI is (forBudgetBytes above
+    // is kForPayloadBudgetBytes when the caller passed no budget_tokens), and it disclosed the cut
+    // (<sigs capped="1">) without naming what did the cutting. Same two conditions as the CLI: the ladder
+    // actually fired, and the caller named no ceiling of their own — so exactly one ceiling rides a trimmed
+    // bundle. Same clause text, so the two dialects say the same sentence. Spliced AFTER the sigs render,
+    // like dropped_positive= above, so sigsBudget and therefore the served row set are untouched; est_tokens
+    // is spliced onto the finished document further down and so prices these bytes.
+    if( mcpSigsCapped && budgetTokens == 0 )
+    {
+        const std::size_t rootCloseAt = headerStr.find( "><!--" );
+        if( rootCloseAt != std::string::npos )
+        {
+            headerStr.insert( rootCloseAt, " budget_bytes=\"" + std::to_string( rw::kForPayloadBudgetBytes ) + "\"" );
+        }
+        const std::size_t closeAt = headerStr.rfind( " -->" );
+        if( closeAt != std::string::npos )
+        {
+            headerStr.insert( closeAt, rw::kForBudgetBytesNote );
+        }
+    }
+    // cut-fix lane A: the <sigs> tag's cut readings (docs_dropped=, shrunk-not-dropped) — the CLI twin's clauses, same
+    // text, same splice point, present only when the tag carries the case (serialize.h sigsCutLegendNotes).
+    if( const std::string cutNotes = rw::sigsCutReportLegend( mcpSigsCut );
+        !cutNotes.empty() )
+    {
+        const std::size_t closeAt = headerStr.rfind( " -->" );
+        if( closeAt != std::string::npos )
+        {
+            headerStr.insert( closeAt, cutNotes );
+        }
+    }
+    // L3 follow-up (CodeRabbit 4053600616): same splice shape as dropped_positive=/budget_bytes= above — absent
+    // entirely on a clean read. `noteIndex.degraded` is read here (not through notesPtr, which is nulled on an
+    // EMPTY index even when the read itself was not clean — see notesPtr's own comment above).
+    if( noteIndex.degraded )
+    {
+        const std::size_t rootCloseAt = headerStr.find( "><!--" );
+        if( rootCloseAt != std::string::npos )
+        {
+            headerStr.insert( rootCloseAt, std::string( rw::notes::kNotesDegradedAttr ) );
+        }
+        const std::size_t closeAt = headerStr.rfind( " -->" );
+        if( closeAt != std::string::npos )
+        {
+            headerStr.insert( closeAt, " [" + std::string( rw::notes::kNotesDegradedReading ) + "]" );
+        }
+    }
+    std::fwrite( headerStr.data(), 1, headerStr.size(), mem );
+    // R2-AF (round 2, S4): first rows inside the root, right after the legend — the CLI twin's exact rule
+    // (verbs_for.h renderForHdrRowsXml), duplicated here rather than shared because main.cpp includes this
+    // file (mcp.h, line 48) before verbs_for.h (line 525) — the render is ~10 lines over the SAME resolver
+    // (rw::forNamedHeaderRows, mention.h), which is the part a divergence would actually cost.
+    if( !mcpForHdrRows.empty() )
+    {
+        const std::string mcpHdrRootPrefix = flRootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( flRootArg );
+        const auto         mcpHdrRel        = [ & ]( std::uint32_t f ) -> std::string
+        {
+            return flRootArg.empty() ? std::string( ing.files[f] ) : std::string( rw::sarif::rootRelativeUri( ing.files[f], mcpHdrRootPrefix ) );
+        };
+        std::vector<char> mcpHdrEsc;
+        std::string       mcpHdrXml;
+        for( const rw::ForNamedHeaderRow& row : mcpForHdrRows )
+        {
+            // same local invariant as the CLI twin's renderForHdrRowsXml (verbs_for.h): the resolver
+            // (rw::forNamedHeaderRows, mention.h) is the only producer of these ids.
+            ASSUME( row.partnerFile < ing.files.size() && row.namedFile < ing.files.size() );
+            mcpHdrXml += "<hdr p=\"";
+            mcpHdrXml += rw::escapeXml( mcpHdrRel( row.partnerFile ), mcpHdrEsc );
+            mcpHdrXml += "\" of=\"";
+            mcpHdrXml += rw::escapeXml( mcpHdrRel( row.namedFile ), mcpHdrEsc );
+            mcpHdrXml += "\"/>";
+        }
+        std::fwrite( mcpHdrXml.data(), 1, mcpHdrXml.size(), mem );
+    }
+    // §P3 × §P4 (parity with the CLI --for): narrow the lego block to the files the budget-trimmed sigs
+    // actually kept and re-render (a byte-subset of what the budget already charged for) — reads sigsStr
+    // directly now rather than re-slicing it back out of the flushed memstream buffer.
+    if( !legoStr.empty() && narrowLegoToRenderedSigs( ing, legoScoped, sigsStr ) )
+    {
+        legoStr = renderToString( [ & ]( std::FILE* m2 ) { packLego( m2, ing, legoScoped, lensRank, 12, redact, &impure, kNoNode, /*withPaths=*/true, flRootArg, {}, &legoPreCapCount ); } );   // R-R: the re-render dropped the root its first render (above) passed
+    }
+    // R2-L2' (round-2, priced re-registration of L2/B1): the CLI twin's exact stub substitution
+    // (verbs_for.h) — same rule, same restoring spelling (kept as the CLI flag form: this dialect's next=
+    // is already CLI-flag-shaped everywhere else, e.g. the r=1 row's --expand=FILE:NAME, so the two
+    // surfaces do not need two spellings), and the SAME shared size gate (rw::priceSectionStub,
+    // serialize.h). This surface has no buffered/degrade-path split (renderToString always renders whole),
+    // so hasRenderedBytes is always true here and the size gate always has a true length to price.
+    //
+    // R2-L2p (independent review, 2026-09-19): mcpLegoWillStub/mcpComposeWillStub decide the SAME collapse
+    // the CLI twin discloses via kForSectionStubLegend (verbs_for.h finishForLensHeaderPriced), but this
+    // block used to just swap legoStr/composeStr for their stubs and never carried that clause anywhere —
+    // an MCP caller got a stubbed section with no legend explaining the cut. mcpSectionsWillStub survives
+    // this block's scope so the splice below (after `out` is assembled, mirroring priceForTaskRoot's own
+    // late-insertion technique for kOverCeilingLegend) knows whether to add it.
+    bool mcpSectionsWillStub = false;
+    {
+        const bool mcpWantLego    = sectionsWant( sections, "lego" );
+        const bool mcpWantCompose = sectionsWant( sections, "compose" );
+        const bool mcpLegoCandidate    = !legoStr.empty()    && !mcpWantLego;
+        const bool mcpComposeCandidate = !composeStr.empty() && !mcpWantCompose;
+        if( mcpLegoCandidate || mcpComposeCandidate )
+        {
+            std::string sectionsNextMcp = nextFlag( "--for=", task );
+            sectionsNextMcp += ' ';
+            sectionsNextMcp += nextFlag( "--sections=", "lego,compose" );
+            const SectionStubPricing legoPricing    = mcpLegoCandidate
+                ? priceSectionStub( "lego",    legoPreCapCount,    sectionsNextMcp, /*hasRenderedBytes=*/true, legoStr.size() )
+                : SectionStubPricing{};
+            const SectionStubPricing composePricing = mcpComposeCandidate
+                ? priceSectionStub( "compose", composePreCapCount, sectionsNextMcp, /*hasRenderedBytes=*/true, composeStr.size() )
+                : SectionStubPricing{};
+            const bool mcpLegoWillStub    = mcpLegoCandidate    && legoPricing.collapse;
+            const bool mcpComposeWillStub = mcpComposeCandidate && composePricing.collapse;
+            // postcondition of the rule itself, checked BEFORE the swap below discards the original size:
+            // whichever section actually collapses is, by construction, smaller than what it replaced.
+            ENSURES( !mcpLegoWillStub    || legoPricing.stubXml.size()    < legoStr.size(),
+                     "R2-L2' MCP twin: a lego stub collapsed without being smaller than the section it replaced" );
+            ENSURES( !mcpComposeWillStub || composePricing.stubXml.size() < composeStr.size(),
+                     "R2-L2' MCP twin: a compose stub collapsed without being smaller than the section it replaced" );
+            if( mcpLegoWillStub )
+            {
+                legoStr = legoPricing.stubXml;
+            }
+            if( mcpComposeWillStub )
+            {
+                composeStr = composePricing.stubXml;
+            }
+            // R2-L2p: same truth table as the CLI's `if( legoWillStub || composeWillStub ) sectionsStubNote = …`
+            // (verbs_for.h ~2858): the legend rides iff at least one section actually collapsed.
+            mcpSectionsWillStub = mcpLegoWillStub || mcpComposeWillStub;
+        }
+    }
+    std::fwrite( sigsStr.data(), 1, sigsStr.size(), mem );
+    std::fwrite( legoStr.data(), 1, legoStr.size(), mem );
+    std::fwrite( composeStr.data(), 1, composeStr.size(), mem );
+    std::fwrite( routeStr.data(), 1, routeStr.size(), mem );   // B6.3
+    // DEEP-TAIL d2, MCP twin: the same shared walk + renderer the CLI --for uses (serialize.h), from the
+    // same resolved surface — the fixed default budget regime, so the tail rides on top (default row cap)
+    // and the ranked head above stays byte-identical to a tail-less bundle.
+    {
+        std::vector<char> tailEsc;
+        const std::string tailStr = renderFileTailXml( computeFileTail( ing, lensRank, mcpShownIds, flRootArg ),
+                                                       kForFileTailShownCap, tailEsc );
+        std::fwrite( tailStr.data(), 1, tailStr.size(), mem );
+    }
+    rw::emitRaw( mem, "</ctx>" );
+    std::optional<std::string> answer = mcpAnswerText( stream );
+    if( !answer )
+    {
+        return McpForAssembly{};   // the buffer lost bytes: the same internal error as the failed open above
+    }
+    std::string out = std::move( *answer );
+    // R2-L2p: the legend clause disclosing a stubbed lego/compose section (kForSectionStubLegend) — the
+    // whole contract lives in spliceForSectionStubLegend above; `stubbed` false (the overwhelming common
+    // path) returns immediately and costs this function nothing but the call. Done BEFORE priceForTaskRoot
+    // so the clause's bytes are part of the est_tokens price exactly as the CLI's own version is.
+    spliceForSectionStubLegend( out, mcpSectionsWillStub );
+    // F5 (terminality round A 2026-09-05): PRICE the bundle instead of declaring it unpriced. The document is
+    // complete here, so this is the same measurement the CLI twin makes over its own (deliberately different)
+    // bytes: pricedRootAttr's ≤4-pass fixpoint at kBytesPerTokenDefault, spliced onto the <ctx> root by the
+    // shared splicer — no second estimator, and no number that could disagree with the CLI's for the same
+    // reason the CLI's could disagree with itself. Charged AFTER the sigs budget on purpose: a disclosure's
+    // contract is disclosure only, and charging its ~18 bytes against the ranked head would drop a row to pay
+    // for the attribute that describes the head — the same exemption mcpConfidenceExemptBytes already makes.
+    // r2-LO: a completeness attribute this bundle carries and its own legend never spells (at=, ccx=, next=) gets its compact
+    // reading — BEFORE pricing, so est_tokens= prices the bytes served, and after the sigs budget, so the rows are unchanged.
+    closeRosterGaps( out );
+    mcpSigsCut.continuationRequest = nullptr;   // it pointed at this pass's mcpSigsNext, which ends here
+    return McpForAssembly{ std::move( out ), mcpSigsCut };
+}
+
 inline std::optional<std::string> forTaskText( const std::string& root, const std::string& task, RedactCounts* redact = nullptr,
                                 std::size_t budgetTokens = 0, bool noRoute = false,
                                 McpPageArgs page = {},   // L-W: limit/offset select the FILE PAGE (forpage.h), the CLI --for --limit twin
@@ -2188,238 +2463,10 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     const notes::NoteIndex        noteIndex = notes::loadNoteIndex( root );
     const notes::NoteIndex* const notesPtr  = noteIndex.empty() ? nullptr : &noteIndex;
 
-    // knob-honesty-068 (orchestrator ruling C3, 2026-10-07): everything from the sigs render to the finished document is ONE
-    // ASSEMBLY PASS, run once or twice — the ranking above runs once. The pass takes its own copies of what it edits (the header,
-    // the lego/compose strings, the lego scope and its pre-cap count), so a second pass starts from the same state as the first.
-    // It returns the document UNPRICED (est_tokens= / over_ceiling= are spliced once, on the chosen one, below).
-    struct McpForAssembly
-    {
-        std::optional<std::string> doc;   // nullopt: the answer buffer lost bytes (internal error)
-        rw::SigsCutReport          cut;
-    };
-    const auto assembleMcpFor = [ & ]( bool payFromRows, std::string headerStr, std::string legoStr, std::string composeStr,
-                                       std::vector<std::vector<NodeId>> legoScoped, std::size_t legoPreCapCount ) -> McpForAssembly
-    {
-        rw::MemoryStream stream;
-        std::FILE* const mem = stream.open();
-        if( !mem )
-        {
-            return McpForAssembly{};   // the answer buffer could not be opened: an internal error, never "not found"
-        }
-        const rw::SigsCutContinuation mcpSigsNext{ task, 0, std::string_view(), fixedBytes,
-                                                   /*charged=*/budgetTokens > 0, /*json=*/false, /*pasteHandle=*/false,
-                                                   /*ledgerGapBytes=*/0u, payFromRows };
-        // A2 (survey card, 2026-09-03): sigs render into their OWN buffer (rather than streaming straight into
-        // `mem` the way this call used to) so droppedPositive is known BEFORE headerStr is written — headerStr,
-        // once flushed to `mem`, cannot be edited retroactively (the same reason the CLI twin's degrade path
-        // never gets the attribute). Byte-for-byte the same content this call always produced.
-        std::size_t mcpDroppedPositive = 0;
-        bool        mcpSigsCapped      = false;   // did the H1 ladder trim <sigs>? — decides the budget_bytes= disclosure below
-        rw::SigsCutReport mcpSigsCut;             // cut-fix lane A: the <sigs> tag's cut readings, spliced below as the CLI twin does
-        mcpSigsCut.continuationRequest = &mcpSigsNext;   // knob-honesty-068: IN — the capped block's machine continuation
-        std::vector<rw::NodeId> mcpShownIds;   // lane 2: the sigs rows actually emitted — the tail excludes these files, not the whole surface
-        std::string sigsStr = renderToString( [ & ]( std::FILE* m2 )
-        {
-            packSignatures( m2, ing, lensRank, forTopN, 0 /* no byte budget in MCP (0 = unlimited) */, true, &fanIn, &impure, redact,
-                            nullptr, nullptr, nullptr, nullptr,   // Q3 lens vectors — the MCP verb has no git/clone pass (as before)
-                            /*rankAdaptivePayload=*/true,         // B0.3: same rank-adaptive payload rule as the CLI --for lens
-                            sigsBudget,                           // H1: global payload budget (trim ladder; payload="capped" marker)
-                            notesPtr,                             // L3: field-notes surfacing (inert when null)
-                            flRootArg,                            // R-E: root-relative p=, same argument the CLI twin passes
-                            /*hasRelevanceFloor=*/true,           // LB-A: shrink past the zero-score tail, never pad
-                            &mcpDroppedPositive,                  // A2: exact count, see droppedPositiveCount (serialize.h)
-                            &mcpShownIds,                         // lane 2: see verbs_for.h shownSigIds
-                            &mcpSigsCapped,                       // the ladder's own verdict — see the budget_bytes= splice below
-                            mcpTopRowNext,                        // L-W: the widening page on a thin answer, else the body
-                            &mcpSigsCut );                        // cut-fix lane A: docs_dropped= / shrunk readings;
-                                                                  //   knob-honesty-068: carries mcpSigsNext IN
-        } );
-        // A2: same insert-before-"-->" splice as the CLI twin (verbs_for.h) — absent entirely on the (overwhelming)
-        // no-drop path, so headerStr's bytes are unchanged there (byte-identical to the pre-A2 output). Bare
-        // spelling (no bracket note), same economy and same reasoning as the CLI twin — byte-consistent between
-        // the two dialects, the way every other --for header fragment in this function already is.
-        if( mcpDroppedPositive > 0 )
-        {
-            const std::size_t closeAt = headerStr.rfind( " -->" );
-            if( closeAt != std::string::npos )
-            {
-                char nb[ 40 ];
-                rw::formatTo( nb, sizeof( nb ), " dropped_positive=\"{}\"", mcpDroppedPositive );
-                headerStr.insert( closeAt, nb ); // else: unexpected shape, header left as-is
-            }
-        }
-        // budget_bytes= — the CLI twin's disclosure (verbs_for.h, where the full argument lives), on this
-        // surface for the §P8 reason every other fragment in this function is: one element name, one attribute
-        // order, both surfaces. This dialect is budgeted by DEFAULT exactly as the CLI is (forBudgetBytes above
-        // is kForPayloadBudgetBytes when the caller passed no budget_tokens), and it disclosed the cut
-        // (<sigs capped="1">) without naming what did the cutting. Same two conditions as the CLI: the ladder
-        // actually fired, and the caller named no ceiling of their own — so exactly one ceiling rides a trimmed
-        // bundle. Same clause text, so the two dialects say the same sentence. Spliced AFTER the sigs render,
-        // like dropped_positive= above, so sigsBudget and therefore the served row set are untouched; est_tokens
-        // is spliced onto the finished document further down and so prices these bytes.
-        if( mcpSigsCapped && budgetTokens == 0 )
-        {
-            const std::size_t rootCloseAt = headerStr.find( "><!--" );
-            if( rootCloseAt != std::string::npos )
-            {
-                headerStr.insert( rootCloseAt, " budget_bytes=\"" + std::to_string( rw::kForPayloadBudgetBytes ) + "\"" );
-            }
-            const std::size_t closeAt = headerStr.rfind( " -->" );
-            if( closeAt != std::string::npos )
-            {
-                headerStr.insert( closeAt, rw::kForBudgetBytesNote );
-            }
-        }
-        // cut-fix lane A: the <sigs> tag's cut readings (docs_dropped=, shrunk-not-dropped) — the CLI twin's clauses, same
-        // text, same splice point, present only when the tag carries the case (serialize.h sigsCutLegendNotes).
-        if( const std::string cutNotes = rw::sigsCutReportLegend( mcpSigsCut );
-            !cutNotes.empty() )
-        {
-            const std::size_t closeAt = headerStr.rfind( " -->" );
-            if( closeAt != std::string::npos )
-            {
-                headerStr.insert( closeAt, cutNotes );
-            }
-        }
-        // L3 follow-up (CodeRabbit 4053600616): same splice shape as dropped_positive=/budget_bytes= above — absent
-        // entirely on a clean read. `noteIndex.degraded` is read here (not through notesPtr, which is nulled on an
-        // EMPTY index even when the read itself was not clean — see notesPtr's own comment above).
-        if( noteIndex.degraded )
-        {
-            const std::size_t rootCloseAt = headerStr.find( "><!--" );
-            if( rootCloseAt != std::string::npos )
-            {
-                headerStr.insert( rootCloseAt, std::string( rw::notes::kNotesDegradedAttr ) );
-            }
-            const std::size_t closeAt = headerStr.rfind( " -->" );
-            if( closeAt != std::string::npos )
-            {
-                headerStr.insert( closeAt, " [" + std::string( rw::notes::kNotesDegradedReading ) + "]" );
-            }
-        }
-        std::fwrite( headerStr.data(), 1, headerStr.size(), mem );
-        // R2-AF (round 2, S4): first rows inside the root, right after the legend — the CLI twin's exact rule
-        // (verbs_for.h renderForHdrRowsXml), duplicated here rather than shared because main.cpp includes this
-        // file (mcp.h, line 48) before verbs_for.h (line 525) — the render is ~10 lines over the SAME resolver
-        // (rw::forNamedHeaderRows, mention.h), which is the part a divergence would actually cost.
-        if( !mcpForHdrRows.empty() )
-        {
-            const std::string mcpHdrRootPrefix = flRootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( flRootArg );
-            const auto         mcpHdrRel        = [ & ]( std::uint32_t f ) -> std::string
-            {
-                return flRootArg.empty() ? std::string( ing.files[f] ) : std::string( rw::sarif::rootRelativeUri( ing.files[f], mcpHdrRootPrefix ) );
-            };
-            std::vector<char> mcpHdrEsc;
-            std::string       mcpHdrXml;
-            for( const rw::ForNamedHeaderRow& row : mcpForHdrRows )
-            {
-                // same local invariant as the CLI twin's renderForHdrRowsXml (verbs_for.h): the resolver
-                // (rw::forNamedHeaderRows, mention.h) is the only producer of these ids.
-                ASSUME( row.partnerFile < ing.files.size() && row.namedFile < ing.files.size() );
-                mcpHdrXml += "<hdr p=\"";
-                mcpHdrXml += rw::escapeXml( mcpHdrRel( row.partnerFile ), mcpHdrEsc );
-                mcpHdrXml += "\" of=\"";
-                mcpHdrXml += rw::escapeXml( mcpHdrRel( row.namedFile ), mcpHdrEsc );
-                mcpHdrXml += "\"/>";
-            }
-            std::fwrite( mcpHdrXml.data(), 1, mcpHdrXml.size(), mem );
-        }
-        // §P3 × §P4 (parity with the CLI --for): narrow the lego block to the files the budget-trimmed sigs
-        // actually kept and re-render (a byte-subset of what the budget already charged for) — reads sigsStr
-        // directly now rather than re-slicing it back out of the flushed memstream buffer.
-        if( !legoStr.empty() && narrowLegoToRenderedSigs( ing, legoScoped, sigsStr ) )
-        {
-            legoStr = renderToString( [ & ]( std::FILE* m2 ) { packLego( m2, ing, legoScoped, lensRank, 12, redact, &impure, kNoNode, /*withPaths=*/true, flRootArg, {}, &legoPreCapCount ); } );   // R-R: the re-render dropped the root its first render (above) passed
-        }
-        // R2-L2' (round-2, priced re-registration of L2/B1): the CLI twin's exact stub substitution
-        // (verbs_for.h) — same rule, same restoring spelling (kept as the CLI flag form: this dialect's next=
-        // is already CLI-flag-shaped everywhere else, e.g. the r=1 row's --expand=FILE:NAME, so the two
-        // surfaces do not need two spellings), and the SAME shared size gate (rw::priceSectionStub,
-        // serialize.h). This surface has no buffered/degrade-path split (renderToString always renders whole),
-        // so hasRenderedBytes is always true here and the size gate always has a true length to price.
-        //
-        // R2-L2p (independent review, 2026-09-19): mcpLegoWillStub/mcpComposeWillStub decide the SAME collapse
-        // the CLI twin discloses via kForSectionStubLegend (verbs_for.h finishForLensHeaderPriced), but this
-        // block used to just swap legoStr/composeStr for their stubs and never carried that clause anywhere —
-        // an MCP caller got a stubbed section with no legend explaining the cut. mcpSectionsWillStub survives
-        // this block's scope so the splice below (after `out` is assembled, mirroring priceForTaskRoot's own
-        // late-insertion technique for kOverCeilingLegend) knows whether to add it.
-        bool mcpSectionsWillStub = false;
-        {
-            const bool mcpWantLego    = sectionsWant( sections, "lego" );
-            const bool mcpWantCompose = sectionsWant( sections, "compose" );
-            const bool mcpLegoCandidate    = !legoStr.empty()    && !mcpWantLego;
-            const bool mcpComposeCandidate = !composeStr.empty() && !mcpWantCompose;
-            if( mcpLegoCandidate || mcpComposeCandidate )
-            {
-                std::string sectionsNextMcp = nextFlag( "--for=", task );
-                sectionsNextMcp += ' ';
-                sectionsNextMcp += nextFlag( "--sections=", "lego,compose" );
-                const SectionStubPricing legoPricing    = mcpLegoCandidate
-                    ? priceSectionStub( "lego",    legoPreCapCount,    sectionsNextMcp, /*hasRenderedBytes=*/true, legoStr.size() )
-                    : SectionStubPricing{};
-                const SectionStubPricing composePricing = mcpComposeCandidate
-                    ? priceSectionStub( "compose", composePreCapCount, sectionsNextMcp, /*hasRenderedBytes=*/true, composeStr.size() )
-                    : SectionStubPricing{};
-                const bool mcpLegoWillStub    = mcpLegoCandidate    && legoPricing.collapse;
-                const bool mcpComposeWillStub = mcpComposeCandidate && composePricing.collapse;
-                // postcondition of the rule itself, checked BEFORE the swap below discards the original size:
-                // whichever section actually collapses is, by construction, smaller than what it replaced.
-                ENSURES( !mcpLegoWillStub    || legoPricing.stubXml.size()    < legoStr.size(),
-                         "R2-L2' MCP twin: a lego stub collapsed without being smaller than the section it replaced" );
-                ENSURES( !mcpComposeWillStub || composePricing.stubXml.size() < composeStr.size(),
-                         "R2-L2' MCP twin: a compose stub collapsed without being smaller than the section it replaced" );
-                if( mcpLegoWillStub )
-                {
-                    legoStr = legoPricing.stubXml;
-                }
-                if( mcpComposeWillStub )
-                {
-                    composeStr = composePricing.stubXml;
-                }
-                // R2-L2p: same truth table as the CLI's `if( legoWillStub || composeWillStub ) sectionsStubNote = …`
-                // (verbs_for.h ~2858): the legend rides iff at least one section actually collapsed.
-                mcpSectionsWillStub = mcpLegoWillStub || mcpComposeWillStub;
-            }
-        }
-        std::fwrite( sigsStr.data(), 1, sigsStr.size(), mem );
-        std::fwrite( legoStr.data(), 1, legoStr.size(), mem );
-        std::fwrite( composeStr.data(), 1, composeStr.size(), mem );
-        std::fwrite( routeStr.data(), 1, routeStr.size(), mem );   // B6.3
-        // DEEP-TAIL d2, MCP twin: the same shared walk + renderer the CLI --for uses (serialize.h), from the
-        // same resolved surface — the fixed default budget regime, so the tail rides on top (default row cap)
-        // and the ranked head above stays byte-identical to a tail-less bundle.
-        {
-            std::vector<char> tailEsc;
-            const std::string tailStr = renderFileTailXml( computeFileTail( ing, lensRank, mcpShownIds, flRootArg ),
-                                                           kForFileTailShownCap, tailEsc );
-            std::fwrite( tailStr.data(), 1, tailStr.size(), mem );
-        }
-        rw::emitRaw( mem, "</ctx>" );
-        std::optional<std::string> answer = mcpAnswerText( stream );
-        if( !answer )
-        {
-            return McpForAssembly{};   // the buffer lost bytes: the same internal error as the failed open above
-        }
-        std::string out = std::move( *answer );
-        // R2-L2p: the legend clause disclosing a stubbed lego/compose section (kForSectionStubLegend) — the
-        // whole contract lives in spliceForSectionStubLegend above; `stubbed` false (the overwhelming common
-        // path) returns immediately and costs this function nothing but the call. Done BEFORE priceForTaskRoot
-        // so the clause's bytes are part of the est_tokens price exactly as the CLI's own version is.
-        spliceForSectionStubLegend( out, mcpSectionsWillStub );
-        // F5 (terminality round A 2026-09-05): PRICE the bundle instead of declaring it unpriced. The document is
-        // complete here, so this is the same measurement the CLI twin makes over its own (deliberately different)
-        // bytes: pricedRootAttr's ≤4-pass fixpoint at kBytesPerTokenDefault, spliced onto the <ctx> root by the
-        // shared splicer — no second estimator, and no number that could disagree with the CLI's for the same
-        // reason the CLI's could disagree with itself. Charged AFTER the sigs budget on purpose: a disclosure's
-        // contract is disclosure only, and charging its ~18 bytes against the ranked head would drop a row to pay
-        // for the attribute that describes the head — the same exemption mcpConfidenceExemptBytes already makes.
-        // r2-LO: a completeness attribute this bundle carries and its own legend never spells (at=, ccx=, next=) gets its compact
-        // reading — BEFORE pricing, so est_tokens= prices the bytes served, and after the sigs budget, so the rows are unchanged.
-        closeRosterGaps( out );
-        mcpSigsCut.continuationRequest = nullptr;   // it pointed at this pass's mcpSigsNext, which ends here
-        return McpForAssembly{ std::move( out ), mcpSigsCut };
-    };
+    // knob-honesty-068 (orchestrator ruling C3): the assembly is one pass (assembleMcpFor above), run once or twice below.
+    const McpForAssemblyInputs assemblyIn{ ing, lensRank, forTopN, fanIn, impure, redact, sigsBudget, fixedBytes, budgetTokens,
+                                           noteIndex, notesPtr, flRootArg, task, mcpTopRowNext, mcpForHdrRows, routeStr,
+                                           composePreCapCount, sections };
     // C3 — pay for the handle in rows ONLY where that makes the answer fit (the CLI twin's rule, runForLens). The PAID pass runs
     // first, so the payable case is the answer it always was; when that answer still lands past budget_tokens — and this surface
     // overshoots on its own (the header bytes its ledger exempts), so a capped answer under a budget nearly always does — the
@@ -2432,7 +2479,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
         return est;
     };
     const std::optional<RedactCounts> tallyAtEntry = redact != nullptr ? std::optional<RedactCounts>( *redact ) : std::nullopt;
-    McpForAssembly chosen = assembleMcpFor( /*payFromRows=*/true, headerStr, legoStr, composeStr, legoScoped, legoPreCapCount );
+    McpForAssembly chosen = assembleMcpFor( assemblyIn, /*payFromRows=*/true, headerStr, legoStr, composeStr, legoScoped, legoPreCapCount );
     if( !chosen.doc )
     {
         return std::nullopt;
@@ -2443,7 +2490,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
         {
             *redact = *tallyAtEntry;   // the summary counts the rows of the ONE answer served
         }
-        chosen = assembleMcpFor( /*payFromRows=*/false, headerStr, legoStr, composeStr, legoScoped, legoPreCapCount );
+        chosen = assembleMcpFor( assemblyIn, /*payFromRows=*/false, headerStr, legoStr, composeStr, legoScoped, legoPreCapCount );
         if( !chosen.doc )
         {
             return std::nullopt;
