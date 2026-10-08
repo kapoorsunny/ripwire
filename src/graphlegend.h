@@ -859,6 +859,81 @@ inline constexpr const char* kModScopeLegend =
     "t=\"modscope\" is a row for a file's MODULE SCOPE, named <file-scope>: the statements outside every named definition, which is where a top-level call and an anonymous callback body's calls live. It is a CALLER, not a function — nothing in the source can name it, so it never appears as a callee, and it has no body, so expanding it returns none. A file that has no such call has no such row. ";
 inline const char* modScopeLegend( bool on ) noexcept { return on ? kModScopeLegend : ""; }
 
+// FE-B (test/receiverevidencecheck.sh): the reading of via="name" — ONE wording for every surface that marks a row with it
+// (--callees/--callers, --impact, --path, --connect's <e>, the <calls> rows of --expand and --for, and MCP's "via":"name").
+// Gated like modScopeLegend: an answer carrying no such row pays 0 bytes. What it does NOT mean is said in the sentence,
+// because the attribute reads as a verdict and is not one.
+inline constexpr const char* kViaNameLegend =
+    "via=\"name\" on a row: the target was matched by name alone, because nothing (self/this, a construction, a type annotation, "
+    "an import, the class's bases) proves the receiver is that class; every by-name candidate in reach is listed (same file and "
+    "directory, else a lone definition), and any one of them, or none (a builtin or an outside object), may be the real target. "
+    "It does NOT mean the edge is false, and a row without it is evidence-bound, not type-checked. ";
+inline constexpr const char* kViaNameImpactClause =
+    "An --impact row reached only through such an edge carries it too; one that some all-proven path reaches stays plain. ";
+inline constexpr const char* kViaNameColumnarClause = "format=columnar carries it as the <via> column (1 = via=\"name\"). ";
+inline std::string viaNameLegend( bool present, bool impact = false, bool columnar = false )
+{
+    if( !present )
+    {
+        return {};
+    }
+    std::string out = kViaNameLegend;
+    if( impact )
+    {
+        out += kViaNameImpactClause;
+    }
+    if( columnar )
+    {
+        out += kViaNameColumnarClause;
+    }
+    return out;
+}
+// …and as --for's two header strips spell a present-only clause (see kForCompactModScopeClause below): the verb's FIRST-SCREEN
+// legend must define every attribute its payload can carry, so --for (and --exemplar) define it there, on an over-approximated
+// bit (serialize.h namesOnlyOutAny), and tell the section not to repeat it.
+inline constexpr std::string_view kForCompactViaNameClause =
+    "; c via=name: that callee matched by name alone, receiver unproven (NOT a claim the edge is false)";
+// The full dialect's spelling: the same three facts as kViaNameLegend (the mechanism, the listing, the NOT sentence) in the
+// fewest bytes, because every byte of --for's header is un-charged by its token ladder and its tight rungs carry ~0
+// headroom (see kForRootRelPathsLegendShort's measurement in verbs_for.h). ~190 B against kViaNameLegend's ~430 B.
+inline constexpr std::string_view kForViaNameClause =
+    " via=\"name\" on a <c> row: that callee matched by name alone (nothing proves the receiver's class); every by-name "
+    "candidate in reach is listed. It does NOT mean the edge is false.";
+inline std::string forViaNameClause()
+{
+    return std::string( kForViaNameClause );
+}
+// …as its own comment node, for the surfaces whose legend is written beside the rows (a <bodies>/<hops> block's <calls>)
+inline std::string viaNameLegendComment()
+{
+    return std::string( "<!-- " ) + kViaNameLegend + "-->";
+}
+// …and the MAP's spelling, as its own comment: the same three facts as kViaNameLegend in the fewest bytes (a map prints the
+// most hedged rows of any answer, and its --max-tokens fit pays for every legend byte in rows), plus x=, the count a merged
+// row carries (serialize.h writeMapCalleeRows), and where each merged candidate is listed. No `--` inside an XML comment:
+// the flag is named callees=.
+inline constexpr std::string_view kMapViaNameLegend =
+    "<!-- via=\"name\": by name alone; all in reach shown, x=N merged (callees=FILE:SYM lists all); does NOT mean it is false -->";
+// …and MCP's spelling: the same sentence as the `via_note` key of an answer one of whose entries carries "via":"name".
+inline std::string viaNameNoteJson()
+{
+    std::string text = kViaNameLegend;
+    for( std::size_t at = text.find( "via=\"name\"" ); at != std::string::npos; at = text.find( "via=\"name\"", at ) )
+    {
+        text.replace( at, 10, "\\\"via\\\":\\\"name\\\"" ); // via="name" -> \"via\":\"name\" inside the JSON string
+        at += 16;
+    }
+    if( const std::size_t at = text.find( "on a row" ); at != std::string::npos )
+    {
+        text.replace( at, 8, "on an entry" );
+    }
+    if( !text.empty() && text.back() == ' ' )
+    {
+        text.pop_back();
+    }
+    return ",\"via_note\":\"" + text + "\"";
+}
+
 // The same fact in --for's two dialects, which are prose strips joined by ';' and ':' rather than XML comment
 // clauses — one constant each so the wording cannot drift from kModScopeLegend above. Present-only, on that
 // verb's own `modScopePresent` bit (verbs_for.h), like every other clause in those two strips.

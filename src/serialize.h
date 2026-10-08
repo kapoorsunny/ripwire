@@ -1939,6 +1939,9 @@ struct MapAnnotations
     // next= that pages them. Every other map keeps the plain rank-order cut, and a map-scope map whose cut swapped
     // nothing carries neither attribute (byte-identical). Filled by assignment, like the trailing fields above.
     bool codeFirstRows = false;
+    // FE-B: the compact posture strips the map's via="name" comment (compactlegend.h, the via/x rows restate it), so the
+    // map does not write it at all — and the --max-tokens fit, which measures this render, prices the delivered bytes.
+    bool               viaLegendStripped = false;
 };
 
 // ── the code-first row pick: data_sections_cut= / next= (docs/EVALS.md "Map data Sections never crowd code out of the
@@ -2618,6 +2621,96 @@ inline std::uint32_t counterAt( const std::vector<std::uint32_t>* v, NodeId id )
     return ( v && id < v->size() ) ? ( *v )[ id ] : 0u;
 }
 
+// FE-B: one map <s>'s <c> rows over out-edges [from, to). A via="name" row (matched by name alone) that the symbol would
+// print several times byte for byte — N same-named by-name candidates, one row each, carrying only n=/prov=/via= — is
+// written ONCE, at its first edge, with x="N": the count, and --callees on the <s> lists each candidate with its file
+// (graphlegend.h kMapViaNameLegend / compactlegend.h's x row). Every other row, prov="split" arms included, is written as
+// before. `scratch` is reused across symbols.
+inline void writeMapCalleeRows( XmlWriter& w, const IngestResult& ing, std::uint32_t from, std::uint32_t to, const std::vector<NodeId>& outTargets,
+                                const std::vector<std::uint8_t>* outProv, const std::vector<std::uint8_t>* outNameOnly, std::vector<char>& esc,
+                                std::vector<std::uint32_t>& scratch )
+{
+    const auto provOf    = [ & ]( std::uint32_t e ) -> std::uint8_t { return ( outProv && e < outProv->size() ) ? ( *outProv )[ e ] : 0; };
+    const auto nameOnly  = [ & ]( std::uint32_t e ) { return outNameOnly && e < outNameOnly->size() && ( *outNameOnly )[ e ] != 0; };
+    // the row's bytes among via="name" rows: name, prov=
+    const auto rowLess = [ & ]( std::uint32_t x, std::uint32_t y )
+    {
+        const std::string& nx = ing.symbols[ outTargets[ x ] ].name;
+        const std::string& ny = ing.symbols[ outTargets[ y ] ].name;
+        return nx != ny ? nx < ny : provOf( x ) < provOf( y );
+    };
+    scratch.clear();
+    for( std::uint32_t e = from; e < to; ++e )
+    {
+        if( nameOnly( e ) )
+        {
+            scratch.push_back( e );
+        }
+    }
+    std::stable_sort( scratch.begin(), scratch.end(), rowLess );   // each group of equal rows stays in edge order
+    for( std::uint32_t e = from; e < to; ++e )
+    {
+        std::size_t repeats = 1;
+        if( nameOnly( e ) )
+        {
+            const auto group = std::equal_range( scratch.begin(), scratch.end(), e, rowLess );
+            ASSUME( group.first != group.second, "every via=\"name\" edge of [from, to) was collected into scratch" );
+            if( *group.first != e )
+            {
+                continue;   // a repeat of an earlier row: counted in that row's x=
+            }
+            repeats = std::size_t( group.second - group.first );
+        }
+        w.write( "<c n=\"" );
+        w.write( escapeXml( ing.symbols[ outTargets[ e ] ].name, esc ) );
+        // A4-R5: prov="scip" on a SCIP-pinned (precise) edge, prov="binding" on an FFI binding-table edge
+        // (pybind/extern-C/JNI), prov="import" on an ES named-import edge whose module AND export the source named. C1:
+        // prov="split" on one arm of a k-way split the resolver could not choose between. Absent = name-based AND
+        // uniquely resolved (the common case → zero token cost). outProv parallels outTargets exactly. C1, and this is the
+        // whole point of the marker: `amb="K"` on the enclosing <s> says K of this symbol's CALLS were guesses and cannot
+        // say WHICH edges; prov="split" names the arms, and the suspect set becomes the guessed edges and nothing else.
+        if( provOf( e ) != 0 )
+        {
+            w.write( "\" prov=\"" );
+            w.write( provLabel( provOf( e ) ) );
+        }
+        if( nameOnly( e ) )
+        {
+            w.write( "\" via=\"name" );   // FE-B: the same edge bit every other surface reads (viaNameLegendComment)
+        }
+        if( repeats > 1 )
+        {
+            w.write( "\" x=\"" );
+            w.write( std::to_string( repeats ) );
+        }
+        w.write( "\"/>" );
+    }
+}
+
+// FE-B: may a <c> row under one of `nodes` carry via="name"? True when any of their out-edges is name-only — an
+// over-approximation of what a section renders (a <calls> block's 16-per-symbol cap may cut that row; a merged overload
+// row prints one representative's edges), asked BEFORE the rows are written by a surface whose first-screen legend must
+// define every attribute its payload can carry (the map, --for, --exemplar).
+inline bool namesOnlyOutAny( const std::vector<std::uint32_t>& outOff, const std::vector<std::uint8_t>& outNameOnly,
+                             std::span<const NodeId> nodes ) noexcept
+{
+    for( const NodeId n : nodes )
+    {
+        if( std::size_t( n ) + 1 >= outOff.size() )
+        {
+            continue;
+        }
+        for( std::uint32_t e = outOff[ n ]; e < outOff[ n + 1 ] && e < outNameOnly.size(); ++e )
+        {
+            if( outNameOnly[ e ] != 0 )
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 inline void serialize( std::FILE* out, const IngestResult& ing, const std::vector<float>& rank,
                        const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
                        int topK, bool mostImportantLast = false,
@@ -2677,7 +2770,10 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
                        const std::vector<std::uint32_t>* declinedOut = nullptr,
                        // of those, the calls the builtin-method name gate declined (graph.h g.gateDeclinedCalls) → the
                        // kDeclinedGateMapLegend clause, absent when zero.
-                       std::size_t gateDeclinedCalls = 0 )
+                       std::size_t gateDeclinedCalls = 0,
+                       // FE-B: Graph::outNameOnly (parallel to outTargets) → via="name" on a <c> row and the via legend
+                       // comment; nullptr/empty ⇒ every edge is evidence-bound and the map is byte-identical.
+                       const std::vector<std::uint8_t>* outNameOnly = nullptr )
 {
     const std::size_t* changedCount = ann.changedCount;
     const std::string* mapAtStamp   = ann.atStamp;
@@ -2913,6 +3009,15 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     const std::size_t declinedTotal   = counterTotal( declinedOut );     // calls tier 3 declined: no edge, and no guess
     legend += declinedTotal > 0 ? kDeclinedMapLegend : "";               // charged to the map that carries declined=
     legend += gateDeclinedCalls > 0 ? kDeclinedGateMapLegend : "";       // only where the builtin-method gate declined a call
+    if( outNameOnly && !stubbed && !ann.viaLegendStripped
+        && namesOnlyOutAny( outOff, *outNameOnly, std::span<const NodeId>( order.data(), std::min( keep, order.size() ) ) ) )
+    {
+        // FE-B: the reading every other surface carries (graphlegend.h kViaNameLegend), in the map's short spelling — exactly
+        // when a kept row may print a via="name" <c> (over-approximated by merged overloads, which print one member's edges).
+        // It also defines a merged row's x=. Not written under the compact posture, whose rewrite strips it (compactlegend.h)
+        // and whose element-qualified via/x rows restate it: the --max-tokens fit then prices what is delivered.
+        legend += kMapViaNameLegend;
+    }
     // C1 DRIFT FIX (Round C lane B, found by re-reading this header's own output). `precise=` means "how many
     // out-edges a SCIP index PINNED", and the emitter's own comment below says it is "emitted ONLY under
     // --scip". Both were true when outProv held only {0, 1}. A4-R5 then added value 2 (an FFI binding edge)
@@ -3144,6 +3249,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     // The children, as ONE renderer both paths call. This was inline code writing through a writer bound to "the buffer,
     // or `out` when the buffer could not open". That serves a failed open, and cannot serve a buffer that opened and then
     // lost a write: by then the children were already spent into it, and the only bytes left to print had a hole in them.
+    std::vector<std::uint32_t> hedgedScratch;   // FE-B: writeMapCalleeRows' reused buffer
     const auto writeChildren = [ & ]( XmlWriter& w )
     {
         // §P8 collision: this prologue spelled its LABEL `l=`, the two characters 22 other sites use for a LINE
@@ -3410,27 +3516,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
                 }
                 w.write( ">" );
 
-                for( std::uint32_t e = outOff[id]; e < outOff[id + 1]; ++e )
-                {
-                    w.write( "<c n=\"" );
-                    w.write( escapeXml( ing.symbols[ outTargets[e] ].name, esc ) );
-                    // A4-R5: prov="scip" on a SCIP-pinned (precise) edge, prov="binding" on an FFI
-                    // binding-table edge (pybind/extern-C/JNI), prov="import" on an ES named-import edge whose
-                    // module AND export the source named. C1: prov="split" on one arm of a k-way split the
-                    // resolver could not choose between. Absent = name-based AND uniquely resolved (the common case
-                    // → zero token cost). outProv parallels outTargets exactly, so index `e` is the same edge.
-                    //
-                    // C1, and this is the whole point of the marker: `amb="K"` on the enclosing <s> says K of this
-                    // symbol's CALLS were guesses and cannot say WHICH edges, so a consumer honouring the honesty
-                    // signal had to distrust every <c> child. prov="split" names the arms, and the suspect set
-                    // becomes the guessed edges and nothing else.
-                    if( outProv && e < outProv->size() && ( *outProv )[e] )
-                    {
-                        w.write( "\" prov=\"" );
-                        w.write( provLabel( ( *outProv )[e] ) );
-                    }
-                    w.write( "\"/>" );
-                }
+                writeMapCalleeRows( w, ing, outOff[id], outOff[id + 1], outTargets, outProv, outNameOnly, esc, hedgedScratch );
                 w.write( "</s>" );
             }
             w.write( "</f>" );
@@ -5902,6 +5988,12 @@ struct CalleeCallsSink
     // have a query. The ordering is a property of a CUT listing, not of a rendering, so the condition is
     // now the rank alone and packBodies threads one in (`calleeRank`); gate test/callsrankordercheck.sh.
     const std::vector<float>*     rank = nullptr;
+    // FE-B: Graph::outNameOnly (parallel to outTargets), so a callee row whose edge is name-only carries via="name" — the
+    // same bit --callees prints. nullptr / empty ⇒ no row is marked.
+    const std::vector<std::uint8_t>* nameOnly = nullptr;
+    // FE-B: set once the block's caller has been charged the via="name" legend comment it will write (packBodies/packHops
+    // write it ahead of the rows, after the walk) — so the budget the walk honours already holds those bytes
+    bool*                            viaLegendCharged = nullptr;
 };
 
 // The <calls> wrapper, written in front of the rows it describes (they have to be walked before `shown`
@@ -6036,17 +6128,18 @@ struct MergedCalleeNameRow
 {
     std::string_view           name;    // a view into ing.symbols — stable for the emitter's lifetime
     std::vector<std::uint32_t> lines;   // every definition line of that name; joined ascending at append time
+    bool                       via = false;   // FE-B: these edges are name-only — merged only with rows of the same bit
 };
 
 inline void collectCalleeNameRow( std::vector<MergedCalleeNameRow>& rows, const Symbol& cs,
-                                  std::size_t& used, const CalleeCallsSink& sink )
+                                  std::size_t& used, const CalleeCallsSink& sink, bool via = false )
 {
     char lb[ 16 ];
     rw::formatTo( lb, sizeof( lb ), "{}", cs.line );
     bool merged = false;
     for( MergedCalleeNameRow& r : rows )
     {
-        if( r.name == cs.name )
+        if( r.name == cs.name && r.via == via )
         {
             r.lines.push_back( cs.line );  merged = true;
             break;
@@ -6054,10 +6147,10 @@ inline void collectCalleeNameRow( std::vector<MergedCalleeNameRow>& rows, const 
     }
     if( !merged )
     {
-        rows.push_back( MergedCalleeNameRow { cs.name, { cs.line } } );
+        rows.push_back( MergedCalleeNameRow { cs.name, { cs.line }, via } );
     }
-    // the comma and the digits a merge appends, or the whole row it opens
-    used += merged ? std::strlen( lb ) + 1 : cs.name.size() + 16;
+    // the comma and the digits a merge appends, or the whole row it opens (FE-B: plus its 11-byte via="name")
+    used += merged ? std::strlen( lb ) + 1 : cs.name.size() + 16 + ( via ? 11u : 0u );
     if( sink.recorded )
     {
         sink.recorded->push_back( EmittedBodyCall { cs.name, cs.line, std::string() } );   // §H5: no sig to record
@@ -6083,8 +6176,24 @@ inline void appendMergedCalleeNameRows( std::string& callsBody, std::vector<Merg
             rw::formatTo( lb, sizeof( lb ), "{}", r.lines[i] );
             callsBody += lb;
         }
-        callsBody += "\"/>";
+        callsBody += "\"";
+        callsBody += viaNameAttr( r.via );   // FE-B
+        callsBody += "/>";
     }
+}
+
+// FE-B: is the <calls> row id → cid name-only (the walk reorders, so the hedge bit is found by the target). The first
+// hedged row of an answer charges the via legend it pulls in to `used`, before the row.
+inline bool calleeRowVia( const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets, NodeId id, NodeId cid,
+                          std::size_t& used, const CalleeCallsSink& sink )
+{
+    const bool via = sink.nameOnly != nullptr && edgeNameOnlyInCsr( outOff, outTargets, *sink.nameOnly, id, cid );
+    if( via && sink.viaLegendCharged != nullptr && !*sink.viaLegendCharged )
+    {
+        used += viaNameLegendComment().size();
+        *sink.viaLegendCharged = true;
+    }
+    return via;
 }
 
 // §P10.1: the disclosed <calls total=... [shown=... capped="1"]> block
@@ -6124,11 +6233,12 @@ inline void emitCalleeCallsBlock( std::string& out, NodeId id, const std::vector
             continue;
         }
         const Symbol& cs = ing.symbols[cid];
+        const std::string_view viaAttr = viaNameAttr( calleeRowVia( outOff, outTargets, id, cid, used, sink ) );   // FE-B: via="name" or ""
 
         // COMPACT: the names-only rendering — see collectCalleeNameRow above for what it does and does not do.
         if( sink.namesOnly )
         {
-            collectCalleeNameRow( nameRows, cs, used, sink );
+            collectCalleeNameRow( nameRows, cs, used, sink, !viaAttr.empty() );
             ++shown;
             continue;
         }
@@ -6143,10 +6253,10 @@ inline void emitCalleeCallsBlock( std::string& out, NodeId id, const std::vector
         {
             continue;
         }
-        char hb[ 32 ];  rw::formatTo( hb, sizeof( hb ), "\" l=\"{}\">", cs.line );
+        char hb[ 48 ];  rw::formatTo( hb, sizeof( hb ), "\" l=\"{}\"{}>", cs.line, viaAttr );
         callsBody += "<c n=\"";  callsBody += escapeXml( cs.name, esc );  callsBody += hb;
         callsBody += escapeXml( sig, esc );  callsBody += "</c>";
-        used += sig.size() + 24;
+        used += sig.size() + 24 + viaAttr.size();
         ++shown;
         if( sink.recorded )
         {
@@ -6503,6 +6613,7 @@ inline void regroupEmittedRecord( EmittedBodies* out, const std::vector<PackedBo
 inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vector<NodeId>& nodes,
                         std::size_t budgetBytes,
                         const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
+                        const std::vector<std::uint8_t>& outNameOnly,   // FE-B: Graph::outNameOnly — the <c> rows' via="name"
                         bool compress = false, RedactCounts* redact = nullptr,
                         const HashMap<NodeId, LineRange>* ranges = nullptr,
                         const notes::NoteIndex* noteIndex = nullptr,    // L3: field notes — surfaces <note> children on each
@@ -6519,11 +6630,14 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
                                                                         //   false (every caller but --expand) ⇒ byte-identical.
                         std::string_view rootArg = {},   // R-E (2026-08-17): same single-root-only root
                                                           // argument serialize() takes — see its comment.
-                        const std::vector<float>* calleeRank = nullptr )   // orders each body's CUT <calls> listing: the query relevance
+                        const std::vector<float>* calleeRank = nullptr,   // orders each body's CUT <calls> listing: the query relevance
                                                                             //   on --for/--pack-task/--from-trace, calleeNameSpecificity on
                                                                             //   --expand; nullptr (--around/--exemplar) ⇒ node-id order.
                                                                             //   See CalleeCallsSink::rank.
+                        bool viaLegendInHead = false )   // FE-B: the caller's own first-screen legend already defines via="name"
+                                                         //   (namesOnlyOutAny above), so this section neither repeats nor charges it
 {
+    bool viaLegendCharged = viaLegendInHead;   // FE-B: the via="name" legend has been charged against the budget (CalleeCallsSink)
     // budgetBytes == 0 ⇒ UNLIMITED (A3-F2): the MCP `exemplar` verb has no byte budget, and 0 must never
     // mean "cap at zero bytes" (the cap fired before the first body and emitted a bare <bodies></bodies>).
     // Matches buildRecall's "0 = no cap" convention; the CLI always passes a real budget (default 64 KB).
@@ -6820,7 +6934,7 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
         // total=/shown=/capped= block — see emitCalleeCallsBlock above; `calleeRank` decides which
         // rows survive when it CUTS one, which is far from rare here (CalleeCallsSink::rank).
         emitCalleeCallsBlock( piece, id, outOff, outTargets, ing, contentOf, esc, used, budgetBytes,
-                              CalleeCallsSink{ redact, record ? &record->calls : nullptr, /*namesOnly=*/false, calleeRank } );
+                              CalleeCallsSink{ redact, record ? &record->calls : nullptr, /*namesOnly=*/false, calleeRank, &outNameOnly, &viaLegendCharged } );
         const std::string bodyNotes = renderNoteChildren( noteIndex, symbolNoteTarget( noteIndex, ing, s ), esc );   // L3/D5
         piece += bodyNotes;
         used += bodyNotes.size();                                                                   // W3-N2: same charge-never-trim rule
@@ -6892,6 +7006,10 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
     {
         w.write( kOverCeilingBodyLegend );   // the same rule, for <b over_ceiling="1">
     }
+    if( !viaLegendInHead && children.find( " via=\"name\"" ) != std::string::npos )
+    {
+        w.write( viaNameLegendComment() );   // FE-B: the same rule, for a <calls> row's via="name"
+    }
     w.write( children );
     w.write( "</bodies>" );
     w.flush();
@@ -6924,14 +7042,14 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
 inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector<NodeId>& nodes,
                       std::size_t budgetBytes,
                       const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
+                      const std::vector<std::uint8_t>& outNameOnly,   // FE-B: Graph::outNameOnly — the <c> rows' via="name"
                       RedactCounts* redact = nullptr,
                       std::size_t* outShown = nullptr,          // rows actually emitted; nullptr ⇒ not recorded
                       const std::vector<float>* rank = nullptr, // query relevance, for ordering a CUT callee listing
                       std::string_view rootArg = {},            // R-E: same single-root-only root= every verb takes
-                      const std::vector<std::uint8_t>* outNameOnly = nullptr )   // hop-slot rule: FE-B's per-edge hedge bit,
-                                                                // parallel to outTargets (graph.h graphNameOnlyBits); nullptr ⇒
-                                                                // every edge counts as proven (byte-identical)
+                      bool viaLegendInHead = false )            // FE-B: packBodies' parameter of the same name
 {
+    bool viaLegendCharged = viaLegendInHead;   // FE-B: the via="name" legend has been charged against the budget (CalleeCallsSink)
     if( budgetBytes == 0 )                                      // 0 ⇒ UNLIMITED, packBodies' own convention
     {
         budgetBytes = SIZE_MAX;
@@ -6997,8 +7115,8 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
         // whose every out-edge was bound by name alone (an off-topic getter whose one callee row was `bag.lookup()` on an
         // untyped local, measured on a graded answer) spent the slot on a hedged edge; it now counts with noedge=, whose
         // reading is "no RESOLVED callee found" — a name-only binding is a hedge, not a resolution.
-        const bool noProvenEdge = outDeg > 0 && outNameOnly != nullptr
-                               && std::all_of( outNameOnly->begin() + outOff[ id ], outNameOnly->begin() + outOff[ id + 1 ],
+        const bool noProvenEdge = outDeg > 0 && !outNameOnly.empty()
+                               && std::all_of( outNameOnly.begin() + outOff[ id ], outNameOnly.begin() + outOff[ id + 1 ],
                                                []( std::uint8_t bit ) { return bit != 0; } );
         if( outDeg == 0 || noProvenEdge )
         {
@@ -7023,7 +7141,7 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
         // the 1-hop callee signatures — the identical block a body carries, charged against the same
         // running `used` so the row identity bytes and the edge bytes share one budget.
         emitCalleeCallsBlock( row, id, outOff, outTargets, ing, contentOf, esc, used, budgetBytes,
-                              CalleeCallsSink{ redact, /*recorded=*/nullptr, /*namesOnly=*/true, rank } );
+                              CalleeCallsSink{ redact, /*recorded=*/nullptr, /*namesOnly=*/true, rank, &outNameOnly, &viaLegendCharged } );
         row += "</h>";
         children += row;
         ++shownCount;
@@ -7044,6 +7162,10 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
     {
         rw::formatTo( open, sizeof( open ), "<hops shown=\"{}\" total=\"{}\" capped=\"{}\">",
                        shownCount, requestedCount, shownCount < requestedCount ? 1 : 0 );
+    }
+    if( !viaLegendInHead && children.find( " via=\"name\"" ) != std::string::npos )
+    {
+        w.write( viaNameLegendComment() );   // FE-B: exactly when a hop's <calls> row carries via="name"
     }
     w.write( open );
     w.write( children );
@@ -9028,7 +9150,8 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
                            const std::vector<std::uint32_t>* locPinOut = nullptr,   // Phase 4: same as serialize()'s
                            std::size_t externalCalls = 0,                           // Phase 5: same as serialize()'s
                            const std::vector<std::uint32_t>* declinedOut = nullptr, // tier-3 declines: same as serialize()'s
-                           std::size_t /*gateDeclinedCalls*/ = 0 )  // serialize()'s legend clause; JSON carries no legend, so unread here
+                           std::size_t /*gateDeclinedCalls*/ = 0,   // serialize()'s legend clause; JSON carries no legend, so unread here
+                           const std::vector<std::uint8_t>* outNameOnly = nullptr )   // FE-B: same as serialize()'s → "via":"name"
 {
     const std::size_t S = ing.symbols.size();
     const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
@@ -9206,6 +9329,10 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
                     if( outProv && e < outProv->size() && (*outProv)[e] )
                     {
                         w.write( ",\"prov\":" );  writeJsonStr( w, provLabel( (*outProv)[e] ), esc );
+                    }
+                    if( outNameOnly && e < outNameOnly->size() && ( *outNameOnly )[e] != 0 )
+                    {
+                        w.write( ",\"via\":\"name\"" );   // FE-B: the XML via="name", 1:1
                     }
                     w.write( "}" );
                 }

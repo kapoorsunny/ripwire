@@ -450,7 +450,8 @@ inline std::string analyzeToString( const std::string& root, int topK, bool stab
                                     // this one must too — "the clause landed at 3 of its 5 echo sites" is the
                                     // §B4 family, and mcpclidiffcheck is the gate that keeps the two surfaces one.
                                     /*ann=*/rw::MapAnnotations{ .prDisclosure = ix.prDisclosure, .codeFirstRows = ix.isCleanWorkingSet },
-                                    /*statsFirstScreen=*/true, anRootArg, &ix.g.locPinOut, ix.g.externalCalls, &ix.g.declinedOut, ix.g.gateDeclinedCalls ); } );
+                                    /*statsFirstScreen=*/true, anRootArg, &ix.g.locPinOut, ix.g.externalCalls, &ix.g.declinedOut, ix.g.gateDeclinedCalls,
+                                    ix.g.outNameOnly.empty() ? nullptr : &ix.g.outNameOnly ); } );
 }
 
 // `rank_by` verb (lane/t10-mcp-coverage): the MCP twin of --rank-by=pagerank|authority|hub|rrf — the SAME
@@ -517,7 +518,8 @@ inline std::string rankByText( const std::string& root, std::string_view mode, i
                                     /*autoOrder=*/false, /*outEstTokens=*/nullptr,
                                     /*extraPayloadTokens=*/0,
                                     /*ann=*/rw::MapAnnotations{ .rankByLabel = rankByLabel, .prDisclosure = disclosure, .codeFirstRows = rankByLabel == nullptr },   // pagerank: the map scope's code-first pick
-                                    /*statsFirstScreen=*/true, rbRootArg, &ix.g.locPinOut, ix.g.externalCalls, &ix.g.declinedOut, ix.g.gateDeclinedCalls ); } );
+                                    /*statsFirstScreen=*/true, rbRootArg, &ix.g.locPinOut, ix.g.externalCalls, &ix.g.declinedOut, ix.g.gateDeclinedCalls,
+                                    ix.g.outNameOnly.empty() ? nullptr : &ix.g.outNameOnly ); } );
 }
 
 // ─── the cross-branch + dark-content MCP twins (`whereis`, `stray_content`, `flags`) ───
@@ -718,8 +720,10 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     // root it twins), and reused per row so `tested` is the same predicate the CLI prints.
     const HopTestedPartition chTested = computeHopTestedPartition( ing, g, referencingOnly ? calledBy : calls );
 
-    const auto symObj = [ & ]( NodeId id ) -> std::string
+    bool anyVia = false;   // FE-B: an entry carried "via":"name" — the answer then carries via_note, its reading
+    const auto symObj = [ & ]( NodeId id, bool via ) -> std::string
     {
+        anyVia = anyVia || via;
         const Symbol& s = ing.symbols[id];
         // T4: attach the stable content-handle so the agent can `fetch_body{handle}` instead of us re-sending
         // the body. Names/signatures by default (this verb); bodies by handle on request.
@@ -732,15 +736,16 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
              + "\",\"line\":" + std::to_string( s.line )
              + ",\"handle\":\"" + mcpdetail::jsonEscape( handleFor( ix, id ) ) + "\""
              + ( rw::isTestedByReach( ing, chTested.testReach, id ) ? ",\"tested\":true" : "" )
+             + ( via ? ",\"via\":\"name\"" : "" )   // FE-B: the CLI row's via="name", the same edge bit (graph.h rowNameOnly)
              + "}";
     };
-    const auto rowArray = [ & ]( const std::vector<NodeId>& ids, const PageWindow& w ) -> std::string
+    const auto rowArray = [ & ]( const std::vector<NodeId>& ids, const PageWindow& w, bool callersSide ) -> std::string
     {
         std::string a = "[";
         for( std::size_t i = w.begin; i < w.end; ++i )
         {
             if( i != w.begin ) { a += ","; }
-            a += symObj( ids[i] );
+            a += symObj( ids[i], rowNameOnly( g, chRows.matches, ids[i], callersSide ) );
         }
         a += "]";
         return a;
@@ -760,7 +765,7 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     {
         out += "\"root\":\"" + mcpdetail::jsonEscape( root ) + "\",";
     }
-    out += "\"symbol\":" + symObj( chRows.matches.front() );
+    out += "\"symbol\":" + symObj( chRows.matches.front(), false );
     // §P10.6 / A6, in the CLI's own key names: defs= = definitions the name resolved to (the rows below are
     // the UNION of all of their neighbours), count= = the un-windowed row total, hop_tested/hop_untested =
     // the partition over that full set.
@@ -800,10 +805,14 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     {
         out += calledByCutJson( name, calledBy.size(), pwSecond, page.limit );   // cut-fix C: the second array's own cut
     }
-    out += ",\"calledBy\":" + rowArray( calledBy, referencingOnly ? pwPrimary : pwSecond );
+    out += ",\"calledBy\":" + rowArray( calledBy, referencingOnly ? pwPrimary : pwSecond, true );
     if( !referencingOnly )
     {
-        out += ",\"calls\":" + rowArray( calls, pwPrimary );
+        out += ",\"calls\":" + rowArray( calls, pwPrimary, false );
+    }
+    if( anyVia )
+    {
+        out += rw::viaNameNoteJson();   // FE-B: the reading of "via":"name", only in an answer that carries it
     }
     // Reference-as-value round: the CLI's <vrs> window, the same rows (callhierarchy.h computed them once): valueRefs =
     // where the symbol is USED AS A VALUE (the --callers side), valueCallees = what it stores/passes and may call
@@ -2712,7 +2721,7 @@ inline std::optional<std::string> exemplarText( const std::string& root, const s
                   fin( pick.winner ), wsym.ccx, exRootAttr.c_str(), ts( pick.winner ) ? " tested=\"1\"" : "",
                   pick.lowConfidence ? " low_confidence=\"1\"" : "",
                   pick.overCcxBar    ? " over_ccx_bar=\"1\"" : "" );
-    packBodies( mem, ing, { pick.winner }, 0 /* no byte budget in MCP (0 = unlimited) */, g.outOff, g.outTargets, false, redact,
+    packBodies( mem, ing, { pick.winner }, 0 /* no byte budget in MCP (0 = unlimited) */, g.outOff, g.outTargets, g.outNameOnly, false, redact,
                 /*ranges=*/nullptr, /*noteIndex=*/nullptr, /*outEmitted=*/nullptr, /*truncateOversizedFirst=*/true,
                 /*withFileContext=*/false, exSingleRoot ? std::string_view( root ) : std::string_view() );
     rw::emitRaw( mem, "</exemplar></ctx>" );
@@ -2748,6 +2757,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
     // 0.6.5: the CLI --impact's walk, keeping each node's hop depth, and its order (graph.h orderByDepthThenRank).
     std::vector<std::uint32_t>       depth;
     const std::vector<NodeId>        reach = transitiveCallersDepth( g, seeds, &depth );
+    const std::vector<char>          proven = provenCallerReach( g, seeds );   // FE-B (D3): as on the CLI
     const auto [ rank, prIters, prConverged ] = rankGraph( g );
     const RankDisclosure             prD{ prIters, prConverged, true };   // W2-F: CLI --impact discloses this; so does its twin
     std::vector<NodeId>              show  = reach;
@@ -2788,10 +2798,13 @@ inline std::optional<std::string> impactText( const std::string& root, const std
     sizeImportTier( imports, page.limit, symbol );   // cut-fix C: limit sizes the tier, as on the CLI
     // Reference-as-value round: SYM's binding sites, the CLI --impact's value_refs=/<vrs> by the same call.
     const ValueRefRows  imValueRefs = valueRefCallerRows( ing, valueRefIndexOf( ix ), seeds );
+    const PageWindow    ipw         = pageWindow( show.size(), effectiveRowCap( page.limit, 40 ), page.offset );
+    const bool          imHasVia    = std::any_of( show.begin() + ipw.begin, show.begin() + ipw.end, [ & ]( NodeId n ) { return impactRowNameOnly( proven, n ); } );
     rw::emitTo( mem, "{}{}. {}{}{}{}{}{}{}{}{}{}{}{}-->", kImpactLegendOpen, kPageRaiseCapClause,
                   reach.empty() ? "" : kImpactDepthLegend,           // 0.6.5: exactly when d=/by_depth= ride, as on the CLI
                   kImpactImportTierLegend,
-                  impactTsImportLegend( imports.importsUnresolved, imports.tsconfigUnread ).c_str(),   // #220: exactly when the root carries them, as on the CLI
+                  ( impactTsImportLegend( imports.importsUnresolved, imports.tsconfigUnread )   // #220: exactly when the root carries them, as on the CLI
+                    + viaNameLegend( imHasVia, true ) ).c_str(),                                // FE-B: exactly when a shown row is via="name", as on the CLI
                   kTestedRowLegend, kImpactTestedPartitionLegend,   // A6
                   kTestedLensBlindSpotLegend,                       // F-02: rides with the partition, byte-identical to the CLI twin
                   unprovenDefsVerbLegend( UnprovenDefsVerb::Impact, unprovenDefs > 0 ).c_str(),   // H1: exactly when the root carries unproven_defs=, as on the CLI
@@ -2805,7 +2818,6 @@ inline std::optional<std::string> impactText( const std::string& root, const std
     // same meaning as the CLI --impact — the two surfaces must not diverge on an honesty marker.
     // §B6 M4: the window and the disclosure now come from the shared pageview.h trio, exactly as they do on
     // the CLI arm, instead of a hand-rolled 40-row slice with a hand-rolled shown=/capped= pair.
-    const PageWindow  ipw       = pageWindow( show.size(), effectiveRowCap( page.limit, 40 ), page.offset );
     const std::size_t shownRows = ipw.end - ipw.begin;
     char              ipab[ kPageDisclosureCap ];
     // R-E fix (2026-08-19): root-relative p= + root=, exactly as the CLI --impact now emits them. The first
@@ -2826,8 +2838,9 @@ inline std::optional<std::string> impactText( const std::string& root, const std
     { const Symbol& s = ing.symbols[ show[i] ];
       const std::string_view rp = imSingleRoot ? sarif::rootRelativeUri( ing.files[ s.fileId ], imRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
       // A6: tested="1" only (never a literal 0) — see kTestedRowLegend. 0.6.5: d= as on the CLI row.
-      rw::emitTo( mem, "<s t=\"{}\" n=\"{}\" p=\"{}:{}\"{}{}/>", symTag( s.kind ), ex( s.name ).c_str(), ex( rp ).c_str(), s.line,
-                    depthRunAttrXml( show, depth, i, ipw.begin ), isTestedByReach( ing, impTestReach, show[i] ) ? " tested=\"1\"" : ""  ); }
+      rw::emitTo( mem, "<s t=\"{}\" n=\"{}\" p=\"{}:{}\"{}{}{}/>", symTag( s.kind ), ex( s.name ).c_str(), ex( rp ).c_str(), s.line,
+                    depthRunAttrXml( show, depth, i, ipw.begin ), isTestedByReach( ing, impTestReach, show[i] ) ? " tested=\"1\"" : "",
+                    viaNameAttr( impactRowNameOnly( proven, show[i] ) ) ); }   // FE-B (D3)
     // the import tier's rows, after the symbol rows and under their own tag — a different unit, so a
     // different element (see the CLI arm and kImpactImportTierLegend for why they are never one number).
     emitImportRowsXml( mem, ing, std::span<const std::uint32_t>( imports.files ).first( imports.shown ), imRootPrefix,
@@ -3257,8 +3270,13 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
     const ToValueRefs ptToValueRefs = toValueRefs( ing, pth.empty(), dstDefs, &valueRefIndexOf( ix ) );
     // PATH-GAP: the CLI --path's gap clause, by the same analysis and emitter (src/pathgaps.h).
     const PathSearchGaps ptGaps = pth.empty() ? pathSearchGaps( ing, g, srcDefs, valueRefIndexOf( ix ) ) : PathSearchGaps{};
+    bool ptHasVia = false;   // FE-B: exactly when a hop of this path is via="name", as on the CLI
+    for( std::size_t i = 1; i < pth.size() && !ptHasVia; ++i )
+    {
+        ptHasVia = edgeNameOnly( g, pth[ i - 1 ], pth[ i ] );
+    }
     rw::emitTo( mem, "<!-- ripwire path: one DIRECTED call path from= to to= (each <s> a hop); reachable= is 0 and hops= 0 when the "
-                       "graph holds none. {}{}{}{}-->{}", unprovenDefsVerbLegend( UnprovenDefsVerb::Path, unprovenDefs > 0 ).c_str(),
+                       "graph holds none. {}{}{}{}-->{}", ( unprovenDefsVerbLegend( UnprovenDefsVerb::Path, unprovenDefs > 0 ) + viaNameLegend( ptHasVia ) ).c_str(),
                   ( std::string( toValueRefsLegend( ptToValueRefs.count > 0 ) ) + valueRefsDepthLegend( ptToValueRefs.depthCut.files > 0 ) ).c_str(),
                   pathGapsLegend( ptGaps.any() ),
                   graphCountFloorBrief( rw::graphGaugeClauses( g ) ).c_str(), rootRelPathsLegend( ptSingleRoot ) );
@@ -3273,10 +3291,11 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
         ? pathUnreachedXml( ing, ptGaps, ptSingleRoot, ptRootPrefix, { "the connect verb on " + from + "," + to, "uses/impact", "" } )
         : PathGapsXml{};
     rw::emitTo( mem, "{}>{}", ptUnreached.rootAttrs, ptUnreached.rows );
-    for( NodeId n : pth )
-    { const Symbol&           s  = ing.symbols[n];
+    for( std::size_t i = 0; i < pth.size(); ++i )
+    { const Symbol&           s  = ing.symbols[ pth[i] ];
       const std::string_view  rp = ptSingleRoot ? sarif::rootRelativeUri( ing.files[ s.fileId ], ptRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
-      rw::emitTo( mem, "<s t=\"{}\" n=\"{}\" p=\"{}:{}\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( rp ).c_str(), s.line ); }
+      rw::emitTo( mem, "<s t=\"{}\" n=\"{}\" p=\"{}:{}\"{}/>", symTag( s.kind ), ex( s.name ).c_str(), ex( rp ).c_str(), s.line,
+                    viaNameAttr( i > 0 && edgeNameOnly( g, pth[ i - 1 ], pth[ i ] ) ) ); }   // FE-B: as on the CLI
     rw::emitRaw( mem, "</path>" );
     return mcpAnswerText( stream );   // nullopt = the buffer lost bytes (dispatch answers -32603), "" stays not-found
 }
@@ -3535,9 +3554,15 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
     const std::string  connectUnprovenLegend = unprovenDefsVerbComment( UnprovenDefsVerb::Connect, unprovenDefs > 0, "<!-- ripwire connect: " );
     // 0.6.6 D1: the tied-terminal names, charged like the residue attribute above; absent (0 bytes) when no pick tied
     const std::string  connectAmbiguousAttr = ambiguousTerminals.empty() ? std::string() : ( " ambiguous_terminal=\"" + ex( ambiguousTerminals ) + "\"" );
+    // FE-B: the reading of via="name", when some <e> of this answer carries it — charged like the clauses above
+    const bool         connectHasVia = std::any_of( res.groups.begin(), res.groups.end(), [ & ]( const ConnectGroup& grp )
+    {
+        return grp.terminals.size() > 1 && std::any_of( grp.edges.begin(), grp.edges.end(), [ & ]( const ConnectEdge& e ) { return edgeNameOnly( g, e.from, e.to ); } );
+    } );
+    const std::string  connectViaLegend = connectHasVia ? "<!-- ripwire connect: " + viaNameLegend( true ) + "-->" : std::string();
     const std::size_t  connectExtraBytes = connectRootAttr.size() + std::strlen( rootRelPathsLegend( !rootArg.empty() ) )
                                          + connectUnindexedLegend.size() + connectUnprovenAttr.size() + connectUnprovenLegend.size()
-                                         + connectAmbiguousAttr.size();
+                                         + connectAmbiguousAttr.size() + connectViaLegend.size();
 
     // §2.4a: the derived hub threshold every Steiner row's connects= is read against, computed ONCE (it is a
     // property of the graph, not of a row) and named on the root so the label is never a bare assertion.
@@ -3685,7 +3710,8 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
             for( const ConnectEdge& e : edges )
             {
                 payload.append( "<e f=\"" ).append( ex( ing.symbols[ e.from ].name ) )
-                       .append( "\" t=\"" ).append( ex( ing.symbols[ e.to ].name ) ).append( "\"/>" );
+                       .append( "\" t=\"" ).append( ex( ing.symbols[ e.to ].name ) ).append( "\"" )
+                       .append( viaNameAttr( edgeNameOnly( g, e.from, e.to ) ) ).append( "/>" );   // FE-B: a name-only edge says so
             }
             payload.append( "</g>" );
         }
@@ -3748,8 +3774,8 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
     {
         estTokens = connectEstTokens( payload.size(), connectExtraBytes + std::strlen( connectOverAttr ) );
     }
-    rw::emitTo( out, "{}{}{}{}", rw::cstr( kConnectHeader ), connectUnindexedLegend.c_str(), connectUnprovenLegend.c_str(),
-                rootRelPathsLegend( !rootArg.empty() ) );
+    rw::emitTo( out, "{}{}{}{}{}", rw::cstr( kConnectHeader ), connectUnindexedLegend.c_str(), connectUnprovenLegend.c_str(),
+                connectViaLegend, rootRelPathsLegend( !rootArg.empty() ) );
     rw::emitTo( out, "<connect terminals=\"{}\" nodes=\"{}\" edges=\"{}\" radius=\"{}\" groups=\"{}\"{}{} est_tokens=\"{}\" hub_floor=\"{}\"{}{}{}{}{}>",
                   res.terminals.size(), nodeTotal, edgeTotal, res.radius, connectedGroups,
                   connectUnprovenAttr.c_str(),   // H1: beside the counts it qualifies; absent at zero

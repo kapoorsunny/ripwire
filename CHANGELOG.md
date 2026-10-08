@@ -15,6 +15,59 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Changed — a call bound by name alone keeps its rows, marked `via="name"`; typed receivers resolve
+
+A member call `x.m()` (or, where the receiver is implicit, a bare `m()`) bound to every in-repo definition spelled
+`m` that the name ladder reached, and each such row read as a confident edge with nothing behind it but the name: a
+request context's `ctx.onerror()` drawn to the `Application.onerror` its file defines, a WeakMap's `.get()` drawn to
+the same file's accessor, a Go struct field's `item.text.Get()` drawn to an unrelated `Merger.Get`, a bare `flush()`
+in a Java class with an outside base drawn to an unrelated class's `flush`.
+
+- **Receivers the source types now resolve** (JavaScript, TypeScript, Python, Go, Java, Kotlin, C#, Swift): `this` /
+  `self` / `cls` inside a class and `super` / `base` through its bases; a parameter or local whose class is written
+  (a TS/Python/Go/Java/C#/Kotlin/Swift annotation or declared type, a Go method receiver, a JS `new Foo()`, Java/C#
+  `new Foo()` (`var` included), Python `Foo()`, Kotlin/Swift `Foo()` or Go `Foo{}` initializer, an import alias of the
+  class); a constructed receiver (`new Foo().m()`); a class-name receiver; a chain of fields whose classes are stated
+  (`this.bucket = new Schemas()`, Python `self.x = Foo()`, Go struct and embedded fields, Java/C# fields and
+  properties, Kotlin/Swift properties and Kotlin `val` constructor properties, read through `this`/`self` or bare);
+  Python `feed = parser.feed`. A Go module alias proves its package by the exact import path: the nearest `go.mod`'s
+  module path plus the directory below it, or the path a local `replace` gives a directory (in a tree with no `go.mod`
+  at all, a directory that ends the import path). A local is read where its language scopes it: a block's declaration
+  from the declaration to the block's end, a parameter in its function or lambda, a Python name in its whole function.
+  Every other binding of a name also hides the field or the outer local it shadows there — a loop, lambda, catch,
+  resource or `with`/`except` variable, a pattern, `case`, `out var` or `match` capture, a destructuring entry, Swift
+  `if`/`guard`/`while let`, a Go range / type-switch / short variable, a JS or Python reassignment (a statically typed
+  variable keeps its declared type when reassigned). Such a binding
+  names its own class only when it is written or constructed with one (a typed loop, lambda or resource variable); otherwise the call
+  through it is name-only, like a call through an untyped local or an interface-typed receiver with several
+  implementors. A written type that names a generic's type parameter (`<Tank>`, `[T any]`, `def f[T]`) names no class,
+  even when a class of that name exists. Wider than the language, and so name-only rather than resolved: a pattern
+  variable hides its field in its whole enclosing block (an `else` branch too), a Java local hides a field anywhere in
+  its method, and a Python rebinding anywhere in its function. Not read, the floor: a nested function or class
+  declaration that reuses a typed binding's name (JS/TS/Python), and Kotlin's implicit `it` beside a field named `it`. A JS/TS call on the class object reaches its `static` members only,
+  and a call on an instance never one. A Ruby call's candidates that Ruby's own method lookup proves (the entries below) are its
+  answer, never `via="name"`.
+- **A call nothing proves is NAME-ONLY.** Its candidates the language's own lookup proves are its answer (an
+  implicit receiver's class and bases, a free function in scope, the module a receiver alias names). With none
+  proven, every same-file and same-directory candidate is listed — a lone global one too, because one candidate is
+  not evidence — and each row carries `via="name"` (MCP: `"via":"name"`) on `--callees`, `--callers`, `--path`,
+  `--connect`'s `<e>`, the `<calls>` rows of `--expand` and `--for`, the default map's `<c>` rows (and its
+  `--json` and MCP `analyze` twins), and MCP `find_symbol`, `find_referencing_symbols`, `impact` and
+  `path_between`. An `--impact` row that no all-proven path reaches inherits
+  it. A legend sentence rides exactly when such a row does and says what it does not mean: not that the edge is
+  false. Rule 3's include-file narrow no longer decides a member call: the file a caller imports says nothing about
+  its receiver. Ranking keeps the old ladder's pick (the same-file, else same-directory rung): the extra candidates
+  are listed at edge weight zero, so a guess never moves PageRank.
+- **The map merges what it would repeat.** A map `<s>` printed one `<c>` row per same-named by-name candidate, N
+  byte-identical rows; it now prints such a `via="name"` group once with `x="N"`, and `--callees` on that symbol
+  lists every candidate with its file. The map's legend is a short spelling of the same reading (and defines `x=`);
+  the compact dialect states both in its element rows. The README's `--max-tokens=3000` map keeps 20 rows.
+- Cost, measured over 210 calls on eight public repositories (`--no-cache`): +2.04% bytes in total (C trees: no
+  change); the `--max-tokens=3000` maps of the eight repositories keep 337 rows (331 before the change). The gate is
+  `test/receiverevidencecheck.sh` (every surface, CLI/MCP parity, census conservation, and near misses
+  for every evidence rule). Ingest records the receiver chain and the Java/C#/Kotlin/Swift declarations
+  (`kParserVer` 154, `kCacheVersion` 29), so a cache written by an earlier build is re-parsed.
+
 ### Changed — a Ruby call to self, or on an instance the code builds, answers from its own side: an instance never reaches `def self.m`
 
 The entry below left one floor open, (i). A call to self, or on a receiver the code builds, read a class's defs from both

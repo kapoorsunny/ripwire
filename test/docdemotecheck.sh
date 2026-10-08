@@ -106,6 +106,13 @@ PY
 # <sigs docs_after_code="2"> and its reading. --no-route has no reorder (the rule is routed-path only). Checked
 # mechanically: removing e=, est_tokens=, the e= clause and the docs_after_code attribute/reading leaves the no-route
 # golden byte-identical and the routed one differing only in that row order. Gate: test/forsigspancheck.sh.
+# RE-PIN 2026-10-04 (lane FE-B, receiver evidence): docdemotegolden_for.xml 5821 -> 6010 B (est_tokens "2328" -> "2404").
+# CAUSE: pagecache.py's `evict_one( self )` names a function its file never imports — Python resolves it nowhere — so
+# FE-B binds it by NAME ALONE: the hop's <c n="evict_one"> row carries via="name", and --for's header defines it (one
+# present-only clause, graphlegend.h kForViaNameClause, on the hop ids the compact route serves). Verified before
+# re-pinning, against the pre-change golden: the root's est_tokens=, the header clause and the row's attribute are the whole
+# diff — no ranking, demotion or route byte moved, and arm (f)'s own assertions still hold. The noroute golden is
+# UNCHANGED: its <bodies> carry no <calls> row through a name-only edge, so the clause does not ride (present-only).
 # RE-PIN 2026-09-13 (merge of lane/sc-legend and lane/for-widen): docdemotegolden_for.xml RE-MEASURED on the
 # MERGED tree at 5,809 B (est_tokens "2328"), from 5,887 on for-widen's tree and 5,425 on sc-legend's. Neither
 # lane's own number is the merged one, so this is measured, not summed. Three identified changes, and the golden
