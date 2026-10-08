@@ -87,6 +87,11 @@
 #            a replace onto lib/ itself, a replaced legacy/ with and without its own go.mod, a nested module,
 #            example.com/a vs example.com/ab, a vendored copy (never the in-repo lib/), a dot import (never the decoy),
 #            and a path-less root lib/ beside a nested module that carries the path.
+#   (T) Java/C#/Kotlin/Swift (review B3): a typed parameter, a typed / constructed / Java `var` local, a typed or
+#            constructed field or property — read bare (implicit this) or through this/self — and a Kotlin `val`
+#            constructor property RESOLVE to the declared class's member (Pump.*: Tank and Barrel both define spill).
+#            Near misses stay hedged: an untyped local (a lower-case factory), a local that hides the field, an
+#            interface/protocol-typed receiver with two implementors (both still listed).
 #   (I) implicit receiver: Java, Kotlin, C#, C++, Swift, Ruby — a bare call inside a class whose base is OUTSIDE
 #            the tree (or that imports the name from outside) never proves an unrelated class's method. Near
 #            misses: own members (private too), an in-repo superclass's member (the cone, and Java super.m()),
@@ -487,6 +492,50 @@ exactproven gomod/pfx   callees app/near.go:Near "fn Mark lib/l.go"
 notproven   gomod/vend  callees app/app.go:Use "Mark lib/l.go"            # near miss: the vendored copy is the package
 notproven   gomod/dot   callees app/app.go:Use "Mark decoy/d.go"          # near miss: a dot import (lib/ unresolved: a floor)
 exactproven gomod/mixed callees m/app/app.go:Use "fn Mark m/lib/l.go"     # near miss: a path-less lib/ never takes a carried path
+
+echo "=== (T) Java/C#/Kotlin/Swift: declared receivers RESOLVE (review B3) ==="
+exactproven java  callees src/main/java/app/Pump.java:param "method spill src/main/java/app/Pump.java"
+exactproven java  callees src/main/java/app/Pump.java:typedLocal "method spill src/main/java/app/Pump.java;method makeTank src/main/java/app/Pump.java"
+exactproven java  callees src/main/java/app/Pump.java:ctorLocal "cls Tank src/main/java/app/Pump.java;method spill src/main/java/app/Pump.java"
+exactproven java  callees src/main/java/app/Pump.java:varLocal "cls Tank src/main/java/app/Pump.java;method spill src/main/java/app/Pump.java"
+exactproven java  callees src/main/java/app/Pump.java:implicitField "method spill src/main/java/app/Pump.java"
+exactproven java  callees src/main/java/app/Pump.java:thisField "method spill src/main/java/app/Pump.java"
+proven      java  callees src/main/java/app/Pump.java:param "method spill src/main/java/app/Pump.java:7"
+notproven   java  callees src/main/java/app/Pump.java:untyped "spill src/main/java/app/Pump.java:7" "spill src/main/java/app/Pump.java:8"       # near miss: an untyped local
+notproven   java  callees src/main/java/app/Pump.java:shadow "spill src/main/java/app/Pump.java:7" "spill src/main/java/app/Pump.java:8"        # near miss: a local hides the field
+notproven   java  callees src/main/java/app/Pump.java:viaIface "spill src/main/java/app/Pump.java:7" "spill src/main/java/app/Pump.java:8"      # near miss: an interface, two implementors
+visible     java  callees src/main/java/app/Pump.java:viaIface "spill src/main/java/app/Pump.java:7" "spill src/main/java/app/Pump.java:8"
+exactproven cs    callees App/Pump.cs:Param "method Spill App/Pump.cs"
+exactproven cs    callees App/Pump.cs:TypedLocal "method Spill App/Pump.cs;method MakeTank App/Pump.cs"
+exactproven cs    callees App/Pump.cs:CtorLocal "method Spill App/Pump.cs;cls Tank App/Pump.cs"
+exactproven cs    callees App/Pump.cs:ImplicitField "method Spill App/Pump.cs"
+exactproven cs    callees App/Pump.cs:ThisField "method Spill App/Pump.cs"
+proven      cs    callees App/Pump.cs:ViaProperty "method Spill App/Pump.cs:8"
+notproven   cs    callees App/Pump.cs:Untyped "Spill App/Pump.cs:7" "Spill App/Pump.cs:8"
+notproven   cs    callees App/Pump.cs:Shadow "Spill App/Pump.cs:7" "Spill App/Pump.cs:8"
+notproven   cs    callees App/Pump.cs:ViaIface "Spill App/Pump.cs:7" "Spill App/Pump.cs:8"
+visible     cs    callees App/Pump.cs:ViaIface "Spill App/Pump.cs:7" "Spill App/Pump.cs:8"
+exactproven kt    callees src/app/Pump.kt:param "fn spill src/app/Pump.kt"
+exactproven kt    callees src/app/Pump.kt:typedLocal "fn spill src/app/Pump.kt;fn makeTank src/app/Pump.kt"
+exactproven kt    callees src/app/Pump.kt:ctorLocal "cls Tank src/app/Pump.kt;fn spill src/app/Pump.kt"
+exactproven kt    callees src/app/Pump.kt:implicitField "fn spill src/app/Pump.kt"
+exactproven kt    callees src/app/Pump.kt:thisField "fn spill src/app/Pump.kt"
+proven      kt    callees src/app/Pump.kt:ctorProperty "fn spill src/app/Pump.kt:8"
+proven      kt    callees src/app/Pump.kt:constructedProperty "fn spill src/app/Pump.kt:7"
+notproven   kt    callees src/app/Pump.kt:untyped "spill src/app/Pump.kt:7" "spill src/app/Pump.kt:8"
+notproven   kt    callees src/app/Pump.kt:shadow "spill src/app/Pump.kt:7" "spill src/app/Pump.kt:8"
+notproven   kt    callees src/app/Pump.kt:viaIface "spill src/app/Pump.kt:7" "spill src/app/Pump.kt:8"
+visible     kt    callees src/app/Pump.kt:viaIface "spill src/app/Pump.kt:7" "spill src/app/Pump.kt:8"
+exactproven swift callees Sources/App/Pump.swift:param "fn spill Sources/App/Pump.swift"
+exactproven swift callees Sources/App/Pump.swift:typedLocal "fn spill Sources/App/Pump.swift;fn makeTank Sources/App/Pump.swift"
+exactproven swift callees Sources/App/Pump.swift:ctorLocal "cls Tank Sources/App/Pump.swift;fn spill Sources/App/Pump.swift"
+exactproven swift callees Sources/App/Pump.swift:implicitField "fn spill Sources/App/Pump.swift"
+exactproven swift callees Sources/App/Pump.swift:selfField "fn spill Sources/App/Pump.swift"
+proven      swift callees Sources/App/Pump.swift:constructedProperty "fn spill Sources/App/Pump.swift:6"
+notproven   swift callees Sources/App/Pump.swift:untyped "spill Sources/App/Pump.swift:5" "spill Sources/App/Pump.swift:6"
+notproven   swift callees Sources/App/Pump.swift:shadow "spill Sources/App/Pump.swift:5" "spill Sources/App/Pump.swift:6"
+notproven   swift callees Sources/App/Pump.swift:viaIface "spill Sources/App/Pump.swift:5" "spill Sources/App/Pump.swift:6"
+visible     swift callees Sources/App/Pump.swift:viaIface "spill Sources/App/Pump.swift:5" "spill Sources/App/Pump.swift:6"
 
 echo "=== (I) implicit receiver: a bare call never proves an unrelated class's method ==="
 notproven java callees src/main/java/app/Logger.java:line "render src/main/java/app/Exporter.java"

@@ -1602,11 +1602,12 @@ void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_vi
         {
             arms.rust = &rustCtx;
         }
-        // FE-B: JavaScript and Go join for the receiver-evidence records alone (captureReceiverEvidence); every other
-        // branch of the pass gates its own language, so their record streams gain exactly those kinds.
+        // FE-B: JavaScript and Go (and, review B3, C#, Kotlin and Swift) join for the receiver-evidence records alone
+        // (captureReceiverEvidence); every other branch of the pass gates its own language, so their record streams gain
+        // exactly those kinds.
         if( le.lang == Lang::Cpp || le.lang == Lang::ObjC || le.lang == Lang::Python || le.lang == Lang::TypeScript
             || le.lang == Lang::Java || le.lang == Lang::JavaScript || le.lang == Lang::Go
-            || le.lang == Lang::C )
+            || le.lang == Lang::C || le.lang == Lang::CSharp || le.lang == Lang::Kotlin || le.lang == Lang::Swift )
         {
             arms.bind = &bindCtx;
         }

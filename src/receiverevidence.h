@@ -83,6 +83,12 @@ inline bool implicitReceiverLang( Lang l ) noexcept
     return l == Lang::Java || l == Lang::Kotlin || l == Lang::CSharp || l == Lang::Swift || l == Lang::Cpp || l == Lang::Ruby;
 }
 
+// FE-B (review B3): the languages where a bare name inside a method may be a field of the enclosing class (implicit this)
+inline bool implicitFieldLang( Lang l ) noexcept
+{
+    return l == Lang::Java || l == Lang::CSharp || l == Lang::Kotlin || l == Lang::Swift;
+}
+
 // the languages where a call written on a receiver reaches a function only as a METHOD (or through a module alias): a
 // free function is never what `x.f()` calls. JS/TS (an object property may hold one), Kotlin (an extension function is a
 // top-level `fun T.f()`) and C (a function-pointer field) are left out.
@@ -436,6 +442,26 @@ struct ReceiverEvidence
             return localNames->contains( keyOf( s, '#', name ) ) || localType.contains( keyOf( s, '#', name ) );
         } ) != kNoNode;
     }
+    // does `from` or a function enclosing it DECLARE `name` (a parameter or a local, typed or not) — not merely bind it: Java
+    // copies each field name onto its class's methods as a bound-only name (graph.h shadowJavaFieldsOntoMethods), which must
+    // not hide the field itself
+    bool declaresLocal( NodeId from, std::string_view name ) const
+    {
+        return walkScopes( from, [ & ]( NodeId s )
+        {
+            const std::string& k = keyOf( s, '#', name );
+            if( localType.contains( k ) )
+            {
+                return true;
+            }
+            if( localNames == nullptr )
+            {
+                return false;
+            }
+            const auto it = localNames->find( k );
+            return it != localNames->end() && ( it->second & kLocalNameDeclared ) != 0;
+        } ) != kNoNode;
+    }
     // a receiver root that names a CLASS at this site: a class-name receiver language, a class of that name, and no local
     // of the caller hiding it (`Interval = make(); Interval.validate( v )`)
     bool namesClass( const Reference& r, std::string_view root, std::string_view cls ) const
@@ -615,6 +641,16 @@ struct ReceiverEvidence
         if( const std::string* t = typedLocal( r.fromSymbol, root ) )
         {
             return unalias( r.fileId, *t );
+        }
+        if( implicitFieldLang( r.lang ) && !declaresLocal( r.fromSymbol, root ) )
+        {
+            // Java/C#/Kotlin/Swift: a bare `field.m()` inside a method is `this.field.m()` — the field the caller's class (or a
+            // base) declares, when no parameter or local of that name hides it
+            const std::string_view owner = callerClass( r.fromSymbol );
+            if( const std::string_view ft = owner.empty() ? std::string_view{} : fieldOf( owner, root ); !ft.empty() )
+            {
+                return unalias( r.fileId, ft );
+            }
         }
         const std::string_view cls = unalias( r.fileId, root );
         if( namesClass( r, root, cls ) )

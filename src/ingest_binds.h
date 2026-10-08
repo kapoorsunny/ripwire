@@ -4126,13 +4126,34 @@ inline std::string_view annotatedClass( TSNode node, std::string_view src )
         {
             node = fieldChild( node, NodeField::Name );
         }
-        else if( kindIs( t, "generic_type" ) )                                         // TS `T<U>` / Go `T[U]`: the class, not the argument
+        else if( kindIs( t, "generic_type" ) || kindIs( t, "generic_name" ) )          // TS `T<U>` / Go `T[U]` / Java / C# `T<U>`: the class
         {
             node = ts_node_named_child_count( node ) > 0 ? ts_node_named_child( node, 0 ) : TSNode{};
         }
+        else if( kindIs( t, "nullable_type" ) || kindIs( t, "optional_type" ) )       // C# / Kotlin `T?`, Swift `T?`: the class
+        {
+            node = ts_node_named_child_count( node ) > 0 ? ts_node_named_child( node, 0 ) : TSNode{};
+        }
+        else if( kindIs( t, "user_type" ) || kindIs( t, "scoped_type_identifier" ) )   // Kotlin / Swift `a.B<C>`, Java `a.B`: the last
+        {                                                                              // name segment, never a type argument
+            TSNode last{};
+            for( std::uint32_t i = 0, k = ts_node_named_child_count( node ); i < k; ++i )
+            {
+                const TSNode c = ts_node_named_child( node, i );
+                if( kindIs( ts_node_type( c ), "type_identifier" ) )
+                {
+                    last = c;
+                }
+            }
+            node = last;
+        }
+        else if( kindIs( t, "qualified_name" ) )                                       // C# `a.B`
+        {
+            node = fieldChild( node, NodeField::Name );
+        }
         else
         {
-            return {};
+            return {};   // an array, a function type, C#'s implicit `var`, a predefined/primitive type: no single class
         }
     }
     return {};
@@ -4176,10 +4197,196 @@ inline std::string_view constructedBy( TSNode value, Lang lang, std::string_view
         const TSNode fn = fieldChild( value, NodeField::Function );
         return ( !ts_node_is_null( fn ) && kindIs( ts_node_type( fn ), "identifier" ) ) ? nodeTextOf( fn, src ) : std::string_view{};
     }
+    if( lang == Lang::Kotlin || lang == Lang::Swift )
+    {
+        // `Store( … )` is spelled like a function call: a capitalized callee is read as the class it constructs (the house
+        // convention of both languages). A lower-case factory (`make()`) names no class, and a capitalized name that is no
+        // class in the tree proves nothing downstream (ReceiverEvidence finds no `Name::member`).
+        if( !kindIs( ts_node_type( value ), "call_expression" ) || ts_node_named_child_count( value ) == 0 )
+        {
+            return {};
+        }
+        const TSNode callee = ts_node_named_child( value, 0 );
+        const std::string_view name = kindIs( ts_node_type( callee ), "simple_identifier" ) ? nodeTextOf( callee, src ) : std::string_view{};
+        return ( !name.empty() && name.front() >= 'A' && name.front() <= 'Z' ) ? name : std::string_view{};
+    }
     return constructedClass( value, lang, src );
 }
 
-// FE-B: one node's receiver evidence. Python, JS/TS and Go only — the languages whose member calls carry no type rule today.
+// FE-B: Java's `var` is inference, not a class: the written type, unless it is `var`, else what the initializer constructs
+inline std::string_view declaredOrConstructed( TSNode type, TSNode value, Lang lang, std::string_view src )
+{
+    std::string_view cls = annotatedClass( type, src );
+    if( cls == "var" && lang == Lang::Java )
+    {
+        cls = {};
+    }
+    return cls.empty() ? constructedBy( value, lang, src ) : cls;
+}
+
+// FE-B (review B3): one declarator's evidence — `name` declared with the class its written `type` names, else the class its
+// initializer `value` constructs. A parameter or local whose class is unknown (`var s = make()`) is still a DECLARATION:
+// recorded with no class (a tombstone), so it hides a same-named field (receiverevidence.h declaresLocal) and proves nothing.
+inline void pushDeclaratorEvidence( BindCtx& cx, LocalBindKind kind, TSNode type, TSNode name, TSNode value, std::uint32_t at )
+{
+    if( ts_node_is_null( name ) || !( kindIs( ts_node_type( name ), "identifier" ) || kindIs( ts_node_type( name ), "simple_identifier" ) ) )
+    {
+        return;
+    }
+    const std::string_view cls = declaredOrConstructed( type, value, cx.lang, cx.src );
+    if( !cls.empty() || kind != LocalBindKind::RecvType )
+    {
+        pushEvidenceBind( cx, kind, nodeTextOf( name, cx.src ), cls, {}, at, false );
+        return;
+    }
+    RawBind b;
+    b.fileId    = cx.fileId;
+    b.startByte = at;
+    b.lang      = cx.lang;
+    b.kind      = LocalBindKind::RecvType;
+    b.var.assign( nodeTextOf( name, cx.src ) );
+    cx.binds->push_back( std::move( b ) );
+}
+
+// the first (or, with `last`, the last) named child of `node` whose kind is one of `kinds`; null when none — Kotlin's grammar
+// carries no field names and Swift's reuses `name` for the parameter, its label and its type
+inline TSNode namedChildOfKind( TSNode node, std::initializer_list<std::string_view> kinds, bool last = false )
+{
+    TSNode hit{};
+    for( std::uint32_t i = 0, k = ts_node_named_child_count( node ); i < k; ++i )
+    {
+        const TSNode c = ts_node_named_child( node, i );
+        if( std::find( kinds.begin(), kinds.end(), std::string_view( ts_node_type( c ) ) ) != kinds.end() )
+        {
+            hit = c;
+            if( !last )
+            {
+                break;
+            }
+        }
+    }
+    return hit;
+}
+
+// FE-B (review B3): Java — a typed parameter, and each declarator of a local or field declaration
+inline void captureJavaDeclEvidence( BindCtx& cx, TSNode n, const char* t, std::uint32_t at )
+{
+    if( kindIs( t, "formal_parameter" ) )
+    {
+        pushDeclaratorEvidence( cx, LocalBindKind::RecvType, fieldChild( n, NodeField::Type ), fieldChild( n, NodeField::Name ), TSNode{}, at );
+        return;
+    }
+    if( !kindIs( t, "local_variable_declaration" ) && !kindIs( t, "field_declaration" ) )
+    {
+        return;
+    }
+    const LocalBindKind kind = kindIs( t, "field_declaration" ) ? LocalBindKind::MemberType : LocalBindKind::RecvType;
+    const TSNode        type = fieldChild( n, NodeField::Type );
+    for( std::uint32_t i = 0, k = ts_node_named_child_count( n ); i < k; ++i )
+    {
+        const TSNode d = ts_node_named_child( n, i );
+        if( kindIs( ts_node_type( d ), "variable_declarator" ) )
+        {
+            pushDeclaratorEvidence( cx, kind, type, fieldChild( d, NodeField::Name ), fieldChild( d, NodeField::Value ), at );
+        }
+    }
+}
+
+// FE-B (review B3): C# — a typed parameter, each declarator of a local or field declaration, and a property
+inline void captureCSharpDeclEvidence( BindCtx& cx, TSNode n, const char* t, std::uint32_t at )
+{
+    if( kindIs( t, "parameter" ) )
+    {
+        pushDeclaratorEvidence( cx, LocalBindKind::RecvType, fieldChild( n, NodeField::Type ), fieldChild( n, NodeField::Name ), TSNode{}, at );
+        return;
+    }
+    if( kindIs( t, "property_declaration" ) )
+    {
+        pushDeclaratorEvidence( cx, LocalBindKind::MemberType, fieldChild( n, NodeField::Type ), fieldChild( n, NodeField::Name ), fieldChild( n, NodeField::Value ), at );
+        return;
+    }
+    if( !kindIs( t, "variable_declaration" ) )
+    {
+        return;
+    }
+    // a field's declaration sits in a field_declaration, a local's in a local_declaration_statement (or a using/for)
+    const TSNode        up   = ts_node_parent( n );
+    const LocalBindKind kind = ( !ts_node_is_null( up ) && kindIs( ts_node_type( up ), "field_declaration" ) ) ? LocalBindKind::MemberType : LocalBindKind::RecvType;
+    const TSNode        type = fieldChild( n, NodeField::Type );
+    for( std::uint32_t i = 0, k = ts_node_named_child_count( n ); i < k; ++i )
+    {
+        const TSNode d = ts_node_named_child( n, i );
+        if( kindIs( ts_node_type( d ), "variable_declarator" ) )
+        {
+            // the initializer is the declarator's last named child, when it has one besides the name (no field names it)
+            const TSNode name  = fieldChild( d, NodeField::Name );
+            const TSNode value = ts_node_named_child_count( d ) > 1 ? ts_node_named_child( d, ts_node_named_child_count( d ) - 1 ) : TSNode{};
+            pushDeclaratorEvidence( cx, kind, type, name, ts_node_eq( value, name ) ? TSNode{} : value, at );
+        }
+    }
+}
+
+// FE-B (review B3): Kotlin and Swift — a typed parameter (Kotlin `val` constructor parameters are properties), and a local
+// or property declaration (a property in a class body, a local elsewhere)
+inline void captureKotlinSwiftDeclEvidence( BindCtx& cx, TSNode n, const char* t, std::uint32_t at )
+{
+    if( kindIs( t, "parameter" ) || ( cx.lang == Lang::Kotlin && kindIs( t, "class_parameter" ) ) )
+    {
+        const bool property = kindIs( t, "class_parameter" );
+        if( property && ts_node_is_null( namedChildOfKind( n, { "binding_pattern_kind" } ) ) )
+        {
+            return;   // a plain constructor parameter, not a property
+        }
+        // Swift `label p: T`: the LAST identifier is the parameter's own name
+        pushDeclaratorEvidence( cx, property ? LocalBindKind::MemberType : LocalBindKind::RecvType,
+                                namedChildOfKind( n, { "user_type", "nullable_type", "optional_type" }, true ),
+                                namedChildOfKind( n, { "simple_identifier" }, true ), TSNode{}, at );
+        return;
+    }
+    if( !kindIs( t, "property_declaration" ) )
+    {
+        return;
+    }
+    const TSNode        up   = ts_node_parent( n );
+    const LocalBindKind kind = ( !ts_node_is_null( up ) && ( kindIs( ts_node_type( up ), "class_body" ) || kindIs( ts_node_type( up ), "enum_class_body" ) ) )
+                             ? LocalBindKind::MemberType : LocalBindKind::RecvType;
+    if( cx.lang == Lang::Kotlin )
+    {
+        const TSNode var = namedChildOfKind( n, { "variable_declaration" } );   // null for `val ( a, b ) = …`: not this rule's question
+        if( !ts_node_is_null( var ) )
+        {
+            pushDeclaratorEvidence( cx, kind, namedChildOfKind( var, { "user_type", "nullable_type" } ), namedChildOfKind( var, { "simple_identifier" } ),
+                                    namedChildOfKind( n, { "call_expression" } ), at );
+        }
+        return;
+    }
+    const TSNode pattern = fieldChild( n, NodeField::Name );
+    const TSNode ann     = namedChildOfKind( n, { "type_annotation" } );
+    pushDeclaratorEvidence( cx, kind, ts_node_is_null( ann ) ? TSNode{} : namedChildOfKind( ann, { "user_type", "optional_type" } ),
+                            ts_node_is_null( pattern ) ? TSNode{} : namedChildOfKind( pattern, { "simple_identifier" } ), fieldChild( n, NodeField::Value ), at );
+}
+
+// FE-B (review B3): a declaration's evidence in Java, C#, Kotlin and Swift — a typed parameter, a typed or constructed
+// local (RecvType), a typed or constructed field / property (MemberType). The base resolver bound these receivers by name
+// alone; FE-B proves a member call only through evidence, so the declarations are read here.
+inline void captureTypedDeclEvidence( BindCtx& cx, TSNode n, const char* t )
+{
+    const std::uint32_t at = ts_node_start_byte( n );
+    if( cx.lang == Lang::Java )
+    {
+        captureJavaDeclEvidence( cx, n, t, at );
+    }
+    else if( cx.lang == Lang::CSharp )
+    {
+        captureCSharpDeclEvidence( cx, n, t, at );
+    }
+    else
+    {
+        captureKotlinSwiftDeclEvidence( cx, n, t, at );
+    }
+}
+
+// FE-B: one node's receiver evidence: Python, JS/TS and Go, and (review B3) Java, C#, Kotlin and Swift declarations.
 inline void captureReceiverEvidence( BindCtx& cx, TSNode n, const char* t )
 {
     const Lang             lang = cx.lang;
@@ -4322,6 +4529,11 @@ inline void captureReceiverEvidence( BindCtx& cx, TSNode n, const char* t )
                 }
             }
         }
+        return;
+    }
+    if( lang == Lang::Java || lang == Lang::CSharp || lang == Lang::Kotlin || lang == Lang::Swift )
+    {
+        captureTypedDeclEvidence( cx, n, t );
         return;
     }
     if( lang != Lang::Go )
@@ -4549,7 +4761,7 @@ void bindsVisitNode( BindCtx& cx, TSNode n, const char* t )
     // DEFINITION's named parameters and a range-for's loop variable. Unconditional (the helper gates
     // language and node type itself); disjoint from every branch of the Rule-2 chain above.
     captureShadowScopeDecls( n, t, fileId, lang, src, binds );
-    captureReceiverEvidence( cx, n, t );   // FE-B: typed parameters/locals, field types, method aliases (Python, JS/TS, Go)
+    captureReceiverEvidence( cx, n, t );   // FE-B: typed parameters/locals, field types, method aliases (Python, JS/TS, Go, Java, C#, Kotlin, Swift)
 
     // ── L3 fn-pointer/callback capture (C/C++/ObjC) — a SEPARATE if (not part of the Rule-2 chain above):
     // the same `declaration` node can carry BOTH a Rule-2 var→type fact and a var→function fact

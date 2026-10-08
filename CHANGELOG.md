@@ -25,10 +25,14 @@ in a Java class with an outside base drawn to an unrelated class's `flush`.
 
 - **Receivers the source types now resolve** (JavaScript, TypeScript, Python, Go, Java, Kotlin, C#, Swift): `this` /
   `self` / `cls` inside a class and `super` / `base` through its bases; a parameter or local whose class is written
-  (a TS/Python/Go annotation, a Go method receiver, a JS `new Foo()`, Python `Foo()` or Go `Foo{}` initializer, an
-  import alias of the class); a constructed receiver (`new Foo().m()`); a class-name receiver; a chain of fields
-  whose classes are stated (`this.bucket = new Schemas()`, Python `self.x = Foo()`, Go struct and embedded fields);
-  Python `feed = parser.feed`. A JS/TS call on the class object reaches its `static` members only, and a call on an
+  (a TS/Python/Go/Java/C#/Kotlin/Swift annotation or declared type, a Go method receiver, a JS `new Foo()`, Java/C#
+  `new Foo()` (`var` included), Python `Foo()`, Kotlin/Swift `Foo()` or Go `Foo{}` initializer, an import alias of the
+  class); a constructed receiver (`new Foo().m()`); a class-name receiver; a chain of fields whose classes are stated
+  (`this.bucket = new Schemas()`, Python `self.x = Foo()`, Go struct and embedded fields, Java/C# fields and
+  properties, Kotlin/Swift properties and Kotlin `val` constructor properties, read through `this`/`self` or bare);
+  Python `feed = parser.feed`. A Go module alias proves its package by the exact import path: the nearest `go.mod`'s
+  module path plus the directory below it, or the path a local `replace` gives a directory. An untyped local, a local
+  that hides a field, and an interface-typed receiver with several implementors stay name-only. A JS/TS call on the class object reaches its `static` members only, and a call on an
   instance never one. A Ruby call's candidates that Ruby's own method lookup proves (the entries below) are its
   answer, never `via="name"`.
 - **A call nothing proves is NAME-ONLY.** Its candidates the language's own lookup proves are its answer (an
@@ -42,11 +46,15 @@ in a Java class with an outside base drawn to an unrelated class's `flush`.
   false. Rule 3's include-file narrow no longer decides a member call: the file a caller imports says nothing about
   its receiver. Ranking keeps the old ladder's pick (the same-file, else same-directory rung): the extra candidates
   are listed at edge weight zero, so a guess never moves PageRank.
-- Cost, measured over 210 calls on eight public repositories (`--no-cache`): +8.55% bytes in total; 32% of the
-  `<s>`/`<c>`/`<e>` rows carry `via="name"`, most of them the map's `<c>` rows (C trees: no change). The gate is
+- **The map merges what it would repeat.** A map `<s>` printed one `<c>` row per same-named by-name candidate, N
+  byte-identical rows; it now prints such a `via="name"` group once with `x="N"`, and `--callees` on that symbol
+  lists every candidate with its file. The map's legend is a short spelling of the same reading (and defines `x=`);
+  the compact dialect states both in its element rows. The README's `--max-tokens=3000` map keeps 20 rows.
+- Cost, measured over 210 calls on eight public repositories (`--no-cache`): +2.04% bytes in total (C trees: no
+  change); the `--max-tokens=3000` maps of the eight repositories keep 337 rows (331 before the change). The gate is
   `test/receiverevidencecheck.sh` (every surface, CLI/MCP parity, census conservation, and near misses
-  for every evidence rule). Ingest records the receiver chain (`kParserVer` 150, `kCacheVersion` 29), so a cache
-  written by an earlier build is re-parsed.
+  for every evidence rule). Ingest records the receiver chain and the Java/C#/Kotlin/Swift declarations
+  (`kParserVer` 152, `kCacheVersion` 29), so a cache written by an earlier build is re-parsed.
 
 ### Changed — a Ruby call to self, or on an instance the code builds, answers from its own side: an instance never reaches `def self.m`
 
