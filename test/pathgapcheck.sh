@@ -20,12 +20,17 @@
 #   (P4) unresolved: a call whose only same-named definition is in another language — gaps=unresolved.
 #   (P5) runaway guard: 6 gap symbols — 3 rows, gap_syms="6", gap_syms_capped="1", nearest first.
 #   (P6) next= is pasteable: running it serves the gap row's body.
+#   (P7) name: run(obj) calls obj.process(), bound by name alone (via="name") to the same-directory A.process only; the
+#        tree's other/B.process (same language, same kind, calls the target) is never searched — gaps=name, row run.
 #   (N1) a fully resolved graph with truly no path keeps "no directed call path" and no gap attribute.
 #   (N2) a gap OUTSIDE the search cone (a declined call reachable only from elsewhere) does not count.
 #   (N3) ambiguous-only cone (a k-way split the search followed) with no path keeps "no directed call path".
 #   (N4) a found path (reachable="1") through a cone with gaps carries no gap clause.
 #   (N5) a function passed as a value that the search ALSO reaches by a call is not a gap.
-#   (M)  MCP path_between carries the same searched/gaps/gap_syms/rows/next as the CLI, and the same no-gap hint shape.
+#   (N6) a via="name" call whose namesakes are a DIFFERENT language (Ruby) or a different KIND (a Python variable) is not a gap.
+#   (N3) above doubles as the name-gap near miss: run's obj.process() is via="name" too, but it has an edge to EVERY
+#        same-language definition of process, so nothing was left unsearched.
+#   (M)  MCP path_between carries the same searched/gaps/gap_syms/rows/next as the CLI (P1-P3, P7), and the same no-gap hint shape.
 #
 # Usage: test/pathgapcheck.sh [BIN]   (BIN defaults to RIPWIRE_BIN, then build/ripwire)
 set -u
@@ -43,7 +48,7 @@ command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 2; }
 # ── fixtures ────────────────────────────────────────────────────────────────────────────────────────────────────────
 mkdir -p "$TMP/decl/core" "$TMP/decl/linux" "$TMP/decl/darwin" "$TMP/val" "$TMP/thr" "$TMP/unr" "$TMP/clean" \
          "$TMP/out/core" "$TMP/out/linux" "$TMP/out/darwin" "$TMP/amb" "$TMP/many/core" "$TMP/many/linux" "$TMP/many/darwin" \
-         "$TMP/found" "$TMP/valin"
+         "$TMP/found" "$TMP/valin" "$TMP/lpy/pkg/x" "$TMP/lpy/other" "$TMP/lpyx/pkg/x" "$TMP/lpyx/other"
 cat > "$TMP/decl/core/machine.c" <<'EOF'
 void Machine_scan( void );
 void Machine_run( void ) { Machine_scan(); }
@@ -166,6 +171,41 @@ function handleRequest(ctx) { handleResponse(ctx); return runMiddleware(ctx).the
 module.exports = { handleRequest, other };
 EOF
 
+# P7 / N6: a call bound by name alone (FE-B via="name"). In lpy the namesake other/B.process is Python, a method, and
+# calls the target; in lpyx the only other process definitions are a Ruby method and a Python variable.
+cat > "$TMP/lpy/pkg/x/a.py" <<'EOF'
+class A:
+    def process(self):
+        return 1
+EOF
+cat > "$TMP/lpy/pkg/x/c.py" <<'EOF'
+def run(obj):
+    return obj.process()
+EOF
+cat > "$TMP/lpy/other/b.py" <<'EOF'
+def target():
+    return 2
+
+class B:
+    def process(self):
+        return target()
+EOF
+cp "$TMP/lpy/pkg/x/a.py" "$TMP/lpy/pkg/x/c.py" "$TMP/lpyx/pkg/x/"
+cat > "$TMP/lpyx/other/b.rb" <<'EOF'
+def target
+  2
+end
+
+class B
+  def process
+    target
+  end
+end
+EOF
+cat > "$TMP/lpyx/other/v.py" <<'EOF'
+process = 3
+EOF
+
 # One --path answer, run unpiped so rc is ripwire's; the <path ...> head and the rest are read off the saved file.
 path(){   # $1 dir, $2 FROM,TO, $3 out file
     "$BIN" "$1" --no-cache --path="$2" > "$3" 2>&1
@@ -216,6 +256,15 @@ gapArm "(P2) value"    "$TMP/val"  "listen,respond"             "value:1"    "ha
 gapArm "(P3) through"  "$TMP/thr"  "start,target"               "through:1"  "apply"
 gapArm "(P4) unresolved" "$TMP/unr" "begin,finish"              "unresolved:1" "begin"
 
+# P7's premise: the call really is bound by name alone to A.process only (else the arm would test the old resolver)
+f="$TMP/lpycallees.xml"; "$BIN" "$TMP/lpy" --no-cache --callees=run > "$f" 2>&1
+if [ "$( grep -o '<s [^>]*n="process"[^>]*/>' "$f" | wc -l | tr -d ' ' )" = "1" ] && grep -q '<s [^>]*n="process" p="pkg/x/a.py:2" via="name"' "$f"; then
+    ok "(P7) premise: run's obj.process() is via=\"name\" to pkg/x/a.py's A.process only"
+    gapArm "(P7) name" "$TMP/lpy" "run,target" "name:1" "run"
+else
+    no "(P7) premise: run's callees are not the one via=name A.process row: $( grep -o '<callees .*' "$f" | head -c 500 )"
+fi
+
 echo "(P5) runaway guard: rows capped at 3, nearest first, the cut disclosed"
 f="$TMP/many.xml"; path "$TMP/many" "root,end_" "$f"; rc=$?
 if premise "(P5)" "$rc" "$f"; then
@@ -262,6 +311,12 @@ if premise "(N4)" "$rc" "$f"; then
     fi
 fi
 cleanArm "(N5) a value the search also calls" "$TMP/valin" "handleRequest,other"
+f="$TMP/lpyxcallees.xml"; "$BIN" "$TMP/lpyx" --no-cache --callees=run > "$f" 2>&1
+if grep -q '<s [^>]*n="process" p="pkg/x/a.py:2" via="name"' "$f"; then
+    cleanArm "(N6) via=name, namesakes of another language/kind" "$TMP/lpyx" "run,target"
+else
+    no "(N6) premise: run's obj.process() is not via=name to A.process here: $( grep -o '<callees .*' "$f" | head -c 500 )"
+fi
 
 echo "(M) MCP path_between carries the same clause"
 # Two MCP legend postures (lean-answers): the unchanged assertions run on --mcp-legend=inline, the pre-posture spelling
@@ -272,7 +327,7 @@ python3 - "$BIN" "$TMP" "$MPOST" <<'PY'
 import json, re, subprocess, sys
 binp, tmp, posture = sys.argv[1], sys.argv[2], sys.argv[3]
 cases = [ ( "decl", "Machine_run", "Process_update", True ), ( "val", "listen", "respond", True ),
-          ( "thr", "start", "target", True ), ( "clean", "a", "d", False ) ]
+          ( "thr", "start", "target", True ), ( "lpy", "run", "target", True ), ( "clean", "a", "d", False ) ]
 reqs = [ { "jsonrpc": "2.0", "id": 0, "method": "initialize", "params": { "protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": { "name": "g", "version": "1" } } } ]
 for i, ( d, a, b, _ ) in enumerate( cases ):
     reqs.append( { "jsonrpc": "2.0", "id": i + 1, "method": "tools/call", "params": { "name": "path_between", "arguments": { "path": tmp + "/" + d, "from": a, "to": b } } } )
@@ -321,7 +376,7 @@ sys.exit( bad )
 PY
 mrc=$?
 if [ "$mrc" -eq 0 ]; then
-    ok "(M) path_between ($MPOST legend posture): same searched/gaps/gap_syms/rows/next as the CLI on P1-P3, plain hint on N1"
+    ok "(M) path_between ($MPOST legend posture): same searched/gaps/gap_syms/rows/next as the CLI on P1-P3 and P7, plain hint on N1"
 else
     no "(M) MCP path_between ($MPOST legend posture) disagrees with the CLI or the helper crashed (rc=$mrc, details above)"
 fi
