@@ -170,15 +170,19 @@ GS="$( "$BIN" "$GF" --lint --sarif --no-cache 2>/dev/null )"
 printf '%s' "$GS" | python3 -c '
 import json, sys
 d = json.load( sys.stdin ); p = d["runs"][0]["properties"]
-sys.exit( 0 if p.get( "findingsCapped" ) is True and p.get( "findingsNext" ) == "--lint --lint-select=goto --lint-max-per-rule=50000" else 1 )' 2>/dev/null \
-    && ok "SARIF: run properties carry findingsCapped=true and the same findingsNext" \
-    || no "SARIF: run properties lack findingsNext: $( printf '%s' "$GS" | grep -oE '"properties":\{"findingsCapped"[^}]*' | head -1 )"
-"$BIN" "$GF" --lint --sarif --lint-max-per-rule=50000 --no-cache 2>/dev/null | python3 -c '
+sys.exit( 0 if p.get( "findingsCapped" ) is True and p.get( "findingsNext" ) == "--lint --lint-select=goto --lint-max-per-rule=50000 --sarif" else 1 )' 2>/dev/null \
+    && ok "SARIF: run properties carry findingsCapped=true and the same findingsNext, --sarif kept" \
+    || no "SARIF: run properties lack findingsNext (with --sarif): $( printf '%s' "$GS" | grep -oE '"properties":\{"findingsCapped"[^}]*' | head -1 )"
+# …and PASTING it (shlex-split, as a CI step would) re-runs in the dialect it was read from (rv-knob-honesty-068 N4): the
+# answer parses as SARIF (a native-XML answer would not), the floor is lifted and no findingsNext rides. RED on dd6e4c8e.
+GSN="$( printf '%s' "$GS" | python3 -c 'import json,sys; print(json.load(sys.stdin)["runs"][0]["properties"].get("findingsNext",""))' 2>/dev/null )"
+python3 -c 'import shlex,sys; print( "\0".join( shlex.split( sys.argv[1] ) ), end = "" )' "$GSN" > "$TMP/gsn.argv"
+( [ -n "$GSN" ] && xargs -0 "$BIN" "$GF" --no-cache < "$TMP/gsn.argv" 2>/dev/null ) | python3 -c '
 import json, sys
 p = json.load( sys.stdin )["runs"][0]["properties"]
 sys.exit( 0 if p.get( "findingsCapped" ) is False and "findingsNext" not in p else 1 )' 2>/dev/null \
-    && ok "SARIF: under the raised budget, findingsCapped=false and no findingsNext" \
-    || no "SARIF: the raised-budget run still floors or still carries findingsNext"
+    && ok "SARIF: pasting findingsNext answers in SARIF, findingsCapped=false and no findingsNext" \
+    || no "SARIF: pasting findingsNext ('$GSN') did not answer as SARIF with the floor lifted"
 # user rules: the call keeps --lint-rules=DIR and selects the floored rule id
 mkdir -p "$TMP/urules"; printf -- '- id: many-goto\n  language: c\n  severity: warn\n  message: goto\n  query: (goto_statement) @hit\n' > "$TMP/urules/g.yml"
 U1="$( "$BIN" "$GF" --lint-rules="$TMP/urules" --no-cache 2>/dev/null )"

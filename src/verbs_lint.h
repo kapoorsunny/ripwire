@@ -502,7 +502,8 @@ struct RuleCap { std::string rule; bool isUserRule; };
 // dead end: disclosed as a floor, with no call that counts the rest, because the budget had no flag. findings_next= is that
 // call — the floored rules ONLY (by --lint-select, so the re-run spends nothing on rules that were already totals), under a
 // 10x budget (lintNextMaxPerRule), keeping --lint-rules=DIR when a user rule floored and --naming-locals when it was on (it
-// changes the naming-* counts). A re-run that is still floored names its own, so the chain ends. `emitted` is the H8
+// changes the naming-* counts), and --sarif on a SARIF run (its findingsNext). A re-run that is still floored names its own,
+// so the chain ends. `emitted` is the H8
 // predicate: a rule the selection dropped never floors this answer, so it never joins the call. "" ⇒ nothing floored.
 // Spelled IN FULL whatever its length (nextverb.h: a next= is never dropped or truncated); nextFlag quotes a value a
 // shell would split (a rules directory with a space, a user rule id with a quote).
@@ -544,6 +545,10 @@ std::string lintFindingsNext( const rw::Config& cfg, const std::vector<RuleCap>&
     }
     inv += " " + rw::nextFlag( "--lint-select=", joined );
     inv += " --lint-max-per-rule=" + std::to_string( rw::lintNextMaxPerRule( spentPerRule ) );
+    if( cfg.sarif )
+    {
+        inv += " --sarif";   // the SARIF run's findingsNext re-runs in the dialect it was read from (rv-knob-honesty-068 N4)
+    }
     ENSURES( !inv.empty() && inv.front() == '-', "a findings_next= is a pasteable flag list (--lint or --lint-rules leads)" );
     return inv;
 }
