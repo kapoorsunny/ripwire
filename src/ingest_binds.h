@@ -4111,11 +4111,13 @@ struct BindCtx
 };
 
 // ── FE-B receiver-evidence capture (model.h LocalBindKind::RecvType / MemberType / MethodAlias) ──────────────────────────
-// an identifier in any grammar's spelling
+// the text of an identifier in any grammar's spelling (`identifier`, `type_identifier`, `simple_identifier`); "" for a null
+// node or any other kind
 inline constexpr std::array<std::string_view, 3> kIdentifierKinds = { "identifier", "type_identifier", "simple_identifier" };
-inline bool identifierKind( const char* t ) noexcept
+inline std::string_view identifierText( TSNode n, std::string_view src )
 {
-    return std::ranges::find( kIdentifierKinds, std::string_view( t ) ) != kIdentifierKinds.end();
+    const std::string_view kind = ts_node_is_null( n ) ? std::string_view{} : std::string_view( ts_node_type( n ) );
+    return std::ranges::find( kIdentifierKinds, kind ) != kIdentifierKinds.end() ? nodeTextOf( n, src ) : std::string_view{};
 }
 
 // The class a written TYPE names, final segment — "" for anything that names no single class (an array, a union, a
@@ -4124,11 +4126,11 @@ inline std::string_view annotatedClass( TSNode node, std::string_view src )
 {
     for( int guard = 0; guard < 8 && !ts_node_is_null( node ); ++guard )
     {
-        const char* t = ts_node_type( node );
-        if( identifierKind( t ) )
+        if( const std::string_view name = identifierText( node, src ); !name.empty() )
         {
-            return nodeTextOf( node, src );
+            return name;
         }
+        const char* t = ts_node_type( node );
         if( kindIs( t, "type" ) || kindIs( t, "type_annotation" ) || kindIs( t, "pointer_type" ) || kindIs( t, "parenthesized_type" ) )
         {
             node = ts_node_named_child_count( node ) == 1 ? ts_node_named_child( node, 0 ) : TSNode{};
@@ -4245,9 +4247,9 @@ inline void noteTypeParameter( BindCtx& cx, TSNode param, std::uint32_t start, s
         {
             c = ts_node_named_child( c, 0 );   // Python `def f[T]( … )`
         }
-        if( identifierKind( ts_node_type( c ) ) )
+        if( const std::string_view name = identifierText( c, cx.src ); !name.empty() )
         {
-            cx.typeParams.push_back( { nodeTextOf( c, cx.src ), start, end } );
+            cx.typeParams.push_back( { name, start, end } );
             named = true;
         }
         else if( named )
@@ -4304,9 +4306,9 @@ inline void noteGoReceiverTypeParameters( BindCtx& cx, TSNode method )
                 {
                     a = ts_node_named_child( a, 0 );
                 }
-                if( identifierKind( ts_node_type( a ) ) )
+                if( const std::string_view name = identifierText( a, cx.src ); !name.empty() )
                 {
-                    cx.typeParams.push_back( { nodeTextOf( a, cx.src ), ts_node_start_byte( method ), ts_node_end_byte( method ) } );
+                    cx.typeParams.push_back( { name, ts_node_start_byte( method ), ts_node_end_byte( method ) } );
                 }
             }
             continue;
@@ -4396,10 +4398,7 @@ inline void pushLocalEvidence( BindCtx& cx, std::string_view var, std::string_vi
 // the same for a name NODE (an identifier of any grammar's spelling; anything else records nothing)
 inline void pushLocalEvidence( BindCtx& cx, TSNode name, std::string_view cls, BindSite site )
 {
-    if( !ts_node_is_null( name ) && identifierKind( ts_node_type( name ) ) )
-    {
-        pushLocalEvidence( cx, nodeTextOf( name, cx.src ), cls, site );
-    }
+    pushLocalEvidence( cx, identifierText( name, cx.src ), cls, site );   // "" records nothing
 }
 // every identifier `node` holds at any depth (a destructuring / tuple pattern's names), each as a tombstone over `site`
 inline void pushPatternTombstones( BindCtx& cx, TSNode node, BindSite site )
@@ -4414,7 +4413,7 @@ inline void pushPatternTombstones( BindCtx& cx, TSNode node, BindSite site )
             continue;
         }
         const char* t = ts_node_type( n );
-        if( identifierKind( t ) || kindIs( t, "shorthand_property_identifier_pattern" ) )
+        if( kindIs( t, "identifier" ) || kindIs( t, "simple_identifier" ) || kindIs( t, "shorthand_property_identifier_pattern" ) )
         {
             pushLocalEvidence( cx, nodeTextOf( n, cx.src ), {}, site );
             continue;
