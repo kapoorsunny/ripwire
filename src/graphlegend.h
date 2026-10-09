@@ -885,8 +885,10 @@ inline constexpr const char* kViaNameLegend =
     "an import, the class's bases) proves the receiver is that class; every by-name candidate in reach is listed (same file and "
     "directory, else a lone definition), and any one of them, or none (a builtin or an outside object), may be the real target. "
     "It does NOT mean the edge is false, and a row without it is evidence-bound, not type-checked. ";
+// G4: no double hyphen — viaNameLegend( …, impact = true ) lands inside the --impact legend's XML comment on the CLI and MCP
+// (CodeRabbit 5468003465: "An --impact row" made a --legend=full answer with a via="name" row invalid XML; test/xmlwellformed.sh).
 inline constexpr const char* kViaNameImpactClause =
-    "An --impact row reached only through such an edge carries it too; one that some all-proven path reaches stays plain. ";
+    "An impact row reached only through such an edge carries it too; one that some all-proven path reaches stays plain. ";
 inline constexpr const char* kViaNameColumnarClause = "format=columnar carries it as the <via> column (1 = via=\"name\"). ";
 inline std::string viaNameLegend( bool present, bool impact = false, bool columnar = false )
 {
