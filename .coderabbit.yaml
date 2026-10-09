@@ -5,6 +5,8 @@
 #   - No re-review on every push: each fix commit used to start a new pass over a new diff.
 #   - No automatic reply inside review threads: every in-thread answer used to wake another pass.
 #   - Vendored parsers and generated/pinned files are excluded; a review of them cannot change them.
+#   - Gate fixture trees (test/*fix/) are excluded: they are inputs, and a train carrying many of them
+#     went over the 300-file review limit (the whole review was skipped).
 #   - No docstring-coverage pre-merge check: the house style documents contracts where they bite, not every symbol.
 # CodeRabbit reads this file from the PR's head branch, so a fork PR picks it up once it merges main.
 reviews:
@@ -17,6 +19,7 @@ reviews:
     - "!docs/captures/**"
     - "!test/*.hash"
     - "!test/printf_parity.manifest"
+    - "!test/*fix/**"                # gate fixture trees (inputs a gate parses); keeps a train PR under the 300-file review limit
   path_instructions:
     - path: "src/**"
       instructions: >-
