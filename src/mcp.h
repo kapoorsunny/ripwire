@@ -1494,6 +1494,10 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             const std::string text    = strArg( "text" );     // insert_before/after
             const std::string handle  = strArg( "handle" );   // T4 fetch_body
             const std::string kind    = strArg( "kind" );     // exemplar kind token; whereis/stray_content/flags/doc_drift name filter
+            // whereis: defs|refs|all. Read HERE with the other strings, before the shared shape gate below: read inside the
+            // whereis arm, a non-string `listing:5` decoded to "" after that gate had run, its shape refusal was dropped, and the
+            // closed-set refusal then told the caller it sent '' (CodeRabbit 5468003465; test/crossrefcheck.sh LEAN (L10b)).
+            const std::string listingArg = strArg( "listing" );
             const std::string from    = strArg( "from" );     // path verb: source symbol
             const std::string to      = strArg( "to" );       // path verb: destination symbol
             const std::string trace   = strArg( "trace" );    // L4 from_trace: the raw trace TEXT
@@ -2314,7 +2318,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     // the CLI), not a hits="0" answer about the literal string. `seedFault` distinguishes it
                     // from the non-git degrade, which is the other way whereisText returns "".
                     crossref::WhereisListing listing = crossref::WhereisListing::ShorterOfDefsAll;
-                    const std::string listingRefusal = whereisListingFromArg( strArg( "listing" ),
+                    const std::string listingRefusal = whereisListingFromArg( listingArg,
                                                                               mcpdetail::findRawValue( args, "listing" ).isPresent, listing );
                     resp = !listingRefusal.empty() ? errResultMsg( -32602, listingRefusal ) : pagedResult( [ & ]( McpPageArgs pg )
                     {

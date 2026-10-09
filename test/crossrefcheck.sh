@@ -593,6 +593,25 @@ if command -v python3 >/dev/null 2>&1; then
         && [ "$( mcpw ',"listing":"refs"' )" = "$( lw zqLean --whereis-listing=refs )" ] && [ "$( mcpw ',"listing":"bogus"' )" = "ERROR -32602" ] \
         && ok "LEAN (L10): MCP whereis default / listing:all / listing:refs are byte-identical to the CLI; listing:bogus refuses -32602" \
         || no "LEAN (L10): the MCP twin differs from the CLI"
+    # (L10b) CodeRabbit 5468003465: a NON-STRING listing refuses through the shared shape gate and echoes the value SENT.
+    # `listing` used to be read inside the whereis arm, after that gate, so listing:5 decoded to "" and the closed-set
+    # refusal said "got ''". Near-miss twins: a string outside the set still echoes itself; a string inside it answers (L10).
+    mcpwmsg(){ printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"whereis","arguments":{"path":"%s","symbol":"zqLean"%s}}}\n' "$LR" "$1" \
+           | "$BIN" --mcp 2>/dev/null | python3 -c 'import sys,json
+for line in sys.stdin:
+    line=line.strip()
+    if not line: continue
+    d=json.loads(line)
+    if "error" in d: print("ERROR",d["error"].get("code"),d["error"].get("message",""),end="")
+    elif d.get("result",{}).get("content"): print("ANSWER",end="")'; }
+    for arm in '5|5' '["all"]|["all"]' '{"v":1}|{"v":1}' 'true|true' '"bogus"|bogus'; do
+        val="${arm%%|*}"; echo_="${arm#*|}"
+        m="$( mcpwmsg ",\"listing\":$val" )"
+        case "$m" in
+            "ERROR -32602 invalid value for field: listing"*"got '$echo_'"*) ok "LEAN (L10b): MCP whereis listing:$val refuses -32602 and echoes '$echo_'" ;;
+            *) no "LEAN (L10b): MCP whereis listing:$val — want a -32602 refusal echoing '$echo_', got: ${m:-nothing}" ;;
+        esac
+    done
 else
     printf '  SKIP  LEAN (L10) MCP twin (no python3)\n'
 fi
