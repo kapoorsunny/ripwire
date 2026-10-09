@@ -544,7 +544,7 @@ std::string lintFindingsNext( const rw::Config& cfg, const std::vector<RuleCap>&
         inv += " --naming-locals";
     }
     inv += " " + rw::nextFlag( "--lint-select=", joined );
-    inv += " --lint-max-per-rule=" + std::to_string( rw::lintNextMaxPerRule( spentPerRule ) );
+    inv += " --lint-max-per-rule=" + std::to_string( rw::lintNextMaxPerRule( spentPerRule, std::size_t( rw::kLintMaxPerRuleMost ) ) );
     if( cfg.sarif )
     {
         inv += " --sarif";   // the SARIF run's findingsNext re-runs in the dialect it was read from (rv-knob-honesty-068 N4)
@@ -771,6 +771,14 @@ inline std::size_t lintPackQueryBudget( std::size_t packDefault, std::size_t max
     constexpr std::size_t kEngineRatio = 20;
     static_assert( rw::atoms::kAtomsQueryBudget == kEngineRatio * rw::kLintMaxPerRule && rw::cachelint::kCacheQueryBudget == kEngineRatio * rw::kLintMaxPerRule,
                    "lintPackQueryBudget keeps the packs' default engine:per-rule ratio — re-derive kEngineRatio with the constants" );
+    // CodeRabbit 5468003465: the flag's ceiling keeps this product, and the 10x continuation's, inside size_t (a 32-bit
+    // size_t wrapped at --lint-max-per-rule=300000000); the continuation never names a value the flag refuses.
+    static_assert( std::size_t( rw::kLintMaxPerRuleMost ) <= std::numeric_limits<std::size_t>::max() / ( kEngineRatio * 10 ),
+                   "--lint-max-per-rule's ceiling keeps the pack budget and its 10x continuation representable" );
+    static_assert( rw::lintNextMaxPerRule( std::size_t( rw::kLintMaxPerRuleMost ) / 10 + 1, std::size_t( rw::kLintMaxPerRuleMost ) )
+                       == std::size_t( rw::kLintMaxPerRuleMost ),
+                   "findings_next= saturates at the flag's own ceiling, never above it" );
+    EXPECTS( maxPerRule <= std::size_t( rw::kLintMaxPerRuleMost ), "the per-rule budget is a parsed --lint-max-per-rule (cli.h refuses above its ceiling) or the default" );
     return maxPerRule > packDefault / kEngineRatio ? maxPerRule * kEngineRatio : packDefault;
 }
 

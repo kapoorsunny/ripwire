@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -3438,6 +3439,12 @@ static_assert( viewFlagEmptyPolicyIsWellFormed(),
 // table changed which SENTENCE a rejected value gets, never which values are rejected.
 inline constexpr int kIntFlagMax        = 1000000000;    // parsePosInt/parseNonNegInt's own overflow ceiling
 inline constexpr int kConnectRadiusMax  = 12;            // == connectcfg::kMaxRadius (static_assert at the seam in main.cpp)
+// --lint-max-per-rule's domain ceiling. The budget is multiplied twice downstream — 20x for the atoms/cache packs' engine
+// budget (verbs_lint.h lintPackQueryBudget) and 10x more for a floored answer's findings_next= (lintrules.h
+// lintNextMaxPerRule) — so the ceiling keeps both products representable in std::size_t: == kIntFlagMax wherever size_t is
+// 64 bits, lower where it is 32 (CodeRabbit 5468003465). Refused above it, never saturated (§B8.1), and the continuation
+// saturates at this same value so the call it names is always one this table accepts.
+inline constexpr int kLintMaxPerRuleMost = int( std::min<std::size_t>( std::size_t( kIntFlagMax ), std::numeric_limits<std::size_t>::max() / 200 ) );
 
 struct IntFlag
 {
@@ -3477,7 +3484,7 @@ inline constexpr IntFlag kIntFlags[] =
     { "--detail=",           &Config::detail,        true,  kIntFlagMax,       "a non-negative integer (0 = off)", "--detail=2" },
     // knob-honesty-068: the per-rule lint budget (kLintMaxPerRule is the default); a modifier of --lint/--lint-rules,
     // refused alone (validateLintSelectionModifierGuards) — the floored answer's findings_next= is the call that spells it.
-    { "--lint-max-per-rule=", &Config::lintMaxPerRule, false, kIntFlagMax,     "a positive integer",         "--lint-max-per-rule=50000" },
+    { "--lint-max-per-rule=", &Config::lintMaxPerRule, false, kLintMaxPerRuleMost, "a positive integer",       "--lint-max-per-rule=50000" },
     // --cochange-recur=K: K is a count of SUB-WINDOWS, so it is bounded by kCoRecurSubWindows in practice;
     // the parser accepts any positive integer and the verb reports zero pairs above the ceiling rather than
     // refusing — an empty result under a disclosed min_recur= is a truthful answer, not an error.

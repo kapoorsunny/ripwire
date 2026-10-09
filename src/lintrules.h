@@ -842,11 +842,12 @@ inline std::size_t lintMaxPerRuleOf( int flagValue ) noexcept
 }
 
 // The budget a floored answer's findings_next= asks for: 10x the one that floored it — a re-run still floored names its own,
-// so the chain terminates (the raw capture stream is finite). Saturating, so a pathological flag value cannot wrap.
-inline std::size_t lintNextMaxPerRule( std::size_t spent ) noexcept
+// so the chain terminates (the raw capture stream is finite). Saturating at `most`, the flag's own domain ceiling
+// (cli.h kLintMaxPerRuleMost): it used to saturate at INT_MAX, above that ceiling, so a run floored at a budget over
+// most/10 named a --lint-max-per-rule= value the parser refuses (CodeRabbit 5468003465 follow-through).
+constexpr std::size_t lintNextMaxPerRule( std::size_t spent, std::size_t most ) noexcept
 {
     constexpr std::size_t kGrowth = 10;
-    const std::size_t     most    = std::size_t( std::numeric_limits<int>::max() );   // the flag parses into an int
     return spent >= most / kGrowth ? most : spent * kGrowth;
 }
 
