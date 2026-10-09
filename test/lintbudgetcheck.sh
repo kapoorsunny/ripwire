@@ -165,6 +165,19 @@ esac
     || no "--lint-max-per-rule without --lint was not refused"
 "$BIN" "$GF" --lint --lint-max-per-rule=0 --no-cache >/dev/null 2>&1; [ $? = 1 ] \
     && ok "refused: --lint-max-per-rule=0 exits 1" || no "--lint-max-per-rule=0 was accepted"
+# CodeRabbit 5468003465: the flag's ceiling (cli.h kLintMaxPerRuleMost = min(kIntFlagMax, SIZE_MAX/200)) keeps the 20x pack
+# budget and the 10x findings_next= continuation inside size_t, and the continuation saturates AT it (lintNextMaxPerRule; both
+# stated by static_asserts in verbs_lint.h lintPackQueryBudget). Where size_t is 64 bits the ceiling IS kIntFlagMax, so the
+# accepted domain did not move: the twin below holds that (1e9 answers, 1e9+1 refuses). On a 32-bit size_t the ceiling is
+# lower by design, so the twin's premise is the word size, checked by name.
+if [ "$( getconf LONG_BIT 2>/dev/null )" = 64 ]; then
+    "$BIN" "$TMP/smallfix" --lint --lint-max-per-rule=1000000000 --no-cache >/dev/null 2>&1; [ $? = 0 ] \
+        && ok "ceiling twin (64-bit): --lint-max-per-rule=1000000000 still answers" || no "--lint-max-per-rule=1000000000 refused on a 64-bit build"
+    "$BIN" "$TMP/smallfix" --lint --lint-max-per-rule=1000000001 --no-cache >/dev/null 2>&1; [ $? = 1 ] \
+        && ok "ceiling twin (64-bit): --lint-max-per-rule=1000000001 refuses (exit 1)" || no "--lint-max-per-rule=1000000001 was accepted"
+else
+    printf '  SKIP  ceiling twin — getconf LONG_BIT is not 64 (the ceiling is SIZE_MAX/200 there by design)\n'
+fi
 # SARIF: the CI surface carries the same call (run properties), beside findingsCapped
 GS="$( "$BIN" "$GF" --lint --sarif --no-cache 2>/dev/null )"
 printf '%s' "$GS" | python3 -c '
