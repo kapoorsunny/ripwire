@@ -368,14 +368,17 @@ inline int lspKindOf( rw::SymKind k ) noexcept
 }
 
 // The hover word per SymKind, a declarative table in enum order (CONTRIBUTING §3's table-over-switch rule; it was a
-// switch, and the three Go named-type kinds made it a near-clone of model.h's langTag switch). Sized by kSymKindCount,
-// so an appended kind without a word does not compile.
+// switch, and the three Go named-type kinds made it a near-clone of model.h's langTag switch). Sized by kSymKindCount, and
+// the static_assert below rejects an empty slot: std::array value-initializes the elements an initializer list leaves out,
+// so the size alone let an appended kind without a word compile to a nullptr hover word (CodeRabbit 5468003465).
 inline constexpr std::array<const char*, rw::kSymKindCount> kLspKindWords = {
     "function", "method", "class", "struct", "interface", "variable", "section", "macro", "field",
     "symbol",          // Other
     "module scope",    // ModuleScope
     "type", "type alias", "function type"   // NamedType, Alias, FuncType
 };
+static_assert( std::ranges::none_of( kLspKindWords, []( const char* w ) { return w == nullptr; } ),
+               "every SymKind needs a hover word in kLspKindWords (an initializer list shorter than kSymKindCount leaves nullptr)" );
 inline const char* lspKindWord( rw::SymKind k ) noexcept
 {
     EXPECTS( std::size_t( k ) < kLspKindWords.size(), "a symbol's kind is a SymKind enumerator (the cache validates the byte)" );
