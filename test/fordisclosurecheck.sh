@@ -125,6 +125,24 @@ grep -q '<b [^>]*><!\[CDATA\[' "$T" \
     || ok "#2 ceiling-exhausted: no body bytes (whole-body-or-nothing still holds)"
 grep -q '<sigs' "$T" && ok "#2 ceiling-exhausted: the <sigs> block is intact" \
     || no "#2 ceiling-exhausted: the <sigs> block vanished"
+# #2c (rv-knob-honesty-068 C2; CHECKLIST 17) the intact-block grep above CAN FAIL on exactly this document. It is a ceiling-
+# exhausted one: its <sigs> is capped, its next= rides unpaid and the root carries over_ceiling="1" with the clause defining
+# that in the header legend — BEFORE the real tag. A clause that spelled the tag literally (dd6e4c8e's floor clause did)
+# satisfied `grep -q '<sigs'` with the block cut out, and moved sigsblock()'s span start into the legend comment. Premise
+# first (a floor document: root over_ceiling="1", the LAST <sigs tag capped with a next=; else this arm proves nothing), then:
+# the same document with its real block removed must NOT match, and sigsblock() must start at the real tag (its span never
+# crosses a comment close). RED on dd6e4c8e.
+if grep -qE '^<ctx [^>]* over_ceiling="1"' "$T" && grep -oE '<sigs [^>]*>' "$T" | tail -1 | grep -q ' capped="1".* next="'; then
+    python3 -c 'import sys; s=open(sys.argv[1],"rb").read(); a=s.rfind(b"<sigs"); b=s.find(b"</sigs>",a); sys.stdout.buffer.write(s[:a]+s[b+7:] if a>=0 and b>=0 else s)' "$T" >"$TMP/n400_nosigs"
+    grep -q '<sigs' "$TMP/n400_nosigs" \
+        && no "#2c the intact-block grep still matches with the <sigs> block removed — a legend clause spells the tag" \
+        || ok "#2c the intact-block grep FAILS once the <sigs> block is removed (no legend clause spells the tag)"
+    sigsblock "$T" | grep -q -- '-->' \
+        && no "#2c sigsblock() starts inside the header legend comment, not at the real tag" \
+        || ok "#2c sigsblock() starts at the real <sigs> tag"
+else
+    no "#2c premise: the --token-budget=400 document is no longer a floor document (root over_ceiling=\"1\", a capped <sigs> with next=) — re-anchor this arm on one that is"
+fi
 "$BIN" src --for="$NAMETASK" --token-budget=400 --signatures-only --no-cache >"$TMP/n400so" 2>/dev/null
 sigsblock "$T" >"$TMP/s_a"; sigsblock "$TMP/n400so" >"$TMP/s_s"
 [ -s "$TMP/s_a" ] || no "#2 presence: could not extract a <sigs> block from the disclosed run"

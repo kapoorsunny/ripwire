@@ -1097,7 +1097,7 @@ inline std::vector<ModuleMetric> computeModuleMetrics( const IngestResult& ing,
     std::vector<std::uint32_t> totalTypes( M, 0 ), abstractTypes( M, 0 );
     for( const Symbol& s : ing.symbols )
     {
-        const bool isType = ( s.kind == SymKind::Class || s.kind == SymKind::Struct || s.kind == SymKind::Interface );
+        const bool isType = ( s.kind == SymKind::Class || isStructOrNamedType( s.kind ) || s.kind == SymKind::Interface );
         if( !isType )
         {
             continue;

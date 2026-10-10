@@ -5,6 +5,7 @@
 // weights at runtime. Integer scores and stable tie-breaking keep the result byte-deterministic.
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstddef>
 #include <string>
@@ -143,30 +144,56 @@ inline int wordScore( std::string_view lower, std::initializer_list<std::pair<st
     return cueScore( lower, CueMatch::WordBounded, words );
 }
 
-// Is `task` a harness/system event rather than something a user typed — a background-task wake-up or an
-// injected reminder, delivered to UserPromptSubmit through the same channel as a real prompt (Claude Code
-// routes both `<task-notification>…</task-notification>` completions and `<system-reminder>…</system-reminder>`
-// blocks this way)? Both the Claude Code and Codex UserPromptSubmit router hooks (under hooks/, filenames
-// ending "-route.sh") skip calling this classifier at all on such input — a bash-level guard mirroring the
-// PreToolUse tool-call router's own pre-classification notification check (hooks/, filename ending
-// "-toolroute.sh") — but --help-task is also callable directly: by a test, by an MCP client, by a future
-// integration that does not go through either hook. So the same discipline lives here too, rather than
-// only at the shell layer. A background-task report is mostly prose quoting machine output (a sanitizer
-// excerpt, a diff, an XML `<result>` block): before this guard existed, that prose could mint a
-// `--from-trace=-`/`--grep=`/`--connect=` recommendation out of text that named no task at all (the
-// routing-noise round, docs/EVALS.md). Narrow and literal on purpose — this is a shape check on the
-// harness's own wake-up markers, not a guess at what a user prompt looks like: only the FIRST non-
-// whitespace bytes are tested, so a user prompt that happens to mention `<task-notification>` in the
-// middle of a sentence ("what does <task-notification> mean in the hook?") is unaffected.
+// Is `task` a harness/system event rather than something a user typed — a background-task wake-up, an
+// injected reminder, an MCP channel event or a sub-agent hand-back, delivered to UserPromptSubmit through the
+// same channel as a real prompt (Claude Code routes `<task-notification>…</task-notification>` completions,
+// `<system-reminder>…</system-reminder>` blocks, `<channel source="…">…</channel>` events and
+// `<agent-message from="…">…</agent-message>` hand-backs this way; the last two are issue #381)? Both the
+// Claude Code and Codex UserPromptSubmit router hooks (under hooks/, filenames ending "-route.sh") skip
+// calling this classifier at all on such input — a bash-level guard (rw_is_harness_event, a mirrored block
+// that lists the same four wrappers) mirroring the PreToolUse tool-call router's own pre-classification
+// notification check (hooks/, filename ending "-toolroute.sh", which deliberately does NOT carry the two
+// newer wrappers: a tool input is the agent's own action, and the guard there is a substring match) — but
+// --help-task is also callable directly: by a test, by an MCP client, by a future integration that does not
+// go through either hook. So the same discipline lives here too, rather than only at the shell layer. A
+// background-task report is mostly prose quoting machine output (a sanitizer excerpt, a diff, an XML
+// `<result>` block): before this guard existed, that prose could mint a `--from-trace=-`/`--grep=`/
+// `--connect=` recommendation out of text that named no task at all (the routing-noise round,
+// docs/EVALS.md). Narrow and literal on purpose — this is a shape check on the harness's own wrappers, not
+// a guess at what a user prompt looks like: only the FIRST non-whitespace bytes are tested, so a user prompt
+// that happens to mention `<task-notification>` in the middle of a sentence ("what does
+// <task-notification> mean in the hook?") is unaffected, and `<channelz>`, `<channels>` and
+// `<agent-messages>` are not the wrappers (the attribute-carrying tags must be followed by a space or `>`).
+struct HarnessEventTag
+{
+    std::string_view tag;   // the bytes the prompt must start with
+    bool             whole; // true: `tag` already ends in `>` and matches as is; false: the tag may carry
+                            // attributes, so it must be followed by a space or `>`
+};
+inline constexpr std::array<HarnessEventTag, 4> kHarnessEventTags{ {
+    { "<task-notification>", true },
+    { "<system-reminder>", true },
+    { "<channel", false },
+    { "<agent-message", false },
+} };
+
 inline bool looksLikeSystemEvent( std::string_view task ) noexcept
 {
     std::size_t i = 0;
-    while( i < task.size() && ( task[i] == ' ' || task[i] == '\t' || task[i] == '\n' || task[i] == '\r' ) )
+    // The six bytes the prompt hooks' lead strip removes, `[!$' \t\n\v\f\r']`: space and \t \n \v \f \r. ASCII only, in
+    // every locale on both sides (issue #381; routehookcheck N10d/N10e, codexpromptroutecheck U+00A0 arms).
+    while( i < task.size() && ( task[i] == ' ' || ( task[i] >= '\t' && task[i] <= '\r' ) ) )
     {
         ++i;
     }
     const std::string_view rest = task.substr( i );
-    return rest.starts_with( "<task-notification>" ) || rest.starts_with( "<system-reminder>" );
+    return std::any_of( kHarnessEventTags.begin(), kHarnessEventTags.end(), [&rest]( const HarnessEventTag &t ) {
+        if( !rest.starts_with( t.tag ) )
+        {
+            return false;
+        }
+        return t.whole || ( rest.size() > t.tag.size() && ( rest[t.tag.size()] == ' ' || rest[t.tag.size()] == '>' ) );
+    } );
 }
 
 inline bool looksLikeTrace( std::string_view lower ) noexcept

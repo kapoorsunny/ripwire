@@ -15,6 +15,112 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Changed — a call bound by name alone keeps its rows, marked `via="name"`; typed receivers resolve
+
+A member call `x.m()` (or, where the receiver is implicit, a bare `m()`) bound to every in-repo definition spelled
+`m` that the name ladder reached, and each such row read as a confident edge with nothing behind it but the name: a
+request context's `ctx.onerror()` drawn to the `Application.onerror` its file defines, a WeakMap's `.get()` drawn to
+the same file's accessor, a Go struct field's `item.text.Get()` drawn to an unrelated `Merger.Get`, a bare `flush()`
+in a Java class with an outside base drawn to an unrelated class's `flush`.
+
+- **Receivers the source types now resolve** (JavaScript, TypeScript, Python, Go, Java, Kotlin, C#, Swift): `this` /
+  `self` / `cls` inside a class and `super` / `base` through its bases; a parameter or local whose class is written
+  (a TS/Python/Go/Java/C#/Kotlin/Swift annotation or declared type, a Go method receiver, a JS `new Foo()`, Java/C#
+  `new Foo()` (`var` included), Python `Foo()`, Kotlin/Swift `Foo()` or Go `Foo{}` initializer, an import alias of the
+  class); a constructed receiver (`new Foo().m()`); a class-name receiver; a chain of fields whose classes are stated
+  (`this.bucket = new Schemas()`, Python `self.x = Foo()`, Go struct and embedded fields, Java/C# fields and
+  properties, Kotlin/Swift properties and Kotlin `val` constructor properties, read through `this`/`self` or bare);
+  Python `feed = parser.feed`. A Go module alias proves its package by the exact import path: the nearest `go.mod`'s
+  module path plus the directory below it, or the path a local `replace` gives a directory (in a tree with no `go.mod`
+  at all, a directory that ends the import path). A local is read where its language scopes it: a block's declaration
+  from the declaration to the block's end, a parameter in its function or lambda, a Python name in its whole function.
+  Every other binding of a name also hides the field or the outer local it shadows there — a loop, lambda, catch,
+  resource or `with`/`except` variable, a pattern, `case`, `out var` or `match` capture, a destructuring entry, Swift
+  `if`/`guard`/`while let`, a Go range / type-switch / short variable, a JS or Python reassignment (a statically typed
+  variable keeps its declared type when reassigned). Such a binding
+  names its own class only when it is written or constructed with one (a typed loop, lambda or resource variable); otherwise the call
+  through it is name-only, like a call through an untyped local or an interface-typed receiver with several
+  implementors. A written type that names a generic's type parameter (`<Tank>`, `[T any]`, `def f[T]`) names no class,
+  even when a class of that name exists. Wider than the language, and so name-only rather than resolved: a pattern
+  variable hides its field in its whole enclosing block (an `else` branch too), a Java local hides a field anywhere in
+  its method, and a Python rebinding anywhere in its function. Not read, the floor: a nested function or class
+  declaration that reuses a typed binding's name (JS/TS/Python), Kotlin's implicit `it` beside a field named `it`, and a
+  Python conditional or later rebinding, which still types the variable for the whole function: `tank = Barrel()` in a
+  branch proves `Barrel.spill` for a `tank.spill()` beside it, even one before the assignment (the older assignment-type
+  rule, which this change does not read). A JS/TS call on the class object reaches its `static` members only,
+  and a call on an instance never one. A Ruby call's candidates that Ruby's own method lookup proves (the entries below) are its
+  answer, never `via="name"`.
+- **A call nothing proves is NAME-ONLY.** Its candidates the language's own lookup proves are its answer (an
+  implicit receiver's class and bases, a free function in scope, the module a receiver alias names). With none
+  proven, every same-file and same-directory candidate is listed — a lone global one too, because one candidate is
+  not evidence — and each row carries `via="name"` (MCP: `"via":"name"`) on `--callees`, `--callers`, `--path`,
+  `--connect`'s `<e>`, the `<calls>` rows of `--expand` and `--for`, the default map's `<c>` rows (and its
+  `--json` and MCP `analyze` twins), and MCP `find_symbol`, `find_referencing_symbols`, `impact` and
+  `path_between`. An `--impact` row that no all-proven path reaches inherits
+  it. A legend sentence rides exactly when such a row does and says what it does not mean: not that the edge is
+  false. Rule 3's include-file narrow no longer decides a member call: the file a caller imports says nothing about
+  its receiver. Ranking keeps the old ladder's pick (the same-file, else same-directory rung): the extra candidates
+  are listed at edge weight zero, so a guess never moves PageRank.
+- **The map merges what it would repeat.** A map `<s>` printed one `<c>` row per same-named by-name candidate, N
+  byte-identical rows; it now prints such a `via="name"` group once with `x="N"`, and `--callees` on that symbol
+  lists every candidate with its file. The map's legend is a short spelling of the same reading (and defines `x=`);
+  the compact dialect states both in its element rows. The README's `--max-tokens=3000` map keeps 20 rows.
+- Cost, measured over 210 calls on eight public repositories (`--no-cache`): +2.04% bytes in total (C trees: no
+  change); the `--max-tokens=3000` maps of the eight repositories keep 337 rows (331 before the change). The gate is
+  `test/receiverevidencecheck.sh` (every surface, CLI/MCP parity, census conservation, and near misses
+  for every evidence rule). Ingest records the receiver chain and the Java/C#/Kotlin/Swift declarations
+  (`kParserVer` 156 in this release, see the versions note; `kCacheVersion` 29), so a cache written by an earlier build is re-parsed.
+### Added — `--quality-delta` gains a twelfth kind, `defect-shape`: four defect shapes code review kept finding by hand
+
+`kind="defect-shape"` rows name a known defect SHAPE the change added, in `defect=` (`src/defectshape.h`):
+- `format-arity`: a literal `std::format` / `format_to` / `format_to_n` / `print` / `println`, `fmt::`,
+  `rw::emitTo` / `rw::formatTo` or Python `"literal".format(…)` format whose replacement fields do not match its
+  arguments. `std::format_string` rejects too few arguments at compile time and accepts too many silently; Python
+  raises on too few and ignores too many. Two sides of a merge that each add the same field and one argument merge
+  cleanly into one field too few — the case this was built for.
+- `utf8-cut` (C++): display text cut at a byte cap and given an ellipsis, with no UTF-8 back-off in the function.
+- `dedup-first` (C++): `std::unique` keeping the first of a run over a type with a severity field that neither the
+  predicate nor the sort before it reads.
+- `vacuous-assert` (Bash test scripts): an absence assertion read off a run whose failure is never checked, so a
+  crash reads as PASS.
+
+A site is new only when its normalized text occurs more often than among the baseline's sites of that shape,
+repo-wide: a moved or renamed defect is not new, an edited one is, and so is a second identical copy. **New-symbol rows never gate, except defect-shape format-arity**: a
+placeholder/argument mismatch is a defect, not debt, so it gates on new code too. The exit predicate lives in one
+place (`quality::rowGates`) and every surface asks it — `gating=` and the row's `gating`, `--json` / MCP `"gating"`,
+`--ack-only=gating`, the scoped-out and allow-dirty counts, the stderr line. `utf8-cut`, `dedup-first` and
+`vacuous-assert` are always `sev="minor"`: report-only by facet, not by size. `--ack-only=FACET` acks one shape; the
+ack key carries the facet AND the definition's sites of that shape, so an ack covers exactly the defects it named:
+it never suppresses another shape, nor a different defect of the same shape swapped or added into the same definition
+(that row re-reports and the old ack is listed stale).
+
+Measured on the eight review findings it was built from: recall 7/8 (format-arity 2/2 on the train-25 keep-both merge,
+utf8-cut 1/1, dedup-first 1/1, vacuous-assert 3/4 — the fourth sits beside a later check on content derived from the
+same run, which already fails the script on a crash). With every site of a tree treated as new: format-arity 0 false
+positives on this tree (1,330 literal-format calls), on the Python 3.13 standard library (405 `"…".format(` calls)
+and on libc++'s std::format tests (80 calls; its 24 hits are the deliberately ill-formed `.verify.cpp` calls), and 0
+false rows on a review's 76 adversarial candidate shapes plus the gate's 19 macro / preprocessor / escape near-misses
+(an argument that may be a macro expanding to an argument list, `#ifdef` arms inside the call, `#if 0`,
+`"\x7b\x7d"`): when the argument count cannot be known the call is skipped, never guessed. vacuous-assert: 46 rows (66 sites) on this tree's gates, each an absence read off an
+unchecked run; sample 30/30, Wilson 95% lower bound 0.89. An absence beside a positive on the same capture — an
+`if`/`elif` condition of `&&`-joined greps, or a grep through a function the script defines — is guarded (a crash
+fails the positive); before that guard the same tree gave 49 rows, of which 3 were such false positives (a seeded
+sample of 28/30, lower bound 0.79). The `tools/list` manifest grows 46,869 → 46,930 B on this release's tree (46,732 → 46,793 B on the lane's base, +61 B both ways): the quality_delta description counts 12 kinds and
+states the format-arity exception.
+
+Not checked, so no row there is no verdict: Python %-formatting and f-strings; a format in a named constant, a macro
+or a runtime wrapper; a pack expansion; an unqualified `format()`; the `std::print` ostream overload; a named dedup
+predicate; a utf8 cut in a function that backs off a continuation byte anywhere; a run behind a script-defined
+wrapper function or a text utility reading a file; an absence read off a FILE a run redirected into (`"$BIN" … >"$TMP/f"`,
+then `grep -q PAT "$TMP/f"`) — the gates' most common output form, the next candidate; an argument that may be a macro
+(a name the file `#define`s, function-like or object-like; a FUNCTION-LIKE macro another file of the tree defines; or
+an ALL_CAPS name followed by `(`), a call with a preprocessor directive inside it or under a literal `#if 0`, an escape
+that spells a brace. Two floors of that skip: the tree's macro list holds function-like macros only, so a lower-case
+object-like macro defined in another file (`#define xyargs p.x, p.y` in a header) is read as one argument and its call
+can be a false format-arity row; and only a literal `#if 0` is skipped — `#if false`, `#if (0)`, `#if 0 && …` and the
+`#else` of `#if 1` are read as live code. The qsnap blob scheme moves (19 in this release, see the versions note); the
+legend dictionary gains `r defect=`.
+
 ### Changed — a Ruby call to self, or on an instance the code builds, answers from its own side: an instance never reaches `def self.m`
 
 The entry below left one floor open, (i). A call to self, or on a receiver the code builds, read a class's defs from both
@@ -757,6 +863,242 @@ which puts the 12 back on `Core`'s def as single edges.
 
 `kParserVer` 129 → 130. New records, same layout: `kCacheVersion` stays 27, and Ruby caches re-parse once.
 
+### Fixed — `--path` no longer says "no directed call path" when its search met a call the graph has no edge for
+
+`--path=A,B` and the MCP `path_between` verb answered `reachable="0" hint="no directed call path"` whenever the search over
+resolved call edges did not reach `B`, even when that search had passed a call the graph keeps no edge for: a call the
+resolver declined (several candidates, none local, nothing chose one), an unresolved call, a function handed off as a
+value (`.then( handleResponse )`), or a call through a parameter. Any of those can be the missing hop. Such an answer now
+says the search was incomplete: `searched=` (the symbols it reached), `gaps="declined:D,unresolved:U,value:V,through:T,name:M"`,
+`gap_syms=` with up to three `<gap t= n= p= gaps=>` rows (nearest `from=` first, `gap_syms_capped="1"` past that) and a
+`next=` that expands their bodies. A `<gap>` row is where the search could not see, never a hop. Ambiguous calls are not
+counted (every candidate has an edge the search follows), nor calls to names defined nowhere in the tree. A call bound by
+name alone (`via="name"`) counts as a `name` gap when the tree defines that name, same language and kind, somewhere the
+search never reached (a namesake another searched symbol reaches was searched, and is not counted): the search follows
+only the candidates such a call lists, so a namesake in another directory is never searched and may be the missing hop (`run(obj)` calling `obj.process()`, bound to the same-directory
+`A.process`, while `other/B.process` calls the target). When the
+search met no such call the answer is unchanged, byte for byte. The legend dictionary gains three entries. A floor:
+the `next=` names a gap row by file and name, so where one file holds two definitions of that name it serves both. Gate:
+`test/pathgapcheck.sh`.
+
+### Fixed — a Go named type's `t=` says what it is: `type`, `functype` or `alias`, not `struct`
+
+Every Go `type_spec` was labelled `t="struct"`, so `type TestName string` and `type F func(...)` read as structs, and
+`type A = B` was not indexed at all. The kind now follows the written form: a struct is `t="struct"`, an interface
+`t="iface"`, a func type `t="functype"`, an alias `t="alias"` (now indexed), and every other defined type (`string`,
+`[]T`, `map`, `chan`, a pointer, an array, another named type, a generic over any of these) `t="type"`. Grouped
+`type ( … )` blocks and generic types follow the same rule. The three new kinds behave as `struct` did everywhere else (a
+conversion `TestName( s )` keeps its caller edge), `--graph-query`'s `kind()` accepts them, and the map's `--legend=full`
+gains a clause for them only on a tree that has one. Only Go is split: other languages' typedefs, aliases and enums still
+read `t="struct"`. A floor: a Go 1.24 generic alias `type A[T any] = B` reads `t="type"`, not `t="alias"`, because
+the grammar gives it no alias node. `kParserVer` moves (see the versions note), so every ingest cache is re-indexed once.
+Gate: `test/gokindcheck.sh`.
+
+### Fixed — a count the index cannot vouch for is marked a floor beside the number; safe-delete rows carry the call line
+
+A zero printed as a total read as "nothing uses this" where the index itself held evidence of a miss:
+`--grep`'s `<enc callers="0">` on a method whose only call the resolver declined to bind, or on a module variable that
+other files read (a call count cannot see a read); `--safe-delete` answering `callers="0" uses="0" risk="none-found"`
+on a C struct whose type mentions are not indexed; and the `--for` bundle's `<iface implementors=>`, which counted the
+implementor rows it LISTED after narrowing to its own files (`implementors="1"` on a tree with six).
+
+- **Row floors.** `callers_floor="1"` (grep `<enc>` and the MCP `grep` `enclosing` rows, `--safe-delete`) and
+  `implementors_floor="1"` (`<lego>` rows, bundle and `--lego`) ride beside the count exactly when the index holds
+  evidence of a miss for that definition: a declined call that named it, a call or extends clause spelled like it that
+  bound to no definition, a use as a value, or a kind used by reading or naming it (a variable, class, struct,
+  interface). `floor_next=` (rows) / `next=` (`--safe-delete`) is the call that lists the rest — the uses verb, or the
+  literal grep where the language's reads are never indexed. A count with no such evidence stays a plain total: a
+  static function nobody calls still reads `callers="0" risk="none-found" dead_code_candidate="1"`, and a recursive
+  function's call to itself counts as bound (the graph records no self-edge).
+- **`--safe-delete`.** `uses_floor="1"` when the definition's uses are reads or type mentions this run did not index,
+  and `risk="unmodelled"` (new value) when nothing was found for such a kind — never `none-found`. Each caller row
+  carries `sites_l=`, the ascending call-site lines spelled like the symbol (the edit-check verb's own pass), beside
+  `p=`, which stays the line where the caller is defined.
+- **`--for` `<lego>`.** `implementors=` is now the lego verb's own count; a shorter list adds `implementors_shown=` and
+  `implementors_next="--lego=FILE:NAME"`. The MCP `for` twin now narrows its `<lego>` block with the root prefix the
+  CLI passes; before, it compared root-relative rows against absolute paths and served no `<lego>` at all, so MCP
+  `for` answers on a tree with interfaces now carry that block (up to 12 rows), as the CLI's always did.
+- Every new attribute is defined present-only in the answer that carries it (compact and full dialects). Answers
+  without one are byte-identical (34 argv across three corpora). Gate: `countfloorcheck`.
+
+
+### Fixed — test infrastructure: `rubyrecvnarrowcheck` absence arms no longer pass on a crashed run
+
+The four "`--callers=X` does not list the row" arms read an empty capture, so a binary that crashed or refused passed
+them. They now go through one helper that reads the absence only off a run that exited 0 and produced its `<callers>`
+root, and fails by name otherwise.
+
+### Fixed — the skill scanner's per-line / joined-body dedupe keeps the worst row of a (line, rule)
+
+The scanner's two passes can report the same (line, rule), and the dedupe sorted with a non-stable sort on (line, rule)
+and kept the first row, so which severity survived was left to the sort. It now sorts stably with the worst severity first
+(the rule the shell-script pass merge already follows), as one shared helper. No input reaches the collision today (a
+rule's severity is a function of its line), so output is unchanged; `test/skillscan.sh` drives the helper with colliding
+pairs in both orders.
+
+### Fixed — a `--scan-skills` / `wrap` finding's excerpt is cut on a character boundary
+
+A skill line longer than the 120-byte excerpt cap was cut at a byte offset, so a multibyte UTF-8 character straddling the
+cap left an invalid tail in the excerpt (the text is arbitrary and untrusted). The cut now backs off to the code-point
+boundary, the same rule as the other text caps, and the `...` is added only when bytes were really dropped; a line of
+exactly the cap is shown whole. `test/skillscan.sh` pins a 2-byte and a 4-byte character at the cap, a line of exactly
+120 bytes, and a plain overlong line.
+
+### Fixed — `--help-task` routing coverage figures are labelled as tuning-corpus numbers
+
+The 0.907 / 0.918 coverage and 1.000 precision figures in `docs/EVALS.md` were measured on the tuning corpus. On the held-out prompts `--help-task` recommended on 28 of 214 positive prompts (0.131, measured 2026-10-02), below the pre-registered ≥ 0.60 coverage bar, and the held-out gate that registration called for is not yet built. Docs only; no behaviour change.
+
+### Changed — router and meter default to a per-session control split; channel events and agent hand-backs are not prompts
+
+With no `~/.ripwire/meter.conf` and no `RIPWIRE_METER_ARM`, the Claude Code prompt router, the tool-call router and
+the meter used to put every session on `treatment`, so the registered treatment-versus-control comparison had no control
+group on a default install (issue #381). The unconfigured default is now `arm=auto`, the stable per-session split
+the meter already had; `arm=treatment` and `arm=control` are still honoured. User-visible consequence: about half of
+the sessions on an unconfigured install now get NO injected advice and NO SessionStart primer (the control arm);
+`arm=treatment` in `~/.ripwire/meter.conf` restores the old behaviour. The Claude Code and Codex prompt-router hooks
+and the `--help-task` classifier now treat a prompt that starts with `<channel` (an MCP channel event) or
+`<agent-message` (a sub-agent hand-back), followed by a space or `>`, as a harness event, like `<task-notification>` and
+`<system-reminder>`: no classification, a `skip-system` log row. `<channelz>`, `<agent-messages>` and a prompt that merely
+mentions a wrapper mid-sentence still route; a prompt that itself starts with a literal `<channel>` or `<agent-message>`
+fragment (a pasted RSS fragment without its prolog, say) is treated as a harness event and is not routed. The
+classifier's leading-whitespace strip now also covers `\v` and `\f`, as the hooks' strip always did, and the hooks'
+strip is now those same six ASCII bytes in every locale: it used bash's `[:space:]`, which in a UTF-8 locale also
+stripped a leading U+00A0 (and other Unicode spaces), so a hook skipped a prompt the classifier routes. `meter.conf`
+parsing, in `resolve_arm` of both router hooks and in the meter, no longer loses a final line that has no newline
+and no longer reads a CRLF value (`arm=control\r`) as `treatment`. `bench/routing_ab_report.py` prints per-arm counts, says `NO CONTROL ARM` when an arm has no prompts, and marks the 2026-09-02
+registration window void (it had no control arm); the readout clock restarts at this release, and the report prints
+the new window's readout date once its start date is recorded in docs/EVALS.md. Gates: `routehookcheck`,
+`codexpromptroutecheck`, `taskroutecheck`, `toolcallroutecheck`, `hookcheck`, `routingreportcheck`.
+
+### Added — `test/mcpreloadasancheck.sh`: MCP index reloads under a sanitizer build
+
+A cached object that points into the MCP server's index dangles when the index is rebuilt in place; a cached
+`ValueRefIndex` once did exactly that (heap-use-after-free after a rebuild that kept its content stamp), and no single-query
+gate can see it. The gate runs one long-lived `--mcp` session on the sanitizer binary for 20 cycles of query, stamp-keeping
+mutation (chmod, a new non-source file, an empty directory), content mutation (file rewrite or the edit verbs), root
+switch, workspace and memory release. Every query answer is compared with a one-shot CLI run on the same tree state; the
+`analyze` answer on a dirty root is compared with a cold server instead. It asserts that each rebuild it drives happened
+(`rebuilt=1`) and that there were zero sanitizer reports. The memory-release arm is host-dependent: when no release session
+meets its premises it prints a named SKIP and the other arms still decide the verdict. The whole gate SKIPs by name when no
+sanitizer build is present, and exits 2 when `RIPWIRE_ASAN_BIN` is set to a path with no executable. The freed-chunk
+quarantine stays on except in the memory-release sessions. It goes red on the build that still had that bug and is green
+after the fix.
+
+
+### Added — `--for` rows say where a definition ends (`e=`); code ranks above the docs that repeat a question
+
+- **`e=` on `<d>` rows.** A `--for` signature row carried only `l=`, the line of the definition's name, so "which body
+  holds line N" was not answerable from the row. Every `<d>` row of a `--for` answer (CLI XML, `--json` as `"e"`, and the
+  MCP `for` tool) now carries `e=`, the 1-based line where that definition ends, body-inclusive, right after `l=`. It
+  is ABSENT — never 0, never a guess — when the extent is not known: a markdown or config row, a module-scope row, a
+  row flagged `extent_suspect=`, or a span the file's current bytes cannot hold. `l=` keeps its meaning, so a
+  definition can start above `l=` (a return type on the line before, a decorator). The attribute is exempt from the
+  signature-row byte budget, so the default ceiling admits the same rows it admitted before; it costs about 8 bytes
+  per row. An answer whose explicit ceiling is TIGHTER than the default signature budget (`--token-budget` below it, a
+  body ceiling, MCP `budget_tokens` likewise) carries no `e=`: its est_tokens promise and its rows stay exactly what they
+  were. A ceiling at or above the default carries `e=` exactly as the default does. For measurement only, the
+  experimental environment switch `RIPWIRE_FOR_ENDLINES=always|auto|never` moves that one decision (CLI `--for` in both
+  dialects and MCP `for`): `auto`, the default, is the rule above; `always` adds `e=` under every ceiling with the same
+  rows, so est_tokens may then exceed a tight budget; `never` drops it everywhere. Any other value falls back to `auto`
+  and says so on stderr. It is not a flag and may be removed once measured.
+  `--pack-signatures`, `--pack-task`, `--from-trace` and the map keep their bytes.
+- **Code above docs.** On a question that does not ask about docs, the code rows of the SHOWN signature set now come
+  first and its markdown rows after them. It is a reorder of the same rows: the score order and the byte budget still
+  choose which rows are shown, so no doc row is ever evicted by it; the shown rows' `r=` values are kept as a set and
+  reassigned in the new order (so for a moved row `r=` is no longer its score rank), and `<sigs docs_after_code="N">` (JSON `"docs_after_code"`) says how many doc rows moved.
+  A question that names docs (`doc…`, `readme`, `guide`, `tutorial`, `manual`, `markdown`, `wiki`, `faq`, `howto`, a
+  change or translation cue, or a named `.md`/`.rst` file) keeps the plain score order, and so does `--no-route`.
+  An answer under an explicit ceiling TIGHTER than the default signature budget (`--token-budget` below it, MCP
+  `budget_tokens` below it, or a body ceiling, `--max-tokens` with `--detail`) is not reordered and carries no
+  `docs_after_code`: it is the answer it was before the reorder, so its est_tokens promise stays what it was (the reading
+  would be uncharged bytes). These are the same three ceilings that drop `e=`, decided by one predicate.
+  `RIPWIRE_NO_DOCS_AFTER_CODE`, set to any value (even empty or `0`), turns the reorder off everywhere (CLI and MCP `for`).
+- **A hop row needs a resolved callee.** In a compact `--for` answer's `<hops>`, a candidate whose every callee edge
+  was bound by name alone (the `via="name"` rows of the receiver-evidence entry above) gets no `<h>` row and is counted
+  in `noedge=`, whose reading is "no RESOLVED callee found", never "none exists". The header then defines `via=` only
+  when a hop that keeps its row has such a callee. Gates: `test/forsigspancheck.sh` (H), `test/docdemotecheck.sh` (f).
+
+Gate: `forsigspancheck` (fixture `test/forcompletefix`, C/JS/Python/TS).
+
+### Changed — leaner answers: `--whereis` lists definitions, two lossless row spellings, the MCP legend once per session
+
+Measured on 90 rung-0 answers of a comparison table (eight repos, three in-sample and five held out), base vs this
+build: 631,732 → 611,785 B for the lossless changes alone (−3.2%), 568,600 B with the `--whereis` default (−10.0%).
+Every gold item the base answers supplied is still supplied (502 of 502), and decoding the lossless spellings gives
+the base answer back element for element on all 90.
+
+- **`--whereis=SYM` lists the definitions and counts the references, when that answer is more complete or shorter.** Every
+  `kind="def"` row is listed; the `kind="ref"` rows are counted in one `<refs count="N" next="--whereis=SYM
+  --whereis-listing=refs"/>` element whose `next=` lists exactly those rows. The default serves this page when it
+  lists MORE definitions than the `--whereis-listing=all` page does under the same row cap (a capped all page can list
+  fewer: HEAD's references fill the cap before the branch definitions arrive), whatever its bytes. When both pages list
+  the same definitions, it serves this page only if it is strictly shorter in bytes (compared as written and in the
+  compact legend), and a tie lists every hit. On a symbol with few references (one to three on a 60-symbol sample) the
+  count and its legend reading cost more than the rows they replace, so the default never serves a page that lists
+  fewer definitions, nor, for the same definitions, one that lists fewer rows in more bytes (an explicit
+  `--whereis-listing=defs` is served as asked).
+  `--whereis-listing=defs|refs|all` (MCP `listing`) picks the rows; `all` is the whole hit list. An answer with no
+  reference row, or no definition row (the mentions are then the answer), lists every hit. `kind="def"` is the
+  parser's label: a definition it does not model (a Ruby `define_method`, a `setattr`, a name bound by assignment) is
+  among the counted references, and the legend says so. Median where-defined answer 10,455 → 1,560 B.
+  `shown=`/`capped=`/`--limit`/`--offset` and `<more hits=>` window the listed rows; `hits=` counts every row;
+  `complete=` reads the listing.
+- **Lossless:** a `--whereis` row on HEAD's commit omits `tip=`/`date=` (they read `at=` and the new root
+  `head_date=`); a `--for` lens row omits `cx=`/`ccx=`/`in=` when 0 (the legend says an absent one is 0; the rows
+  kept by the byte budget are unchanged). Median per class: how-it-works −0.24 KB, orient-for −0.26 KB,
+  where-defined −1.95 KB; map answers are unchanged.
+- **MCP: the legend session opens on the first answer.** A stdio session no longer waits for a read of
+  `ripwire://legend-dict`: its first answer carries its legend inline, later answers take the `legend="ref"`
+  posture (rows first, each definition sent once per session, the core carried by the first ref answer).
+  `--mcp-legend=inline` keeps the previous posture; `legend:"compact"`/`"full"` still keep one answer inline; the
+  CLI and the HTTP transport are unchanged. A ten-call session on one repo: 45,463 → 32,622 B (inline) → 29,679 B.
+- **Manifest.** The `tools/list` manifest grows 46,732 → 46,869 B: whereis declares `listing`.
+
+Gates: `crossrefcheck` (LEAN L1–L16 — L11–L14 the same-definitions bytes rule: one ref, 73 refs, the exact tie and one
+byte either side, the MCP twin; L15 and L16 the definitions-first rule: a capped answer whose longer defs page lists more
+definitions is served, and one whose pages list the same definitions keeps the shorter all page, each with its MCP twin
+— and listing=all twins), `completecheck`, `legendrefcheck` (J), `mcptwinclaimscheck`
+(A-default), `compactlegendcheck` (re-pinned with the measured bytes; a listing=all twin pin), `mcpmanifestcheck`.
+
+
+### Fixed — every disclosed cut names the call that recovers it: `--for`'s `<sigs>`, `--lint`'s per-rule floor, `--impact`'s import tier
+
+Three cuts were disclosed and still dead ends — counted, with no pasteable call that serves the rest:
+
+- **`--for` (and the MCP `for` twin, and `--for --json`).** A `<sigs shown= total= capped="1">` block cut by the payload
+  ceiling or an explicit `--token-budget` now carries `next=` — the same ranked lens re-run with the signatures given the
+  whole ceiling, sized from the untrimmed block so nothing is cut (`--for=TASK --signatures-only [ranking flags]
+  [--pack-top-n=N] --token-budget=T`) — and, when rows were dropped, `next_offset=`: the candidate index the cut starts at
+  (the last printed row's rank, so a slot that prints no row cannot skew it). `--json` carries `"sigs_next"` and
+  `"sigs_next_offset"`. The MCP twin carries no CLI argv (an MCP client re-calls the tool): `next_budget_tokens=T` names
+  the `budget_tokens` a re-call needs, beside the same `next_offset=`. Nothing consumes `next_offset=` yet
+  (`--for --offset=N` pages the file-grain list, a different one; `next=` re-runs the list), and its clause says so.
+  Present-only legend clauses define each. At the
+  default ceiling, and at any explicit ceiling wide enough that the signature side is frozen at the default's, they are
+  exempt from the signature trim — the rows shown are the ones they were. Under a tighter explicit ceiling (a hard one)
+  `next=` rides alone, and rows pay for it ONLY where paying is what makes the answer fit: the answer with every row the
+  cut leaves plus `next=` is served whenever it fits; only when it lands past its ceiling are rows dropped to pay (a
+  capped compact answer then serves the rows a paid full one keeps — fewer than `--legend=full` serves only where the
+  compact header is the larger one and full fits unpaid), and that paid answer is served only when it fits. Past
+  the ceiling either way (the rank 1..4 floor has nothing left to give, or the MCP `for` answer, whose header overshoots
+  `budget_tokens` on its own), no row is dropped for it — the answer keeps the rows the cut alone leaves, `next=` still
+  ships (the call that recovers a cut is never the thing cut), and the root says `over_ceiling="1"`, with a clause naming
+  the cause where the answer's own ceiling was otherwise met. Measured on 20 queries at a 2000-token budget: the CLI keeps
+  every row on 19 (the 20th was over its ceiling and now pays one row to fit), `--json` on all 20, MCP `for` on all 20
+  (19 of them over their ceiling either way); at 4000, MCP `for` pays on the 6 answers that fit only by paying.
+  No budget, ceiling or token conversion changed.
+- **`--lint` / `--lint-rules` and `--sarif`.** A rule that spends its per-rule match budget (`count_capped="1"`) now makes
+  the root carry `findings_next=` (SARIF: `runs[0].properties.findingsNext`, which keeps `--sarif`): only the floored
+  rules, under a 10x budget, through the new `--lint-max-per-rule=N` (sets each rule's budget either way; the default
+  stays 5000). A re-run still floored names its own.
+- **`--impact`.** A cut import tier dropped `importers_next=` when `--impact=SYM --limit=N` passed 120 bytes, so a long
+  selector lost its only continuation with no marker. It is now always emitted in full, like every other `next=`.
+
+Also: the `ripwire-handoff` skill passed `--top-k=20` to `--for`, which does not read it; it now spells
+`--signatures-only`. Gates: `forrankordercheck` (9), `lintbudgetcheck` (5), `impactimportcheck` (#9d), `estchargecheck`
+(#11 A7 unpaid twin), `compactlegendcheck` (P4 floor twin, P1-B), `forrankordercheck` (10) and (11), `fordisclosurecheck` (#2c).
+
+
 ### Added — MCP `grep` rows carry the matched text and a `fetch_body` handle (CLI parity)
 
 The MCP `grep` hit row was `{file, line, in}`: no matched text, so an agent re-read every file it had just searched, and
@@ -834,13 +1176,30 @@ call-shaped references, so on such a function `--callers`, `--callees`, `--impac
   tree, django and webpack, 30 were identical. The 3 that differed are in scope: a read row became
   `role="value"`; a callee answer gained 2 rows; `--dead-code` dropped 4 functions that a `NODE_SET_METHOD`
   argument or a CommonJS `module.exports` table holds.
+- **Depth.** The capture does not descend past 512 levels of nesting (a 300-link C `else if` chain reaches it). That
+  cut is disclosed, never silent: every answer that reads value references for the cut file's language — the
+  callers/callees roots, `--impact`, `--safe-delete`, `--dead-code`, `--uses`, `--path` (beside `to_value_refs=`),
+  `--json` and the MCP twins — carries `value_refs_depth_capped=N` (files cut) and `value_refs_depth_at=FILE:LINE`
+  (the first cut), so a missing row, a `count=` or a listed dead function there reads as a floor. The named
+  exceptions read the rows and do not yet carry it: `--quality-delta`'s dead-code kind and its `value-ref-excluded=`
+  count (CLI and MCP), `--verify='uses(SYM)'` / `'unused(SYM)'` (their `count=` is a floor there; the verdict is not:
+  a witness confirms, an absence is `not-established`), and the LSP references and hover handlers, which have no
+  attribute to carry it. An answer over a tree with no cut is byte-identical.
+- **Second review.** A parameter of a prototype, a function-pointer typedef or parameter, a C++ member declaration, a
+  Go func type or interface method, or a TS function type, `declare function` or interface signature no longer hides a
+  same-named function in the enclosing scope (`signal( SIGINT, handler )` beside `typedef void (*fn_t)( int handler )`
+  was no row). A function that only stores ITSELF (`timer_set( tick )` inside tick) is no longer kept off `--dead-code`
+  or `dead_code_candidate`, as a recursive self-call is no caller. `--callees` rows are per binding site and written
+  callee: two calls `tbl.k(); tbl.k();` through one slot are one row, and `sites=` counts binding sites, not calls. A
+  known floor: one slot called under two spellings (`tbl.k()` and `tbl["k"]()`) is two written callees, so two rows. A C `[expr]` designator, a numeric key
+  and an identifier key are capped like every other written slot.
 - **Cost.** A cold default map costs +3.6% CPU on this tree, +6.3% on django and +5.2% on webpack (median of 5,
   `sim/refval_cpu.sh`).
 - **Cache.** `kParserVer` moves.
 - **Manifest.** The `tools/list` manifest grows 46,591 → 46,732 B: the two find descriptions name `valueRefs` as
   not a proven call.
 
-Gate: `test/recallshapecheck.sh`. It has 177 arms across C, C++, JS, JSX, TS, TSX, Python and Go:
+Gate: `test/recallshapecheck.sh`. It has 201 CLI arms (plus the parity checks) across C, C++, JS, JSX, TS, TSX, Python and Go:
 - positives;
 - near-miss negatives for every guard, each proven able to fail by a mutation (`sim/refval_mutate.sh`);
 - named floors;
@@ -1254,7 +1613,7 @@ per page instead. Gate: `test/impactdepthcheck.sh`.
 
 ### Changed — the versions this release moves, stated once
 
-`kParserVer` 124 → 148 (the function-literal fix takes 128; #338 and #325 take 129; the body-less C/C++ type-specifier
+`kParserVer` 124 → 156 (the function-literal fix takes 128; #338 and #325 take 129; the body-less C/C++ type-specifier
 span fix and the TypeScript `await f<T>(x)` / `!f<T>(x)` calls each took a number of their own on their branches, as did
 the false-edge resolution (134, 135), the value-reference rows (140) and the Ruby method-lookup changes (#373: one per
 step from 130 to 137 — bare-word calls, mixins, typed receivers, RSpec targets, Rails declared calls, Rake and Jbuilder
@@ -1262,12 +1621,14 @@ files, RSpec matcher chains, class objects — then 142 and 145 for its rebase a
 change); 141 sat above every number a branch build of unreleased work had used, and the review fixes to the global-object
 shadow and the value-reference slot text take 143, above 141's full-use file tag 142. The Ruby method lookup lands at
 148, renumbered from its branch's 145: other branch builds in flight have used up to 147, and 148's full-use file tag is
-149, so no cache such a build wrote is read as this release's), `kCacheVersion` 25 → 28
-(the function-literal fix's record changes, then the false-edge fix's member-call fields; the Ruby branch's appended
-binding kinds need no bump of their own) and `kQSnapCacheScheme` 15 → 17
+149. The Go named-type kinds and the train 25 re-review's extraction fixes each took 145 on their branches, and the
+receiver-evidence records took 145 to 154 on theirs; all three land together at 156: branch builds have used up to 154,
+whose full-use file tag is 155, so no cache such a build wrote is read as this release's), `kCacheVersion` 25 → 29
+(the function-literal fix's record changes, then the false-edge fix's member-call fields, then the receiver chain
+`memberPath`/`memberCtor`; the Ruby branch's appended binding kinds need no bump of their own) and `kQSnapCacheScheme` 15 → 19
 (the `--quality-delta` error-masking and placeholder changes, then the dead kind agreeing with `--dead-code` on functions
-held as values). Every ingest cache written by an earlier build is refused and re-indexed once, and every
-cached quality snapshot is recomputed. The session legend dictionary is `dictv=04d7833c60d2d5bd entries=784`.
+held as values, then on a function that only stores itself, then the defect-shape records of the twelfth kind). Every ingest cache written by an earlier build is refused and re-indexed once, and every
+cached quality snapshot is recomputed. The session legend dictionary is `dictv=593769ab691623d8 entries=806`.
 
 ### Fixed — a call the language resolves outside the tree no longer binds to a same-named in-repo definition
 
@@ -1281,7 +1642,8 @@ the result as a confident edge. Three shapes are now resolved the way the langua
 - a JavaScript/TypeScript call on a global object (`JSON.parse`, `Buffer.from`, `crypto.subtle.verify`) or to a global
   function (`fetch`) in a file that neither imports nor declares that name;
 - a call through `require( 'pkg' )`, `import * as ns from 'pkg'` or a name destructured from a global object, and a Go
-  call through an import whose path no go.mod in the tree contains.
+  call through an import whose path no go.mod in the tree contains (a go.mod path is read as its grammar spells it:
+  bare, quoted or a raw string, with a trailing comment dropped, so `replace "x" => "./x"` puts x in the tree).
 Such a call has no edge and is counted `external=` where the language proves the target is outside the tree (a
 builtin, a global, an outside package or `use`, a Go predeclared function, a C library name), `unresolved=` otherwise. A
 name an import binds from inside the tree, and every implicit-receiver language (Java, C#, C++, Kotlin, Swift, Ruby,
@@ -1312,6 +1674,18 @@ left it behind when a suite timeout killed the gate. `scripts/gatebound.sh` now 
 `alarm` cap (survives SIGKILL) in the background, with the gate's EXIT/TERM/INT/HUP traps killing it; both harnesses
 also arm an `alarm` of their own, and a sanitized harness that will not start is a SKIP, like one that will not link.
 `test/pargatescheck.sh` arm (O) stops each gate mid-harness (TERM and KILL) and asserts no harness survives.
+
+### Fixed — an ASan runtime that hangs before `main` is reported at configure time, and the ASan-harness gates no longer time out on it
+
+On macOS 26.7 with Command Line Tools 26.3 (Apple clang 17.0.0), every `-fsanitize=address` binary deadlocks in the
+sanitizer runtime's own start-up, so each ASan gate ended as an `rc=124` timeout and an `-DRIPWIRE_ASAN=ON` tree built
+binaries that never reached `main`. An Apple `-DRIPWIRE_ASAN=ON` configure now builds and runs an empty ASan program
+under a 10 s timeout (`RIPWIRE_ASAN_PROBE_TIMEOUT`) and stops with the two fixes (update the Command Line Tools/Xcode, or
+configure with Homebrew `llvm@22`); a pass is cached and prints nothing, and non-ASan or non-Apple configures run no probe.
+The gates that compile their own ASan harness (`connectcorecheck`, `radixsimdcheck`, `dynmapsimdcheck`) prefer
+`llvm@22`'s `clang++` when installed (an explicit `CXX` wins); with no working ASan toolchain they, and
+`oswin32logiccheck` arm (B) and `strkerncheck`, print a named `SKIP` with the reason and exit 0. No assertion changed.
+`scripts/asanprobe.sh` holds the compiler choice and the probe.
 
 ### Fixed — C/C++: a body-less `enum X` in a function signature no longer poses as the function's encloser
 

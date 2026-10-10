@@ -36,8 +36,9 @@
 # and NO VERDICT below 40 recommended prompts per arm — that floor is enforced unconditionally below;
 # there is no flag that overrides it, and none should be added.
 #
-# WHAT THIS NEVER OPENS. Exactly the two paths named by --routing and --meter — nothing else on disk,
-# ever. routing.jsonl carries no prompt text by construction (a cksum and a byte length only), and this
+# WHAT THIS NEVER OPENS. Exactly the two paths named by --routing and --meter, plus the one registration
+# file docs/EVALS.md (--evals) read for the window-2 start date and nothing else — no other path on
+# disk, ever. routing.jsonl carries no prompt text by construction (a cksum and a byte length only), and this
 # script never reads a field that could hold any (`detail`, transcripts, repo content); every number
 # printed below is a count, a rate, or a file path the caller supplied.
 #
@@ -65,7 +66,9 @@
 # Exit 0 on a normal readout OR a refusal (refusing below the floor is a correct answer, not a
 # failure); non-zero only when an input file's content cannot be read as this instrument's data at all.
 import argparse
+import datetime
 import os
+import re
 import subprocess
 import sys
 import json
@@ -74,6 +77,84 @@ MIN_RECOMMENDED_PER_ARM = 40   # docs/EVALS.md §4 — pre-registered before the
 KEEP_PP = 10.0                 # KEEP >= +10pp; REWORD is (0, +10)pp; REMOVE <= 0pp
 ARMS = ("treatment", "control")
 AGENT = "claude"                # routing.jsonl is shared with the Codex router; see header
+
+
+def default_evals():
+    """docs/EVALS.md next to this script (bench/ and docs/ are siblings in the checkout)."""
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "docs", "EVALS.md")
+
+
+# The prompt-router registration (docs/EVALS.md, "Claude Code prompt router — PRE-REGISTERED 2026-09-02")
+# carries the readout clock as ONE bold line, `**Window start:** YYYY-MM-DD` (or `PENDING`). Window 1 (the
+# 2026-09-02 registration) had no control arm on a default install (issue #381), so it is VOID for the
+# verdict and is printed as such, never as a readout date; window 2 starts at the release that ships
+# `arm=auto`, and its readout date is start + 28 days, with the one-time extension at start + 42 days. The
+# registration states neither date: they are derived here from the start. Read from that section only.
+REGISTRATION_HEADING = "### Claude Code prompt router — PRE-REGISTERED"
+WINDOW_START_LINE_RE = re.compile(r"^\*\*Window start:\*\*[ \t]*(.*)$", re.M)
+WINDOW_START_DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})(?!\d)")
+READOUT_DAYS = 28
+EXTENDED_DAYS = 42
+WINDOW1_LINE = ("prompt-router window 1 (registered 2026-09-02): VOID -- no control arm (issue #381); "
+                "not a readout")
+PENDING_LINE = ("prompt-router readout date: PENDING -- window 2 starts at the release that ships arm=auto "
+                "(no Window start date in docs/EVALS.md yet)")
+
+
+def read_window_start(path):
+    """(start, pending, problem). `start` is a `datetime.date` when the registration records a window-2
+    start date; `pending` is True when it says PENDING or carries no `**Window start:**` line at all;
+    `problem` is a one-line reason when the clock could not be read (file missing, section missing, a
+    start that is neither a calendar date nor PENDING) so the report says "unknown" and why."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+    except OSError:
+        return None, False, "registration file not readable: %s" % os.path.normpath(path)
+    begin = text.find(REGISTRATION_HEADING)
+    if begin < 0:
+        return None, False, "no prompt-router registration section in %s" % os.path.normpath(path)
+    nxt = text.find("\n### ", begin + 1)
+    section = text[begin:nxt if nxt > 0 else len(text)]
+    line = WINDOW_START_LINE_RE.search(section)
+    if line is None:
+        return None, True, None
+    value = line.group(1).strip()
+    if value.upper().startswith("PENDING"):
+        return None, True, None
+    m = WINDOW_START_DATE_RE.match(value)
+    if m is None:
+        return None, False, "the `**Window start:**` line is neither a YYYY-MM-DD date nor PENDING"
+    try:
+        return datetime.date.fromisoformat(m.group(1)), False, None
+    except ValueError:
+        return None, False, "the `**Window start:**` date is not a valid calendar date"
+
+
+def flag_line(label, d, today):
+    """One readout-date line: the date, how far it is from `today`, and a loud flag once it has passed (a
+    passed date is exactly when an unread, underpowered window needs a decision)."""
+    delta = (today - d).days
+    if delta > 0:
+        return "%s: %s -- PASSED %d day(s) ago (as of %s)" % (label, d.isoformat(), delta, today.isoformat())
+    if delta == 0:
+        return "%s: %s -- TODAY" % (label, d.isoformat())
+    return "%s: %s -- in %d day(s) (as of %s)" % (label, d.isoformat(), -delta, today.isoformat())
+
+
+def readout_lines(start, pending, problem, today):
+    """The report's readout lines. Window 1 is ALWAYS printed as VOID -- it is never given a readout date,
+    so no output of this script can call the 2026-09-02 window passed. Window 2 follows its start date."""
+    lines = [WINDOW1_LINE]
+    if problem:
+        lines.append("readout date: UNKNOWN -- %s" % problem)
+    elif pending or start is None:
+        lines.append(PENDING_LINE)
+    else:
+        lines.append(flag_line("prompt-router window 2 readout date", start + datetime.timedelta(days=READOUT_DAYS), today))
+        lines.append(flag_line("prompt-router window 2 extended readout date (one-time)",
+                               start + datetime.timedelta(days=EXTENDED_DAYS), today))
+    return lines
 
 
 def default_home():
@@ -262,6 +343,17 @@ def report_one_router(router, routing_rows, meter_rows):
         print("%-10s %8d %12d %10d %8s %9d"
               % (arm, st["prompts"], st["recommended"], st["adopted"], rate_s, st["sessions"]))
 
+    # Per-arm counts on one line, and a LOUD flag for an empty arm: a window with no control prompts
+    # (the shipped default put every session on treatment until issue #381) cannot yield the registered
+    # treatment-minus-control difference no matter how long it runs.
+    print("arm counts: treatment=%d control=%d prompts"
+          % (arm_stats["treatment"]["prompts"], arm_stats["control"]["prompts"]))
+    for arm, other in (("control", "treatment"), ("treatment", "control")):
+        if arm_stats[arm]["prompts"] == 0:
+            print("!!! NO %s ARM -- %s has 0 prompts in this window (the other arm has %d); "
+                  "the registered treatment-minus-control difference CANNOT be computed from it !!!"
+                  % (arm.upper(), arm, arm_stats[other]["prompts"]))
+
     covered, total = join_coverage(prompts, meter_rows)
     if total:
         print("join coverage: %d/%d routing row(s) (%.1f%%) have a session with >=1 meter row"
@@ -284,6 +376,31 @@ def report_one_router(router, routing_rows, meter_rows):
     return 0
 
 
+def parse_today(arg):
+    """`--today` as a date (default: the current UTC date), or None when it is not YYYY-MM-DD."""
+    if not arg:
+        return datetime.datetime.now(datetime.timezone.utc).date()
+    try:
+        return datetime.date.fromisoformat(arg)
+    except ValueError:
+        return None
+
+
+def print_readout(evals_path, today):
+    """The readout-clock lines. They belong to the PROMPT router's registration; the toolcall
+    router has its own registration and is not dated here."""
+    for line in readout_lines(*read_window_start(evals_path), today):
+        print(line)
+
+
+def pick_routers(requested, routing_rows):
+    """The routers to report: the one asked for, else every router in the log (prompt first), else the
+    empty prompt-router table so a log with nothing in it still shows its shape."""
+    if requested:
+        return [requested]
+    return routers_present(routing_rows) or [DEFAULT_ROUTER]
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="adoption-within-two A/B readout for the Claude Code routers (docs/EVALS.md §4 and "
@@ -294,6 +411,12 @@ def main():
                      help="path to substitution.jsonl (default: $RIPWIRE_HOME or ~/.ripwire, substitution.jsonl)")
     ap.add_argument("--since", default=None, help="only rows with at >= this ISO8601 timestamp")
     ap.add_argument("--until", default=None, help="only rows with at < this ISO8601 timestamp")
+    ap.add_argument("--evals", default=default_evals(),
+                     help="path to docs/EVALS.md, read only for the prompt-router registration's window-2 "
+                          "start date (default: the docs/EVALS.md next to this script)")
+    ap.add_argument("--today", default=None,
+                     help="YYYY-MM-DD to compare the window-2 readout date against (default: the current UTC date; "
+                          "a fixed value makes the report reproducible)")
     ap.add_argument("--router", default=None,
                      help="report only this router (e.g. prompt, toolcall) instead of every router "
                           "present in the log")
@@ -311,6 +434,11 @@ def main():
               % args.meter, file=sys.stderr)
         return 1
 
+    today = parse_today(args.today)
+    if today is None:
+        print("routing_ab_report: --today must be YYYY-MM-DD, got %r" % args.today, file=sys.stderr)
+        return 2
+
     routing_rows = filter_window(routing_rows, args.since, args.until)
 
     print("routing_ab_report -- routing=%s meter=%s" % (args.routing, args.meter))
@@ -319,15 +447,9 @@ def main():
              len(meter_rows), meter_bad, "found" if meter_existed else "not found"))
     if args.since or args.until:
         print("window: [%s, %s)" % (args.since or "-inf", args.until or "+inf"))
+    print_readout(args.evals, today)
 
-    if args.router:
-        routers = [args.router]
-    else:
-        routers = routers_present(routing_rows)
-        if not routers:
-            routers = [DEFAULT_ROUTER]   # nothing in the log yet -- still show the empty prompt-router table
-
-    for router in routers:
+    for router in pick_routers(args.router, routing_rows):
         report_one_router(router, routing_rows, meter_rows)
 
     return 0

@@ -531,6 +531,9 @@ struct McpDispatchPolicy
     // time); the HTTP transport passes none, so every answer there keeps its legend inline and the resource read that
     // switches a stdio session to legend="ref" only serves text. See legenddict.h.
     legenddict::LegendSession* legendSession = nullptr;
+    // lean-answers lane: whether that session OPENS on its first reducible answer (the stdio default) or only on a read of
+    // ripwire://legend-dict (--mcp-legend=inline, the pre-lane posture). Read only where legendSession is set.
+    bool                       legendOpensOnFirstAnswer = false;
     // --mcp-tools: bit i = kMcpVerbTable[ i ] is listed and callable. The whole catalog unless the flag narrowed it;
     // toolSpec is the flag's value as typed, rendered only under a subset (the refusal and the instructions note).
     McpToolMask toolMask = kMcpAllToolsMask;
@@ -1034,9 +1037,16 @@ inline std::string mcpLegendPointer( const McpDispatchPolicy& policy )
     {
         return {};
     }
-    return " Legends: each answer defines its own attributes until this session reads the resource ripwire://legend-dict "
-           "once (dictv=" + legenddict::dictionaryVersion() + "); after that answers list rows first, carry a definition "
-           "only the first time the session meets it, and end with <about legend=\"ref\"/>. legend:\"compact\" on a call "
+    if( !policy.legendOpensOnFirstAnswer )   // --mcp-legend=inline: the pre-lane pointer, byte for byte
+    {
+        return " Legends: each answer defines its own attributes until this session reads the resource ripwire://legend-dict "
+               "once (dictv=" + legenddict::dictionaryVersion() + "); after that answers list rows first, carry a definition "
+               "only the first time the session meets it, and end with <about legend=\"ref\"/>. legend:\"compact\" on a call "
+               "that takes it keeps that answer's legend inline.";
+    }
+    return " Legends: the session's first answer defines its own attributes inline (dictv=" + legenddict::dictionaryVersion()
+           + "); later answers list rows first, carry a definition only the first time the session meets it, and end with "
+           "<about legend=\"ref\"/>; ripwire://legend-dict/full holds every definition. legend:\"compact\" on a call "
            "that takes it keeps that answer's legend inline.";
 }
 
@@ -1334,7 +1344,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                    // paraphrased — this stanza used to describe an ordering the selector does not use.
                    "{\"name\":\"exemplar\",\"description\":\"BEFORE writing a function / method / class / struct / interface / variable, get the repo's single best-in-class instance of that kind to imitate — signature AND full body. " + std::string( kExemplarSelectionRule ) + ". Beats grep/find_symbol: those find A definition, this ranks every definition and returns the one worth copying. kind = fn|method|class|struct|iface|var, OR a task string (its top match's kind is used).\","
                    + mcprefuse::toolMetadataFor( "exemplar", pathIsRequired ) + "},"
-                   "{\"name\":\"quality_delta\",\"description\":\"Your PR self-check, run every time you think a change is DONE — pairs with the CLI-only --test-gate (names the tests to run + the untested blast radius; not MCP-exposed) to form the two-step pre-PR gate. Reports ONLY what your working tree made WORSE vs baseline, across 11 measured failure modes (complexity, verbosity, nesting, params, new duplication, new dead code, new public API surface, error-masking, short-horizon churn, new clone of a reused helper, an added stub or TODO). Read-only; auto-compares vs git HEAD with no setup, or a pinned .ripwire_quality_baseline sidecar if present and not stale (baseline says which). sev=minor does not gate; acked findings stay suppressed until one worsens. at= is the commit compared at (+dirty = the working tree differed).\","
+                   "{\"name\":\"quality_delta\",\"description\":\"Your PR self-check, run every time you think a change is DONE — pairs with the CLI-only --test-gate (names the tests to run + the untested blast radius; not MCP-exposed) to form the two-step pre-PR gate. Reports ONLY what your working tree made WORSE vs baseline, across 12 kinds (complexity, verbosity, nesting, params, new duplication, new dead code, new public API surface, error-masking, short-horizon churn, new clone of a reused helper, an added stub or TODO, a defect shape). new-symbol rows never gate, except defect-shape format-arity. Read-only; auto-compares vs git HEAD with no setup, or a pinned .ripwire_quality_baseline sidecar if present and not stale (baseline says which). sev=minor does not gate; acked findings stay suppressed until one worsens. at= is the commit compared at (+dirty = the working tree differed).\","
                    + mcprefuse::toolMetadataFor( "quality_delta", pathIsRequired ) + "},"
                    "{\"name\":\"quality_baseline\",\"description\":\"PIN the quality floor: writes .ripwire_quality_baseline stamped with the current git HEAD sha, snapshotting complexity / duplication / dead-code / API surface. Call once at the start of non-trivial work, then quality_delta compares against this pinned floor instead of HEAD. Side-effecting (writes a file) — skip it for a simple 'before I push' check, quality_delta already compares vs HEAD with zero setup.\","
                    + mcprefuse::toolMetadataFor( "quality_baseline", pathIsRequired ) + "},"
@@ -1484,6 +1494,10 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             const std::string text    = strArg( "text" );     // insert_before/after
             const std::string handle  = strArg( "handle" );   // T4 fetch_body
             const std::string kind    = strArg( "kind" );     // exemplar kind token; whereis/stray_content/flags/doc_drift name filter
+            // whereis: defs|refs|all. Read HERE with the other strings, before the shared shape gate below: read inside the
+            // whereis arm, a non-string `listing:5` decoded to "" after that gate had run, its shape refusal was dropped, and the
+            // closed-set refusal then told the caller it sent '' (CodeRabbit 5468003465; test/crossrefcheck.sh LEAN (L10b)).
+            const std::string listingArg = strArg( "listing" );
             const std::string from    = strArg( "from" );     // path verb: source symbol
             const std::string to      = strArg( "to" );       // path verb: destination symbol
             const std::string trace   = strArg( "trace" );    // L4 from_trace: the raw trace TEXT
@@ -1533,9 +1547,14 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             // and only on the verbs whose legend the dictionary holds: the ones that declare `legend` (compacted first,
             // then reduced) and `for` (its native dialect). `legend:"ref"` before the read is the compact posture: an
             // answer is never ref before the dictionary was served.
+            // lean-answers lane: the session no longer waits for that read. Its FIRST such answer is served inline, whole,
+            // and OPENS the session (legenddict::openSessionWith); every later one takes the ref posture, the first of them
+            // carrying the core. legend:"compact"/"full" still keep one answer inline; an HTTP request holds no session.
             legenddict::LegendSession* const legendSession = policy.legendSession;
-            const bool legendRefPosture = legendSession != nullptr && legendSession->refOn
-                                        && ( legendDeclaredHere ? ( legendArg.empty() || legendArg == "ref" ) : name == "for" );
+            const bool legendSessionPosture = legendSession != nullptr
+                                            && ( legendDeclaredHere ? ( legendArg.empty() || legendArg == "ref" ) : name == "for" );
+            const bool legendRefPosture   = legendSessionPosture && legendSession->refOn;
+            const bool legendOpensSession = legendSessionPosture && !legendSession->refOn && policy.legendOpensOnFirstAnswer;
 
             // ── W3FIX H4/M5: every NUMERIC argument through the ONE guarded reader ─────────────────────────
             //
@@ -1656,6 +1675,10 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                         body      = &compacted;
                     }
                     legenddict::applyRefPosture( compacted, *legendSession );
+                }
+                else if( legendOpensSession )
+                {
+                    legenddict::openSessionWith( *body, *legendSession );   // served as-is; opens the session when reducible
                 }
                 return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
                      + mcpdetail::jsonEscape( *body ) + "\"}],\"_index\":\"" + mcpdetail::jsonEscape( stamp )
@@ -2294,10 +2317,13 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     // — the shared triple (flag + problem + the per-fault clause selectorrefuse.h speaks for
                     // the CLI), not a hits="0" answer about the literal string. `seedFault` distinguishes it
                     // from the non-git degrade, which is the other way whereisText returns "".
-                    resp = pagedResult( [ & ]( McpPageArgs pg )
+                    crossref::WhereisListing listing = crossref::WhereisListing::ShorterOfDefsAll;
+                    const std::string listingRefusal = whereisListingFromArg( listingArg,
+                                                                              mcpdetail::findRawValue( args, "listing" ).isPresent, listing );
+                    resp = !listingRefusal.empty() ? errResultMsg( -32602, listingRefusal ) : pagedResult( [ & ]( McpPageArgs pg )
                     {
                         bool              seedFault = false;
-                        const std::string t = whereisText( path, symbol, kind, crossref::kWhereisHits, pg, &seedFault );
+                        const std::string t = whereisText( path, symbol, kind, crossref::kWhereisHits, pg, &seedFault, listing );
                         if( seedFault )
                         {
                             return errResultMsg( -32602, mcprefuse::notFound( getIndex( path ).ing, "symbol", symbol ) );
@@ -2845,6 +2871,7 @@ struct McpStdioConfig
     std::vector<std::string> roots;
     McpToolMask              toolMask = kMcpAllToolsMask;
     std::string              toolSpec;
+    bool                     legendInline = false;   // --mcp-legend=inline: the session opens only on a read of the core
 };
 
 // The stdio server's dispatch policy. Same root plumbing as runMcpHttp(), building McpDispatchPolicy::defaultRoot
@@ -2875,6 +2902,7 @@ inline McpDispatchPolicy mcpStdioPolicy( const McpStdioConfig& config )
     policy.defaultRoot = defaultRoot;   // "" unless a startup root was given — see the comment above
     policy.toolMask    = config.toolMask;  // --mcp-tools
     policy.toolSpec    = config.toolSpec;
+    policy.legendOpensOnFirstAnswer = !config.legendInline;   // lean-answers lane: the default session posture
 
     // R2a (the 2026-08-12 usage mine): with NO startup root, resolve the launch cwd ONCE as the softest
     // default — see McpDispatchPolicy::assumedRoot for the full contract and mcpResolveAssumedRoot for

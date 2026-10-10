@@ -17,10 +17,10 @@ it once, marked `×N`.
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 236 | 94 | 135 | **101** |
+| 240 | 96 | 140 | **100** |
 
 Plus 7 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 236 + 7 is the 243 constants this generator parses out of `src/`.
+are not counted as caps, and 240 + 7 is the 247 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -38,8 +38,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **130 of 236 caps are classified
-(45 INDEXING, 41 OUTPUT, 44 BOUNDARY); the remaining 106 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **132 of 240 caps are classified
+(47 INDEXING, 41 OUTPUT, 44 BOUNDARY); the remaining 108 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -89,7 +89,7 @@ refuse to write, so the column cannot be satisfied by pointing at nothing.
 
 ## Caps, by file
 
-One table for each of the 94 files that declare a cap — the 236 caps counted above, and no parameter.
+One table for each of the 96 files that declare a cap — the 240 caps counted above, and no parameter.
 
 ### `src/abicheck.h`
 
@@ -134,7 +134,7 @@ Discloses: **none**
 
 ### `src/cli.h`
 
-Discloses: `capped`, `bridges_capped`, `files_capped`, `inc_capped`, `mention_idents_capped`, `mention_syms_capped`, `modules_capped`, `rows_capped`, `sibs_capped`, `syms_capped`, `tests_capped`, `unflagged_capped`, `untested_capped`
+Discloses: `capped`, `bridges_capped`, `count_capped`, `files_capped`, `inc_capped`, `mention_idents_capped`, `mention_syms_capped`, `modules_capped`, `rows_capped`, `sibs_capped`, `syms_capped`, `tests_capped`, `unflagged_capped`, `untested_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
@@ -505,11 +505,11 @@ Discloses: **none**
 
 ### `src/ingest_valuerefs.h`
 
-Discloses: **none**
+Discloses: `value_refs_depth_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
-| `kVrMaxDepth` | `512` | — | the value-uses pass's own depth guard (ingest_sidecap.h kSideDepthUses) |
+| `kVrMaxDepth` | `512` | INDEXING | the value-uses pass's own depth guard (ingest_sidecap.h kSideDepthUses); a cut is disclosed as value_refs_depth_capped= (valuerefs.h) |
 | `kVrTextCap` | `96` | — | a written slot / callee longer than this is cut with "…" |
 
 ### `src/jsrunner.h`
@@ -571,7 +571,7 @@ Discloses: **none**
 
 ### `src/lintrules.h`
 
-Discloses: **none**
+Discloses: `count_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
@@ -726,6 +726,14 @@ Discloses: **none**
 | --- | --- | --- | --- |
 | `kMaxPartitions` | `16` | BOUNDARY | — |
 
+### `src/pathgaps.h`
+
+Discloses: `gap_syms_capped`
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kPathGapRows` | `3` | — | <gap> rows printed; gap_syms= counts them all, gap_syms_capped="1" says so |
+
 ### `src/pattern.h`
 
 Discloses: `hits_capped`
@@ -753,6 +761,7 @@ Discloses: **none**
 | `kMaxCacheBlobAgeDays` | `30.0` | BOUNDARY | — |
 | `kMaxCacheBlobCount` | `4096` | BOUNDARY | bound every future hygiene scan |
 | `kMaxEditLockAgeDays` | `1.0` | BOUNDARY | — |
+| `kMaxFilesPerCommit` | `30` | — | — |
 | `kRenameMaxChain` | `8` | INDEXING | a→b→c… chain depth followed from one current path (disclosed) |
 | `kRenameMaxPairs` | `4000` | INDEXING | hard cap on recorded pairs (disclosed when hit) |
 
@@ -787,6 +796,14 @@ Discloses: **none**
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kDefaultRecallMaxTokens` | `8000` | — | — |
+
+### `src/receiverevidence.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kWalkCap` | `64` | INDEXING | classes visited per base walk; deterministic (sorted chaUp) |
 
 ### `src/redact.h`
 
@@ -894,6 +911,7 @@ Discloses: `capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
+| `kSkillExcerptMaxBytes` | `120` | — | — |
 | `kSkillScanFindingCap` | `200` | INDEXING | generous for one file or a small dir; caps a pathological --scan-skills sweep |
 
 ### `src/slice.h`
@@ -938,7 +956,7 @@ Discloses: `name_ladder_capped`
 
 ### `src/valuerefs.h`
 
-Discloses: `capped`
+Discloses: `capped`, `value_refs_depth_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |

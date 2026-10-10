@@ -172,9 +172,24 @@ echo "=== (4) byte ceiling on the fixture ==="
 # Pinned, not relative: the pre-fix binary answers this exact fixture in 5,307 B (recorded in the header).
 # 3000 leaves room for the shared legends (which are most of what is left) while staying far below any
 # padded answer. If a legend legitimately grows past this, re-pin in the same commit and say why.
+# RE-PIN 2026-10-07 (lane for-spine-span-068, by design): the one floored row now carries e="N" (its end line)
+# and the full legend gains the ~225 B clause defining e= — 2871 -> 3107 B. The 3000 B assertion is KEPT on the
+# answer with exactly those two additions normalised out (4), and the whole answer gets its own ceiling of
+# 3300 B (4b) — still far below the 5307 B padded answer this arm exists to keep out.
 a_bytes="$( printf '%s' "$A_OUT" | wc -c | tr -d ' ' )"
-[ "$a_bytes" -lt 3000 ] && ok "(4) the floored bundle is $a_bytes B (< 3000; pre-fix was 5307 B on this fixture)" \
-                        || no "(4) the floored bundle is $a_bytes B, over the 3000 B ceiling"
+a_norm_bytes="$( printf '%s' "$A_OUT" | sed -E 's/ e="[0-9]+"//g; s/; e= on a d row: the 1-based line where that definition ends, body-inclusive; absent when the extent is not known \(extent_suspect, docs, config\), never 0; l= is the line of the definition.s name, so a definition can start above l=//' | wc -c | tr -d ' ' )"
+case "$a_bytes$a_norm_bytes" in *[!0-9]*|'') no "(4) byte counts are not numeric ('$a_bytes' / '$a_norm_bytes')"; a_bytes=999999; a_norm_bytes=999999 ;; esac
+[ "$a_norm_bytes" -lt 3000 ] && ok "(4) the floored bundle without e= and its clause is $a_norm_bytes B (< 3000; pre-fix was 5307 B on this fixture)" \
+                             || no "(4) the floored bundle without e= and its clause is $a_norm_bytes B, over the 3000 B ceiling"
+[ "$a_bytes" -lt 3300 ] && ok "(4b) the whole floored bundle is $a_bytes B (< 3300 with e= and its legend clause)" \
+                        || no "(4b) the whole floored bundle is $a_bytes B, over the 3300 B ceiling"
+if printf '%s' "$A_OUT" | grep -q ' e="'; then
+    [ "$a_norm_bytes" -lt "$a_bytes" ] \
+        && ok "(4c) the normalisation in (4) removed e= bytes ($a_bytes -> $a_norm_bytes B), so the 3000 B twin is live" \
+        || no "(4c) the answer carries e= but normalising it removed nothing — the (4) twin would be inert"
+else
+    ok "(4c) this answer carries no e= (a binary without it): (4) measures the answer as it is"
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo "=== (5) nothing matched ⇒ nothing claimed ==="

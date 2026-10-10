@@ -923,6 +923,25 @@ inline std::string_view trimWs( std::string_view s ) noexcept
     return s;
 }
 
+// The first token of a go.mod directive operand — a module path or a directory — as the go.mod grammar spells it: bare
+// (up to whitespace), an interpreted string ("example.com/x") or a raw string (`example.com/x`), the quotes removed. ""
+// when the operand is empty or its quote never closes. Both go.mod readers (this file's replace aliases, graph.h's module
+// census) read a path through it, so a quoted spelling names the same module as the bare one.
+inline std::string_view goModToken( std::string_view s ) noexcept
+{
+    s = trimWs( s );
+    if( s.empty() )
+    {
+        return {};
+    }
+    if( s.front() == '"' || s.front() == '`' )
+    {
+        const std::size_t close = s.find( s.front(), 1 );
+        return close == std::string_view::npos ? std::string_view() : s.substr( 1, close - 1 );
+    }
+    return s.substr( 0, s.find_first_of( " \t" ) );
+}
+
 // Parse go.mod `replace OLD [ver] => NEW [ver]` directives (both single-line and grouped `replace ( … )`).
 // A filesystem NEW target (`./…`, `../…`, or absolute) is resolved relative to the go.mod's root dir; when it
 // ESCAPES `rootReal` (points at a sibling root) we mint a Go alias: module-path `OLD` → the on-disk dir.
@@ -930,11 +949,6 @@ inline std::string_view trimWs( std::string_view s ) noexcept
 inline void parseGoModReplaces( const std::string& bytes, std::uint32_t fromRoot, const std::string& rootReal,
                                 std::vector<ConfigAlias>& out )
 {
-    const auto firstTok = []( std::string_view s ) noexcept
-    {
-        const std::size_t sp = s.find_first_of( " \t" );
-        return sp == std::string_view::npos ? s : s.substr( 0, sp );
-    };
     bool        inGroup = false;
     std::size_t i       = 0;
     while( i < bytes.size() )
@@ -984,8 +998,8 @@ inline void parseGoModReplaces( const std::string& bytes, std::uint32_t fromRoot
         {
             continue;
         }
-        const std::string_view mod = firstTok( trimWs( body.substr( 0, arrow ) ) );
-        const std::string_view tgt = firstTok( trimWs( body.substr( arrow + 2 ) ) );
+        const std::string_view mod = goModToken( body.substr( 0, arrow ) );   // `"example.com/x" => "../x"` is x => ../x
+        const std::string_view tgt = goModToken( body.substr( arrow + 2 ) );
         if( mod.empty() || tgt.empty() )
         {
             continue;
@@ -1494,7 +1508,7 @@ inline HashMap<std::string, std::uint32_t> buildElixirModuleIndex( const IngestR
     for( const Symbol& s : ing.symbols )
     {
         if( s.lang != Lang::Elixir || !s.scope.empty() || s.name.empty() || s.fileId >= F
-            || ( s.kind != SymKind::Other && s.kind != SymKind::Class && s.kind != SymKind::Struct && s.kind != SymKind::Interface ) )
+            || ( s.kind != SymKind::Other && s.kind != SymKind::Class && !isStructOrNamedType( s.kind ) && s.kind != SymKind::Interface ) )
         {
             continue;   // only module/protocol/struct containers, never attributes or type declarations
         }
@@ -4776,7 +4790,7 @@ inline void addTypeAliasBases( const IngestResult& ing, HashMap<std::string, std
     HashMap<std::string, char> realClassNames;   // alias names some class-like symbol at a non-alias site also carries
     for( const Symbol& s : ing.symbols )
     {
-        const bool classLike = s.kind == SymKind::Class || s.kind == SymKind::Struct || s.kind == SymKind::Interface;
+        const bool classLike = s.kind == SymKind::Class || isStructOrNamedType( s.kind ) || s.kind == SymKind::Interface;
         if( classLike && aliasNames.find( s.name ) != aliasNames.end() )
         {
             siteKey( key, s.fileId, s.line, s.name );
@@ -4809,7 +4823,7 @@ inline HashMap<std::string, char> classNameSet( const IngestResult& ing )
     for( const Symbol& s : ing.symbols )
     {
         const bool rubyModule = ( s.lang == Lang::Ruby && s.kind == SymKind::Other );
-        if( s.kind == SymKind::Class || s.kind == SymKind::Struct || s.kind == SymKind::Interface || rubyModule )
+        if( s.kind == SymKind::Class || isStructOrNamedType( s.kind ) || s.kind == SymKind::Interface || rubyModule )
         {
             classNames.try_emplace( s.name, '\0' );
         }
@@ -5103,7 +5117,7 @@ inline HashMap<std::string, std::vector<std::string>> buildUsingReexports( const
         }
         const Symbol& cls = ing.symbols[ ur.fromSymbol ];
         const std::string_view base = namesplit::stripTemplateArgs( ur.qualifier );
-        if( ( cls.kind != SymKind::Class && cls.kind != SymKind::Struct ) || base.empty() || base == ur.calleeName || base == cls.name )
+        if( ( cls.kind != SymKind::Class && !isStructOrNamedType( cls.kind ) ) || base.empty() || base == ur.calleeName || base == cls.name )
         {
             continue;   // not at class scope, an inheriting constructor, or a class naming itself
         }
@@ -7037,6 +7051,58 @@ struct Narrower
             }
         }
         return !out.empty();
+    }
+};
+
+// Rule 3 asked once per (caller file, name's candidate list) instead of once per call. rule3IncludeFile is a pure
+// function of (caller file, candidate list, minCands) and walks the WHOLE list with a binary search per candidate over
+// the caller's transitive include set, so a file that calls one name N times paid that walk N times for one answer
+// (C: thousands of include ids, a name defined in dozens of files). The key is the candidate list's own address — a
+// byName entry, which buildGraph's resolve loop never inserts into or reorders — plus the file, held until the next
+// reference of ANOTHER file replaces it (references arrive file by file, so one file's answers are all that is ever
+// resident; out of order only costs a recompute, never a wrong answer). minCands is fixed at its default (2): the
+// lists a call computes per reference (a reachableByName survivor set, a FalseEdgeRules-narrowed list) have no stable
+// address and are never memoized. A hit hands back exactly the ids the first computation wrote, in the same order.
+struct Rule3FileMemo
+{
+    struct Answer
+    {
+        std::uint32_t begin = 0;       // slice of `pool`
+        std::uint32_t count = 0;
+        bool          fired = false;   // rule3IncludeFile's return
+    };
+    std::uint32_t                                              fileId = kNoFile;   // the caller file the answers below are for
+    HashMap<const rw::SmallVec<NodeId, 2>*, Answer>            answers;
+    std::vector<NodeId>                                        pool;               // every fired answer's survivor ids, back to back
+
+    // == narrower.rule3IncludeFile( cands, callerFileId, out ): true iff it narrowed (then `out` holds the survivors);
+    // false leaves `out` untouched.
+    bool narrow( const Narrower& narrower, const rw::SmallVec<NodeId, 2>& cands, std::uint32_t callerFileId, std::vector<NodeId>& out )
+    {
+        if( callerFileId != fileId )
+        {
+            fileId = callerFileId;
+            answers.clear();
+            pool.clear();
+        }
+        const auto [ it, fresh ] = answers.try_emplace( &cands );
+        Answer&    ans           = it->second;
+        if( fresh )
+        {
+            ans.fired = narrower.rule3IncludeFile( cands, callerFileId, out );
+            if( ans.fired )
+            {
+                ans.begin = static_cast<std::uint32_t>( pool.size() );
+                ans.count = static_cast<std::uint32_t>( out.size() );
+                pool.insert( pool.end(), out.begin(), out.end() );
+            }
+            return ans.fired;
+        }
+        if( ans.fired )
+        {
+            out.assign( pool.begin() + ans.begin, pool.begin() + ans.begin + ans.count );
+        }
+        return ans.fired;
     }
 };
 

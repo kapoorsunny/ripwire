@@ -107,4 +107,27 @@ if [ "$STATE" = "INACTIVE" ]; then
     echo "  PASS  quiet degrade (INACTIVE, stderr carries only the report)"
 fi
 
+# ── diagnostics compile: -DPROFILE_PMC_VERBOSE=1 must build (PMC_DIAG once spelled printf varargs against an emitter that
+#    had become (stream, text) only — the trace for "which arming step failed" was uncompilable exactly when wanted) and
+#    must stay on stderr: stdout is the data stream. The run's own contract is the same one asserted above. ──────────────
+VBIN="$WORK/pmccheckharness_verbose"
+if ! "$CXX" "$CXXSTD" -O2 -g -Wall -Wextra -pthread \
+        -DPROFILE_ENABLED=1 -DPROFILE_AUTO_REPORT=0 -DPROFILE_PMC_VERBOSE=1 \
+        -I"$ROOT/src/infra" -I"$ROOT/src" -I"$ROOT/third_party" \
+        "$HARNESS" -o "$VBIN" 2> "$WORK/cc_verbose.log"; then
+    echo "  FAIL  verbose diagnostics (-DPROFILE_PMC_VERBOSE=1 failed to compile)"; sed 's/^/    /' "$WORK/cc_verbose.log" | head -10; exit 2
+fi
+if ! "$VBIN" > "$WORK/out_verbose.log" 2> "$WORK/err_verbose.log"; then
+    echo "  FAIL  verbose diagnostics (harness contract violated under -DPROFILE_PMC_VERBOSE=1)"; exit 2
+fi
+# the real backends (Apple Silicon, Linux) always trace something while arming; the inert stubs elsewhere cannot
+case "$( uname -s )-$( uname -m )" in
+    Darwin-arm64|Linux-*) NEED_TRACE=yes ;;
+    *)                    NEED_TRACE=no ;;
+esac
+if grep -q 'prof::pmc:' "$WORK/out_verbose.log" || { [ "$NEED_TRACE" = yes ] && ! grep -q 'prof::pmc:' "$WORK/err_verbose.log"; }; then
+    echo "  FAIL  verbose diagnostics (the arming trace must reach stderr, and only stderr)"; exit 2
+fi
+echo "  PASS  verbose diagnostics (-DPROFILE_PMC_VERBOSE=1 compiles; the trace is on stderr, not stdout)"
+
 echo "pmccheck: PASS"

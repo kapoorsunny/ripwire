@@ -44,6 +44,12 @@ inline void dedupRawDefs( std::vector<RawDef>& rawDefs )
             case SymKind::Section:   return 0;   // each comes from its own single capture (a #define, a heading or data key), so
             case SymKind::Other:     return 0;   // neither collides with a code kind on one name byte
             case SymKind::ModuleScope: return 0; // minted after this pass runs; it can never reach the dedup
+            // Go's type_spec fires the generic @definition.definedtype AND, for `type F func(...)`, @definition.functype on the
+            // same name byte (struct/interface specs fire their own pattern too): the form-specific kind must win, and a
+            // struct/interface must beat the generic defined type. An alias is its own node (type_alias) and never collides.
+            case SymKind::FuncType:  return 2;
+            case SymKind::NamedType: return 1;
+            case SymKind::Alias:     return 1;
         }
         return 0;
     };
@@ -918,6 +924,10 @@ inline void emitReferences( IngestResult& result, std::vector<RawRef>& rawRefs, 
         ref.qualifierRootsStd = r.qualifierRootsStd;   // #150: the FULL written qualifier chain is rooted at std
         ref.memberCall  = r.memberCall;                 // FE-A: a Go/JS/TS/Rust member call (recv stays None)
         ref.memberRoot  = std::move( r.memberRoot );    // FE-A: its receiver chain's root identifier
+        ref.memberPath  = std::move( r.memberPath );    // FE-B: the members between that root and the callee
+        ref.memberCtor  = std::move( r.memberCtor );    // FE-B: the class a constructed receiver names
+        ref.memberVia   = std::move( r.memberVia );     // FE-B on #373: the method a Ruby typed receiver was built by
+        ref.memberFactory = r.memberFactory;            // FE-B on #373: memberCtor names a FactoryBot factory
         ref.fieldName   = std::move( r.fieldName );   // S5-E: the member variable name (e.g. "m_pool")
         ref.composeRel  = std::move( r.composeRel );  // S5-E: "creates" or "uses"
         ref.startByte   = r.startByte;                // shadow fix round: for the block-span containment test

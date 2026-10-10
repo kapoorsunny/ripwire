@@ -881,6 +881,30 @@ inline std::vector<float> docNoiseSymbolMultipliers( const IngestResult& ing, st
     return mul;
 }
 
+// ── CODE ABOVE DOCS (--for and MCP `for`, routed path only; serialize.h reorderDocsAfterCode; gate forsigspancheck (R)) ──
+// Markdown headings that repeat a question's words sat ABOVE the code that defines the answer in the ranked rows. A
+// question about CODE now shows the code rows of its SHOWN set first and the doc rows after them — the same rows, only
+// reordered: the score order and the byte ladder still choose which rows are shown, so the reorder never evicts a doc
+// row. A question that ASKS about docs keeps the plain score order: a docs cue (kDocsQuestionCues), a change or
+// translation cue (the doc-noise lists above: those questions are about prose too), or a named doc file. A false cue
+// is the cheap side to be wrong on — it restores the old order. Under an explicit ceiling TIGHTER than the default signature
+// share, or a body ceiling (serialize.h explicitCeilingTighterThanDefault) the reorder and its uncharged note do not apply: the answer is the plain
+// score-order one, so est_tokens <= the budget keeps holding. RIPWIRE_NO_DOCS_AFTER_CODE=1 is the A/B handle (the
+// RIPWIRE_NO_DOC_MENTION precedent): the same answer in plain score order, which the gate compares the row SET against.
+inline constexpr DocNoiseCue kDocsQuestionCues[] = { { "doc", true },      { "readme", true }, { "guide", true }, { "tutorial", true },
+                                                     { "manual", true },   { "markdown", false }, { "wiki", false }, { "faq", false },
+                                                     { "howto", false } };
+inline bool taskAsksAboutDocs( std::string_view task )
+{
+    const std::string lowerTask = queryshape::detail::lowerAscii( task );
+    if( lowerTask.find( ".md" ) != std::string::npos || lowerTask.find( ".rst" ) != std::string::npos )
+    {
+        return true;   // a named doc file (the B8 mention anchor lifts it; this rule must not push it back down)
+    }
+    return taskHasCue( lowerTask, kDocsQuestionCues ) || taskHasCue( lowerTask, kChangeQuestionCues )
+        || taskHasCue( lowerTask, kTranslationQuestionCues );
+}
+
 // Order a file-id list by a per-id KEY descending, PATH ascending as the tiebreak — the shared
 // "most-consequential-first, and deterministically so" ordering the first-screen verbs need (§P11.7
 // --pr-context by blast radius, §P11.8 --tree by best-symbol rank). Templated on the key because one of

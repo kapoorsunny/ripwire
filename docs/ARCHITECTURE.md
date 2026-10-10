@@ -378,7 +378,13 @@ call graph's visibility (same file first; C `static` stays in its file; JS/TS/Py
 import; Go stays in its package) and serves them as separate `<vr>` rows with `value_refs=N`: where
 the value lands (`into=`), and which functions may call through that slot (`called_by=`/`through=`).
 A row is a clue to follow, not a proven call; `--dead-code` and `--safe-delete` treat a value use as
-a reason a function is not dead.
+a reason a function is not dead (one made by another function or at file scope: a function that only
+stores itself stays dead, as a recursive self-call is no caller). The capture stops at 512 levels of
+nesting; a file it cut carries one depth-cut record, and every answer that reads value references for
+that file's language says so (`value_refs_depth_capped=`, `value_refs_depth_at=`): the callers/callees roots,
+`--impact`, `--safe-delete`, `--dead-code`, `--uses`, `--path`, the JSON form and the MCP twins. The exceptions, which
+do not yet say so: `--quality-delta`'s dead-code kind and its `value-ref-excluded=` count (CLI and MCP),
+`--verify='uses(SYM)'` / `'unused(SYM)'` (their `count=` is then a floor), and the LSP references and hover handlers.
 
 ### graph — the CSR
 

@@ -316,6 +316,49 @@ LCUT="$( attr lens "$( ri --format=columnar )" )"; LALL="$( attr lens "$( ri --l
     || no "next: --format=columnar lens='$LCUT' on the cut tier (want shown_importers,importers_capped,importers_next), lens='$LALL' uncut (want shown_importers,importers_capped)"
 rm -rf "$RS"
 
+# ── #9d A LONG SELECTOR KEEPS ITS CALL (knob-honesty-068) ───────────────────────────────────────────────
+# sizeImportTier offered importers_next= only while the invocation was <= kNextAttrMaxBytes (120 B), so a cut tier
+# whose symbol name is long lost its ONLY continuation with no marker: importers_capped="1" and nothing that serves
+# the rest — the silent drop the 2026-09-25 ruling (138b383c: "emit the FULL next=") removed everywhere else. Same
+# 48-importer shape as #9b with a 110-character function name: `--impact=NAME --limit=48` is 130 B. RED on 255dc199
+# (no importers_next= on the XML root, the --json dialect, or the MCP twin).
+LS="$( mktemp -d )"; mkdir -p "$LS/pkg"
+LONGN="importHubFn_$( printf 'x%.0s' $( seq 1 98 ) )"
+python3 - "$LS" "$LONGN" <<'PY'
+import os, sys
+d, n = os.path.join( sys.argv[1], "pkg" ), sys.argv[2]
+open( os.path.join( d, "__init__.py" ), "w" ).write( "" )
+open( os.path.join( d, "hub.py" ), "w" ).write( "def %s( x ):\n    return x\n" % n )
+for i in range( 48 ):
+    open( os.path.join( d, "a_%02d.py" % i ), "w" ).write( "from pkg.hub import %s\n\ndef use_a_%02d( ):\n    return %s( %d )\n" % ( n, i, n, i ) )
+PY
+rl(){ perl -e 'alarm 30; exec @ARGV' "$BIN" "$LS" --impact="$LONGN" --no-cache "$@" 2>/dev/null; }
+L_DEF="$( rl )"
+WANT_L="--impact=$LONGN --limit=48"
+{ [ "${#LONGN}" = 110 ] && [ "${#WANT_L}" -gt 120 ] && [ "$( attr importers_capped "$L_DEF" )" = 1 ]; } \
+    && ok "long: presence guard — a ${#LONGN}-char selector, a ${#WANT_L} B call (> 120), importers_capped=1" \
+    || no "long: fixture broken — name ${#LONGN} chars, call ${#WANT_L} B, importers_capped='$( attr importers_capped "$L_DEF" )'"
+[ "$( attr importers_next "$L_DEF" )" = "$WANT_L" ] \
+    && ok "long: the cut tier still names its call (importers_next= is ${#WANT_L} B, never dropped for length)" \
+    || no "long: importers_next='$( attr importers_next "$L_DEF" )' on a cut tier (want the full ${#WANT_L} B call)"
+L_NX="$( perl -e 'alarm 30; exec @ARGV' "$BIN" "$LS" $( attr importers_next "$L_DEF" ) --no-cache 2>/dev/null )"
+{ [ "$( attr shown_importers "$L_NX" )" = 48 ] && [ "$( attr importers_capped "$L_NX" )" = 0 ]; } \
+    && ok "long: pasting the long importers_next= serves all 48 importers" \
+    || no "long: pasting importers_next= gave shown_importers='$( attr shown_importers "$L_NX" )'"
+rl --json | grep -qF "\"importers_next\":\"$WANT_L\"" \
+    && ok "long: the --json dialect carries the same full importers_next" \
+    || no "long: --json lacks the full \"importers_next\" on the cut tier"
+L_MCP="$( printf '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{}}\n{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"impact","arguments":{"path":"%s","symbol":"%s"}}}\n' "$LS" "$LONGN" \
+          | perl -e 'alarm 60; exec @ARGV' "$BIN" --mcp 2>/dev/null | tail -1 )"
+printf '%s' "$L_MCP" | grep -qF "importers_next=\\\"$WANT_L\\\"" \
+    && ok "long: the MCP impact twin carries the same full importers_next" \
+    || no "long: MCP impact lacks importers_next on the cut tier: $( printf '%s' "$L_MCP" | grep -oE 'importers_[a-z]+=[^ ]+' | tr '\n' ' ' | cut -c1-200 )"
+# negative twin: an UNCUT long tier carries no importers_next= (the follow-up rides a cut only)
+[ -z "$( attr importers_next "$( rl --limit=100 )" )" ] \
+    && ok "long: the uncut tier (--limit=100) carries no importers_next=" \
+    || no "long: an uncut tier carries importers_next="
+rm -rf "$LS"
+
 # ── #10 determinism + well-formedness ─────────────────────────────────────────────────────────────────
 A="$( i Widget )"; B="$( i Widget )"
 if [ "$A" = "$B" ]; then ok "determinism: --impact=Widget byte-identical run-to-run"; else no "non-deterministic --impact output"; fi

@@ -176,6 +176,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
+echo "fornotesbudgetcheck: BIN=$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 CORPUS="$TMP/corpus"
 fail=0
@@ -187,7 +188,6 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 command -v python3 >/dev/null 2>&1 || { echo "fornotesbudgetcheck: python3 is required (JSON arms)"; exit 2; }
 command -v git     >/dev/null 2>&1 || { echo "fornotesbudgetcheck: git is required (notes carry a sha/branch stamp)"; exit 2; }
 
-echo "fornotesbudgetcheck: BIN=$BIN"
 
 # ── the sandbox corpus: 72 small symbols across 12 files, one long note on every one ───────────────
 mkdir -p "$CORPUS/src" || { echo "fornotesbudgetcheck: cannot create corpus under $TMP"; exit 2; }

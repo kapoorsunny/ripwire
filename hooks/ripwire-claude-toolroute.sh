@@ -18,7 +18,7 @@
 #
 # THE ARM IS THE METER'S ARM, NOT A SECOND COIN FLIP. `resolve_arm` below reimplements the exact rule
 # meter_init() (hooks/ripwire-nudge.sh) and hooks/ripwire-claude-route.sh's own `resolve_arm` apply —
-# env over `meter.conf` over the `treatment` default, `auto` selecting the same stable session-id hash
+# env over `meter.conf` over the `auto` default (issue #381; it was `treatment`), `auto` selecting the same stable session-id hash
 # — so a session lands on the same side across all three instruments. A control session runs the same
 # classification and writes the identical row; it injects nothing. Reimplemented rather than sourced:
 # sourcing either sibling script would run its own top-level PreToolUse/UserPromptSubmit body.
@@ -129,7 +129,11 @@ esac
 #      build/gate invocation) never reaches here at all for Bash: it is not a recursive-grep shape, so
 #      the classification below never sets `shape`, and the fast "no shape, no row" exit further down
 #      handles it identically to `cat`/`sed`. This block only needs to catch the marker literally
-#      appearing inside one of the fields we DO act on. ----
+#      appearing inside one of the fields we DO act on.
+#      DELIBERATELY NOT `<channel` / `<agent-message` (issue #381, which taught the PROMPT hooks to skip
+#      those wrappers): a PreToolUse input is the agent's own tool call, never a harness-delivered event,
+#      and this guard is a SUBSTRING match, so `<channel>` here would suppress an honest grep for RSS/XML
+#      text (`grep -rn '<channel>' feeds/`). The wrappers only matter as the leading bytes of a prompt. ----
 case "$command$pattern$gpath$file_path" in
     *'[SYSTEM NOTIFICATION'*|*'<task-notification>'*) notif=1 ;;
     *) notif=0 ;;
@@ -150,12 +154,18 @@ resolve_arm()
     _ra_home="${RIPWIRE_HOME:-${HOME:+$HOME/.ripwire}}"
     if [ -n "$_ra_home" ] && [ -f "$_ra_home/meter.conf" ]
     then
-        while IFS='=' read -r _ra_k _ra_v
+        # `|| [ -n "$_ra_k" ]` keeps a final line that has no newline (read returns 1 on it but has filled
+        # the variables); `${_ra_v%$'\r'}` drops the CR of a CRLF file so `arm=control\r` reads as `control`.
+        while IFS='=' read -r _ra_k _ra_v || [ -n "$_ra_k" ]
         do
+            _ra_v="${_ra_v%$'\r'}"
             case "$_ra_k" in arm) _ra_conf="$_ra_v" ;; esac
         done < "$_ra_home/meter.conf"
     fi
-    case "${RIPWIRE_METER_ARM:-$_ra_conf}" in
+    # UNSET (no env, no `arm=` in meter.conf) is `auto`, not `treatment` (issue #381): the shipped default
+    # used to put every session on treatment, so the pre-registered treatment-minus-control difference could
+    # never be computed. An explicit `treatment` stays the opt-out; any OTHER value still reads as treatment.
+    case "${RIPWIRE_METER_ARM:-${_ra_conf:-auto}}" in
         control) route_arm="control" ;;
         auto)
             _ra_h="$( printf '%s' "$1" | cksum 2>/dev/null | cut -d' ' -f1 )"

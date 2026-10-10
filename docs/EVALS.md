@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 671 gate scripts plus the determinism, cache-transparency and golden contracts. <!-- gatecount --> |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 678 gate scripts plus the determinism, cache-transparency and golden contracts. <!-- gatecount --> |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -1104,7 +1104,7 @@ exists so that the next negative is as publishable as the last one.
 
 **The mechanism under test.** `hooks/ripwire-claude-route.sh`, a Claude Code `UserPromptSubmit` hook.
 On every submitted prompt it asks the deterministic `--help-task` classifier — the same one gated by
-`test/taskroutecheck.sh` at precision 1.000 / harmful 0.000 — and, **only** when that classifier
+`test/taskroutecheck.sh` at precision 1.000 / harmful 0.000 on the tuning corpus — and, **only** when that classifier
 returns `status="recommend"`, injects ONE paste-ready command as `additionalContext`. At
 `status="abstain"` it injects nothing at all. It is the Claude Code port of
 `hooks/ripwire-codex-route.sh`, which has shipped for Codex since 2026-08-28 and has never seen a
@@ -1157,6 +1157,13 @@ measures in the wild; a coverage collapse invalidates the readout the same way a
 drift does. (c) Route accuracy in the field is **not** measurable from this log by construction — the
 rows are hash-only — and no number resembling it will be reported from it.
 
+**Window 1 (registered 2026-09-02): VOID for the verdict.** Until issue #381 an unconfigured install resolved every session to `treatment`, so this window had no control arm, and the registered treatment − control difference cannot be computed from it. No verdict is read from it. Its four- and six-week dates (2026-09-30, 2026-10-14) are not readout dates.
+
+**Window 2: the readout clock restarts at the release that ships `arm=auto` as the default.** The rule is unchanged: one readout at four weeks, at least 40 recommended prompts per arm, and one extension to six weeks if the readout is underpowered.
+**Window start:** PENDING (the release that ships `arm=auto` writes its release date here as YYYY-MM-DD)
+
+`bench/routing_ab_report.py` reads the `Window start` line: a date gives the readout date (start + 28 days) and the one-time extension date (start + 42 days); `PENDING` gives no date.
+
 **Decision rule.** One readout, at four weeks (or six, under the extension). KEEP → the router stays as
 shipped. REWORD → one revision of the injected framing text, then a fresh registration with a new band;
 the mechanism is not re-litigated. **REMOVE → the hook is unregistered from the installer and deleted**,
@@ -1192,6 +1199,19 @@ population is biased toward the intents it already covers.
 
 **The readout is a LATER session.** This lane ships the instrument and the band. Nothing in this
 registration is a result.
+
+**Amendment, 2026-10-07 (issue #381) — the shipped default previously gave no control arm.** The control arm
+above is real only for a session that resolves to `control`. The hooks resolved an unconfigured arm (no
+`RIPWIRE_METER_ARM`, no `arm=` line in `~/.ripwire/meter.conf`) to `treatment`, and nothing in the installer
+wrote `arm=auto`, so a machine that never created `meter.conf` logged only treatment sessions: one such
+machine reported 18968 treatment prompts and 0 control prompts over four weeks, and the treatment-minus-control
+difference registered above could not be computed from them. The default is now `auto` (the stable
+session-hash split) in `hooks/ripwire-claude-route.sh`, `hooks/ripwire-claude-toolroute.sh` and
+`hooks/ripwire-nudge.sh`; an explicit `arm=treatment` or `arm=control` is still honoured. Rows written before
+the change by an unconfigured hook carry `arm="treatment"` with no control population, so they belong to the void window 1 and to no readout. **Pre-period observation, not a readout:** field data from one machine on the old treatment-only default (issue #381, 2026-09-10 to 2026-10-07) had 1,926 distinct injected recommendations. None of them was followed by the recommended verb within the same turn (0/1,926 same-turn adoptions; 3 were followed by any ripwire call). This observation enters neither window's verdict. The same issue taught the prompt hooks to skip MCP channel events (`<channel …>`) and sub-agent
+hand-backs (`<agent-message …>`) like `<task-notification>` and `<system-reminder>`: they are harness events,
+not prompts. `bench/routing_ab_report.py` now prints per-arm counts, says `NO CONTROL ARM` when an arm has no
+prompts, and marks the 2026-09-02 registration window void (it had no control arm); the readout clock restarts at the release that ships `arm=auto`, and the report prints the new window's readout date once its start date is recorded in this section.
 
 **The readout instrument.** `python3 bench/routing_ab_report.py [--routing PATH] [--meter PATH]
 [--since AT] [--until AT]` (defaults: `$RIPWIRE_HOME/routing.jsonl` and
@@ -2301,11 +2321,13 @@ verb, so a composed expression the verb would refuse fails the gate rather than 
 | --- | ---: | ---: |
 | skills the router can name (of 16, `ripwire-router` excluded) | **8** | **16** |
 | audit's 39 surface phrasings, recommends | **3** | **9** |
-| corpus `split=test` (n=114) accuracy / coverage | 0.754 / 0.627 | **0.939 / 0.907** |
-| corpus `split=dev` (n=111) accuracy / coverage | — | 0.946 / 0.929 |
-| corpus `split=all` (n=225) accuracy / coverage | 0.809 / 0.730 | **0.942 / 0.918** |
-| precision / harmful / neg-specificity, every split | 1.000 / 0.000 / 1.000 | 1.000 / 0.000 / 1.000 |
+| tuning corpus `split=test` (n=114) accuracy / coverage | 0.754 / 0.627 | **0.939 / 0.907** |
+| tuning corpus `split=dev` (n=111) accuracy / coverage | — | 0.946 / 0.929 |
+| tuning corpus `split=all` (n=225) accuracy / coverage | 0.809 / 0.730 | **0.942 / 0.918** |
+| tuning corpus precision / harmful / neg-specificity, every split | 1.000 / 0.000 / 1.000 | 1.000 / 0.000 / 1.000 |
 | the 189 rows that predate this tier, (status, intent, resolved_symbols) | — | **0 differing** |
+
+The accuracy, coverage and precision figures in this table (0.907, 0.918, 1.000) were measured on the tuning corpus, `test/taskroutefix/prompts.tsv`, the corpus the intents were written against. On the held-out prompts, `test/skillevalfix/prompts.tsv`, `--help-task` recommended on 28 of 214 positive prompts (28/214 = 0.131, measured 2026-10-02), below the pre-registered coverage bar of ≥ 0.60; the held-out gate that registration called for is not yet built.
 
 The remaining 30 of 39 are declined by design and are gated as such: six SHAPING flags (`--scope`,
 `--slice-depth`, `--slice-flow`, `--allow-dirty`, `--no-ignore`, `--no-post-check`) are modifiers on
@@ -5866,7 +5888,7 @@ copy here would be exactly the dialect divergence that gate exists to catch. Com
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **671 gate scripts**, all of which exist on disk. <!-- gatecount -->
+naming **678 gate scripts**, all of which exist on disk. <!-- gatecount -->
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -6167,15 +6189,29 @@ regenerated file. It skips (exit 0) when no reference binary is given, self-test
 and asserts it left the tree unmodified — an assertion that is itself **controlled**: a stray file is
 created on purpose, must be detected, and must then be gone.
 
-### `--quality-delta`'s eleven kinds: ten measured failure modes and placeholder
+### `--quality-delta`'s twelve kinds: ten measured failure modes, placeholder and defect-shape
 
 These are the exact `kind=` strings the binary emits, from `src/quality.h`:
 
 `complexity` · `verbosity` · `nesting` · `params` · `duplication` · `dead-code` · `api-surface` ·
-`error-masking` · `short-horizon-churn` · `new-clone-of-reused-helper` · `placeholder`
+`error-masking` · `short-horizon-churn` · `new-clone-of-reused-helper` · `placeholder` · `defect-shape`
 
 The first ten each target a failure mode measured in the literature; `placeholder` (added 0.6.5) is an
-honesty check on "done" — a stub or TODO the change added — and never gates.
+honesty check on "done" — a stub or TODO the change added — and never gates. `defect-shape` carries four
+facets in `defect=` (`format-arity`, `utf8-cut`, `dedup-first`, `vacuous-assert`), shapes this project's own
+code review kept finding; only `format-arity` gates, and on any origin (new-symbol rows never gate, except
+defect-shape format-arity). Measured (2026-10-07): recall 7/8 on the eight review findings it was built
+from; with every site treated as new, 0 format-arity false positives on this tree (1,330 literal-format calls),
+on the Python 3.13 standard library (405 calls) and on libc++'s std::format tests (80 calls; the 24 hits are its
+deliberately ill-formed `.verify.cpp` calls); vacuous-assert sample precision 30/30 on this tree's gates
+(46 rows, Wilson 95% lower bound 0.89) after fix round 1 (2026-10-08) taught the guard the positive on the same
+capture spelled as an `if`/`elif` `&&` condition or through a script-defined function — before it, 3 of 49 rows were
+such false positives and the seeded sample read 28/30 (lower bound 0.79), not the 30/30 first published. Floor: an
+absence read off a file a run redirected into is not judged (`redactcheck.sh:81`, `namingcalibrationcheck.sh:292`).
+Two format-arity floors (a delta review, 2026-10-08; 0 hits on the three corpora above): the macro skip sees a name this
+file `#define`s and a function-like macro the tree defines, not a lower-case object-like macro defined only in another
+file; and only a literal `#if 0` is skipped, so `#if false`, `#if (0)`, `#if 0 && …` and the `#else` of `#if 1` are
+read as live.
 
 Note that some user-facing summaries abbreviate four of these (`dup`, `dead`, `churn`,
 `clone-of-reused-helper` / `reuse-decline`). **Match against the strings above** when grepping real
@@ -6969,7 +7005,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 671. The <!-- gatecount -->
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 678. The <!-- gatecount -->
   loop is the authority; the stale docstrings are a known drift. Since 2026-09-10 the number is not
   written by hand anywhere: `docs/gatecount_build.py` derives it from the loop and rewrites every
   published site, `test/gatecountcheck.sh` fails if any of them drifts, and `test/manifestcheck.sh`

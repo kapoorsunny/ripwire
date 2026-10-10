@@ -236,6 +236,28 @@ case "$SYS3" in *'status="abstain"'*) ok "leading whitespace before the marker s
 SYS4="$( route 'what does <task-notification> mean in the hook? also, help me understand the implementation of targetSymbol' )"
 case "$SYS4" in *'status="recommend"'*'intent="understand-symbol"'*'--expand='*'targetSymbol'*) ok "a real prompt merely mentioning the marker mid-sentence still routes normally";; *) no "mid-sentence mention wrongly suppressed a real route: $SYS4";; esac
 
+# MCP channel events (`<channel source="…">`) and sub-agent hand-backs (`<agent-message from="…">`) arrive
+# on the same channel (issue #381). The prefix is the opening tag plus a space or `>`; every positive
+# below ends with a sentence that routes by itself (SYS4's), so only the guard can make it abstain.
+SYSTASK='help me understand the implementation of targetSymbol'
+for sysp in "<channel source=\"x\">$SYSTASK</channel>" "<channel>$SYSTASK</channel>" \
+            "$( printf '\n  \t<channel source="x">%s</channel>' "$SYSTASK" )" \
+            "<agent-message from=\"w\">$SYSTASK</agent-message>" "<agent-message>$SYSTASK</agent-message>" \
+            "$( printf '  \n<agent-message from="w">%s' "$SYSTASK" )" \
+            "$( printf '\v<channel source="x">%s</channel>' "$SYSTASK" )" \
+            "$( printf ' \f\v<agent-message from="w">%s' "$SYSTASK" )" \
+            "$( printf '\f<task-notification>%s' "$SYSTASK" )"; do
+    SYSC="$( route "$sysp" )"
+    case "$SYSC" in *'status="abstain"'*'resolved_symbols="0"'*) ok "harness wrapper abstains: $( printf '%s' "$sysp" | tr '\n\t\v\f' '    ' | cut -c1-40 )";; *) no "harness wrapper routed: $sysp => $SYSC";; esac
+done
+# Near-misses: a different tag, or a mention that is not the leading bytes, is a user prompt and routes.
+for nearp in "<channelz> $SYSTASK" "<channels> $SYSTASK" "<agent-messages> $SYSTASK" \
+             "what does <channel source=\"x\"> mean? $SYSTASK" "what does <agent-message from=\"w\"> mean? $SYSTASK" \
+             "channel the energy: $SYSTASK" "$( printf '\v<channelz> %s' "$SYSTASK" )"; do
+    SYSN="$( route "$nearp" )"
+    case "$SYSN" in *'status="recommend"'*'--expand='*'targetSymbol'*) ok "near-miss still routes: $( printf '%s' "$nearp" | tr '\n\t\v\f' '    ' | cut -c1-40 )";; *) no "near-miss wrongly suppressed: $nearp => $SYSN";; esac
+done
+
 # ── the weak tier may not confirm itself, and may not read a config key as code (2026-09-10) ───────────
 # Two independent defects, two independent arms each; all four recommend-side arms are RED against a
 # pre-change binary (each recommended understand-symbol with an --expand).

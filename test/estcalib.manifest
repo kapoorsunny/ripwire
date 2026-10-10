@@ -1,5 +1,5 @@
 # est_calib pins — REAL tokenizer counts of ripwire's output on test/estcalibfix.
-# label o200k cl100k est_at_pin_time argv...   (space-separated; no argv may contain a space)
+# label o200k cl100k est_at_pin_time argv...   (space-separated; no argv may contain a space; a leading NAME=VALUE is env)
 # Regenerate: python3 bench/tokenaudit/pin.py --bin build/ripwire   (needs tiktoken)
 # Read by: test/tokenbudgetcheck.sh #18 — the calibration band. See bench/tokenaudit/README.md.
 map 1009 999 1123 
@@ -7,6 +7,10 @@ map-topk5 538 535 653 --top-k=5
 metrics 2381 2370 2509 --metrics
 pack-signatures 1801 1784 2116 --pack-signatures
 expand 541 542 455 --expand=billableTotal
-for-named 789 785 1050 --for=billableTotal
-for-budgeted 419 415 598 --for=dedupe --token-budget=400
+# for-named re-pinned 2026-10-07: its --for rows now carry e= (+237 B, +64 o200k over its twin);
+# for-named-noe is its e=-free twin (RIPWIRE_FOR_ENDLINES=never, byte-identical to the pre-e= answer). Other rows: 2026-09-12 pins.
+for-named 962 958 1290 --for=billableTotal
+for-named-noe 898 893 1195 RIPWIRE_FOR_ENDLINES=never --for=billableTotal
+# for-budgeted re-pinned 2026-10-08 on the train 26b tree (knob-honesty's <sigs> next= + floor clause, measured with pin.py; other rows kept).
+for-budgeted 491 486 698 --for=dedupe --token-budget=400
 pack-task 882 862 1104 --pack-task=dedupe

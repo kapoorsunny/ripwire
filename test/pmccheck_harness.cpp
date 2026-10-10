@@ -87,6 +87,22 @@ static std::uint64_t busyWork( std::uint64_t iterationCount )
     return acc;
 }
 
+// teardown: release() hands the counters back (Apple: counting off + force-state restored; Linux: the calling
+// thread's group closed) and ends the "active" claim, so a read after it is zeros in both states. It is
+// idempotent (the exit reporter calls it again at static destruction).
+static void checkRelease()
+{
+    prof::pmc::release();
+    prof::pmc::release();
+    const prof::pmc::Snapshot afterRelease = prof::pmc::read();
+    bool allZero = true;
+    for( unsigned slot = 0; slot < prof::pmc::kMaxEvents; ++slot )
+    {
+        allZero = allZero && afterRelease.values[ slot ] == 0;
+    }
+    check( !prof::pmc::active() && allZero, "release: counters handed back (inactive, reads zero) and a second release is harmless" );
+}
+
 int main()
 {
     // a nested pair of scopes so the report has rows in both states (and the PMC bracket runs when active)
@@ -159,6 +175,8 @@ int main()
     // the report must render in both states (counter columns present iff active), on STDERR; the gate
     // script captures the streams separately to assert that and the quiet-degrade arm.
     prof::report();
+
+    checkRelease();
 
     return g_fail;
 }

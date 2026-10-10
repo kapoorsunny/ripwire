@@ -12,13 +12,13 @@
 #   1. THE MOMENT. This runs before the agent has chosen a tool, not after it already reached for one.
 #   2. THE PAYLOAD. A runnable command with its arguments already filled in from the prompt, not a verb
 #      name and an ellipsis the agent has to finish.
-#   3. THE GATE. `--help-task` has a measured precision (1.000 / harmful 0.000 on its corpus,
+#   3. THE GATE. `--help-task` has a measured precision (1.000 / harmful 0.000 on its tuning corpus,
 #      test/taskroutecheck.sh), so this is silent on the prompts it cannot route rather than firing on
 #      everything. Silence is the common case and is not a failure.
 # The round cannot separate the three, and the registration says so.
 #
 # THE ARM IS THE METER'S ARM, NOT A SECOND COIN FLIP. It resolves `arm` exactly as meter_init() in
-# hooks/ripwire-nudge.sh does — env over `meter.conf` over the `treatment` default, with the literal
+# hooks/ripwire-nudge.sh does — env over `meter.conf` over the `auto` default (issue #381; it was `treatment`), with the literal
 # `auto` selecting the same stable session-id hash — so a session lands on the SAME side in both
 # instruments and the two logs join on session_hash. A control session runs the classifier, writes the
 # identical row and the identical pending file, and injects NOTHING; its adoption-within-two number is
@@ -78,12 +78,18 @@ resolve_arm()
     _ra_home="${RIPWIRE_HOME:-${HOME:+$HOME/.ripwire}}"
     if [ -n "$_ra_home" ] && [ -f "$_ra_home/meter.conf" ]
     then
-        while IFS='=' read -r _ra_k _ra_v
+        # `|| [ -n "$_ra_k" ]` keeps a final line that has no newline (read returns 1 on it but has filled
+        # the variables); `${_ra_v%$'\r'}` drops the CR of a CRLF file so `arm=control\r` reads as `control`.
+        while IFS='=' read -r _ra_k _ra_v || [ -n "$_ra_k" ]
         do
+            _ra_v="${_ra_v%$'\r'}"
             case "$_ra_k" in arm) _ra_conf="$_ra_v" ;; esac
         done < "$_ra_home/meter.conf"
     fi
-    case "${RIPWIRE_METER_ARM:-$_ra_conf}" in
+    # UNSET (no env, no `arm=` in meter.conf) is `auto`, not `treatment` (issue #381): the shipped default
+    # used to put every session on treatment, so the pre-registered treatment-minus-control difference could
+    # never be computed. An explicit `treatment` stays the opt-out; any OTHER value still reads as treatment.
+    case "${RIPWIRE_METER_ARM:-${_ra_conf:-auto}}" in
         control) route_arm="control" ;;
         auto)
             _ra_h="$( printf '%s' "$1" | cksum 2>/dev/null | cut -d' ' -f1 )"
@@ -369,9 +375,11 @@ case "$promptBytes" in ''|*[!0-9]*) exit 0;; esac
 [ "$promptBytes" -le 8192 ] || exit 0
 
 # HARNESS/SYSTEM EVENT GUARD, checked before the classifier is ever invoked. Claude Code delivers a
-# background-task completion (`<task-notification>…</task-notification>`) and an injected reminder
-# (`<system-reminder>…</system-reminder>`) through this SAME UserPromptSubmit channel — they are not user
-# input, but `--help-task` has no concept of "this names no task" and answers the report prose anyway
+# background-task completion (`<task-notification>…</task-notification>`), an injected reminder
+# (`<system-reminder>…</system-reminder>`), an MCP channel event (`<channel source="…">…</channel>`) and a
+# sub-agent hand-back (`<agent-message from="…">…</agent-message>`) through this SAME UserPromptSubmit
+# channel (the last two: issue #381 — channel events alone were about half of one machine's injected
+# recommendations) — they are not user input, but `--help-task` has no concept of "this names no task" and answers the report prose anyway
 # (docs/EVALS.md, the routing-noise round: a background-task summary quoting words like "Summary:" and
 # "Fix," minted `--connect='Split,A,Report'` out of text that never named a task). Narrow and POSITIONAL
 # on purpose: only the prompt's own leading bytes, after whitespace, are tested, so a genuine user prompt
@@ -386,26 +394,46 @@ case "$promptBytes" in ''|*[!0-9]*) exit 0;; esac
 # newline in `rest` and missed the case match below — the guard then fell through to actually invoke the
 # classifier (a real subprocess), log status="abstain" instead of status="skip-system", and delete an
 # existing session's routing-pending file, none of which a harness/system event should ever cause. This
-# bash parameter-expansion form strips the FULL leading run of [:space:] bytes (space/tab/newline/CR) from
+# bash parameter-expansion form strips the FULL leading run of whitespace bytes (space/tab/newline/VT/FF/CR) from
 # the whole string in one pass, not line by line.
-lead="${prompt%%[![:space:]]*}"
+# ---- BEGIN MIRRORED BLOCK rw_is_harness_event (issue #381) ------------------------------------------------
+# KEEP BYTE-IDENTICAL in hooks/ripwire-claude-route.sh and hooks/ripwire-codex-route.sh; test/routehookcheck.sh
+# extracts both copies and diffs them (the rw_is_ripwire_call pattern). The list of harness-event wrappers is
+# data in ONE place per file: the C++ classifier keeps the same list in src/taskroute.h (kHarnessEventTags).
+# rw_is_harness_event REST — REST is the prompt with its leading whitespace already stripped. True when it
+# begins with a wrapper Claude Code uses to deliver something that is not user input: a background-task
+# completion or an injected reminder (matched with their closing `>`), or an MCP channel event / sub-agent
+# hand-back (`<channel` / `<agent-message`, which carry attributes, so they match only as the opening tag:
+# followed by a space or `>`). `<channelz>`, `<channels>`, `<agent-messages>` and a prompt that merely
+# MENTIONS a wrapper mid-sentence are not matches.
+rw_is_harness_event()
+{
+    case "$1" in
+        '<task-notification>'*|'<system-reminder>'*) return 0 ;;
+        '<channel '*|'<channel>'*|'<agent-message '*|'<agent-message>'*) return 0 ;;
+    esac
+    return 1
+}
+# ---- END MIRRORED BLOCK rw_is_harness_event ---------------------------------------------------------------
+# The lead strip is the six ASCII bytes src/taskroute.h's looksLikeSystemEvent strips (space \t \n \v \f \r), written
+# out: bash's [:space:] also matches U+00A0 and other Unicode spaces in a UTF-8 locale, which the classifier keeps.
+lead="${prompt%%[!$' \t\n\v\f\r']*}"
 rest="${prompt#"$lead"}"
-case "$rest" in
-    '<task-notification>'*|'<system-reminder>'*)
-        if meter_home; then
-            promptHash="$( hash_text "$prompt" )"
-            [ -n "$session" ] || session="prompt:$promptHash"
-            sessionHash="$( hash_text "$session" )"
-            now="$( date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || true )"
-            jq -cn --arg at "$now" --arg hash "$promptHash" --arg sessionHash "$sessionHash" \
-                --argjson bytes "$promptBytes" \
-                '{v:2,at:$at,agent:"claude",router:"prompt",event:"UserPromptSubmit",status:"skip-system",
-                  intent:"",recommended:"",arm:"",session_hash:$sessionHash,prompt_hash:$hash,
-                  prompt_bytes:$bytes}' >>"$routingLog" 2>/dev/null || true
-        fi
-        exit 0
-        ;;
-esac
+if rw_is_harness_event "$rest"
+then
+    if meter_home; then
+        promptHash="$( hash_text "$prompt" )"
+        [ -n "$session" ] || session="prompt:$promptHash"
+        sessionHash="$( hash_text "$session" )"
+        now="$( date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || true )"
+        jq -cn --arg at "$now" --arg hash "$promptHash" --arg sessionHash "$sessionHash" \
+            --argjson bytes "$promptBytes" \
+            '{v:2,at:$at,agent:"claude",router:"prompt",event:"UserPromptSubmit",status:"skip-system",
+              intent:"",recommended:"",arm:"",session_hash:$sessionHash,prompt_hash:$hash,
+              prompt_bytes:$bytes}' >>"$routingLog" 2>/dev/null || true
+    fi
+    exit 0
+fi
 
 route="$( ripwire "$cwd" --help-task="$prompt" 2>/dev/null )" || exit 0
 # The root's ATTRIBUTE, not a byte prefix: since the compact legend became the CLI default (L1) the root reads

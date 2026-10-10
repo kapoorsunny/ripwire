@@ -123,5 +123,91 @@ case "$crow_user" in
 esac
 rm -rf "$COLLIDE"
 
+# ── 5. THE FLOORED RULE NAMES ITS CALL (knob-honesty-068) ───────────────────────────────────────────────
+# A rule that spends its kLintMaxPerRule budget was disclosed (count_capped="1", findings_capped="1"), but the answer
+# named no call that counts the rest: the budget had no flag, so the floor was a dead end on the CLI and in the SARIF
+# a CI reads. Now --lint-max-per-rule=N raises the budget (the default stays kLintMaxPerRule), and a floored answer
+# carries findings_next= (SARIF: run properties findingsNext) — the floored rules only, under a 10x budget. Fixture:
+# one C file with 6000 gotos (raw captures past the 5000 default). RED on 255dc199 (no findings_next=, no flag).
+GF="$TMP/gotofix"; mkdir -p "$GF"
+python3 -c 'import sys; open( sys.argv[1], "w" ).write( "void f( void )\n{\nL: ;\n" + "    goto L;\n" * 6000 + "}\n" )' "$GF/g.c"
+python3 -c 'import sys; open( sys.argv[1], "w" ).write( "void f( void )\n{\nL: ;\n" + "    goto L;\n" * 10 + "}\n" )' "$GF/../small.c"
+mkdir -p "$TMP/smallfix"; mv "$GF/../small.c" "$TMP/smallfix/s.c"
+lattr(){ printf '%s' "$2" | grep -oE "<lint [^>]*" | head -1 | grep -oE "(^| )$1=\"[^\"]*\"" | head -1 | sed -E 's/^ ?[a-z_]+="//; s/"$//'; }
+grow(){ printf '%s' "$1" | grep -oE "<rule name=\"$2\"[^/]*/>" | head -1; }
+G1="$( "$BIN" "$GF" --lint --no-cache 2>/dev/null )"
+case "$( grow "$G1" goto )" in
+    *'count="5000"'*' count_capped="1"'* ) ok "goto fixture: presence guard — 6000 gotos, count=5000 count_capped=\"1\" (the default budget is unchanged)" ;;
+    * ) no "goto fixture: presence guard failed: $( grow "$G1" goto )" ;;
+esac
+GNEXT="$( lattr findings_next "$G1" )"
+[ "$GNEXT" = "--lint --lint-select=goto --lint-max-per-rule=50000" ] \
+    && ok "floored: the root names its call, findings_next=\"$GNEXT\" (the floored rule only, a 10x budget)" \
+    || no "floored: findings_next='$GNEXT' (want --lint --lint-select=goto --lint-max-per-rule=50000)"
+# paste it: the floor becomes the total, and that answer carries no findings_next (nothing left to recover)
+G2="$( [ -n "$GNEXT" ] && "$BIN" "$GF" $GNEXT --no-cache 2>/dev/null )"
+case "$( grow "$G2" goto )" in
+    *'count="6000"'* ) case "$( grow "$G2" goto )" in *count_capped*) no "pasted: goto still count_capped: $( grow "$G2" goto )";; *) ok "pasted: goto count=\"6000\" — the floor became the total";; esac ;;
+    * ) no "pasted findings_next did not count all 6000: $( grow "$G2" goto )" ;;
+esac
+[ -n "$G2" ] && [ -z "$( lattr findings_next "$G2" )" ] && [ -z "$( lattr findings_capped "$G2" )" ] \
+    && ok "pasted: the uncapped answer carries neither findings_capped= nor findings_next=" \
+    || no "pasted: findings_capped='$( lattr findings_capped "$G2" )' findings_next='$( lattr findings_next "$G2" )' on the re-run"
+# negatives: nothing floored ⇒ no findings_next; the flag only raises (an explicit budget under the default floors sooner)
+[ -z "$( lattr findings_next "$( "$BIN" "$TMP/smallfix" --lint --no-cache 2>/dev/null )" )" ] \
+    && ok "negative: an unfloored answer carries no findings_next=" || no "negative: findings_next= on an answer nothing floored"
+case "$( grow "$( "$BIN" "$TMP/smallfix" --lint --lint-max-per-rule=4 --no-cache 2>/dev/null )" goto )" in
+    *'count="4"'*' count_capped="1"'* ) ok "negative: --lint-max-per-rule=4 floors 10 gotos at 4 (the flag IS the budget, both ways)" ;;
+    * ) no "--lint-max-per-rule=4 not honoured on 10 gotos" ;;
+esac
+"$BIN" "$GF" --lint-max-per-rule=50000 --no-cache >/dev/null 2>&1; [ $? = 1 ] \
+    && ok "refused: --lint-max-per-rule without --lint/--lint-rules exits 1 (never accepted and ignored)" \
+    || no "--lint-max-per-rule without --lint was not refused"
+"$BIN" "$GF" --lint --lint-max-per-rule=0 --no-cache >/dev/null 2>&1; [ $? = 1 ] \
+    && ok "refused: --lint-max-per-rule=0 exits 1" || no "--lint-max-per-rule=0 was accepted"
+# CodeRabbit 5468003465: the flag's ceiling (cli.h kLintMaxPerRuleMost = min(kIntFlagMax, SIZE_MAX/200)) keeps the 20x pack
+# budget and the 10x findings_next= continuation inside size_t, and the continuation saturates AT it (lintNextMaxPerRule; both
+# stated by static_asserts in verbs_lint.h lintPackQueryBudget). Where size_t is 64 bits the ceiling IS kIntFlagMax, so the
+# accepted domain did not move: the twin below holds that (1e9 answers, 1e9+1 refuses). On a 32-bit size_t the ceiling is
+# lower by design, so the twin's premise is the word size, checked by name.
+if [ "$( getconf LONG_BIT 2>/dev/null )" = 64 ]; then
+    "$BIN" "$TMP/smallfix" --lint --lint-max-per-rule=1000000000 --no-cache >/dev/null 2>&1; [ $? = 0 ] \
+        && ok "ceiling twin (64-bit): --lint-max-per-rule=1000000000 still answers" || no "--lint-max-per-rule=1000000000 refused on a 64-bit build"
+    "$BIN" "$TMP/smallfix" --lint --lint-max-per-rule=1000000001 --no-cache >/dev/null 2>&1; [ $? = 1 ] \
+        && ok "ceiling twin (64-bit): --lint-max-per-rule=1000000001 refuses (exit 1)" || no "--lint-max-per-rule=1000000001 was accepted"
+else
+    printf '  SKIP  ceiling twin — getconf LONG_BIT is not 64 (the ceiling is SIZE_MAX/200 there by design)\n'
+fi
+# SARIF: the CI surface carries the same call (run properties), beside findingsCapped
+GS="$( "$BIN" "$GF" --lint --sarif --no-cache 2>/dev/null )"
+printf '%s' "$GS" | python3 -c '
+import json, sys
+d = json.load( sys.stdin ); p = d["runs"][0]["properties"]
+sys.exit( 0 if p.get( "findingsCapped" ) is True and p.get( "findingsNext" ) == "--lint --lint-select=goto --lint-max-per-rule=50000 --sarif" else 1 )' 2>/dev/null \
+    && ok "SARIF: run properties carry findingsCapped=true and the same findingsNext, --sarif kept" \
+    || no "SARIF: run properties lack findingsNext (with --sarif): $( printf '%s' "$GS" | grep -oE '"properties":\{"findingsCapped"[^}]*' | head -1 )"
+# …and PASTING it (shlex-split, as a CI step would) re-runs in the dialect it was read from (rv-knob-honesty-068 N4): the
+# answer parses as SARIF (a native-XML answer would not), the floor is lifted and no findingsNext rides. RED on dd6e4c8e.
+GSN="$( printf '%s' "$GS" | python3 -c 'import json,sys; print(json.load(sys.stdin)["runs"][0]["properties"].get("findingsNext",""))' 2>/dev/null )"
+python3 -c 'import shlex,sys; print( "\0".join( shlex.split( sys.argv[1] ) ), end = "" )' "$GSN" > "$TMP/gsn.argv"
+( [ -n "$GSN" ] && xargs -0 "$BIN" "$GF" --no-cache < "$TMP/gsn.argv" 2>/dev/null ) | python3 -c '
+import json, sys
+p = json.load( sys.stdin )["runs"][0]["properties"]
+sys.exit( 0 if p.get( "findingsCapped" ) is False and "findingsNext" not in p else 1 )' 2>/dev/null \
+    && ok "SARIF: pasting findingsNext answers in SARIF, findingsCapped=false and no findingsNext" \
+    || no "SARIF: pasting findingsNext ('$GSN') did not answer as SARIF with the floor lifted"
+# user rules: the call keeps --lint-rules=DIR and selects the floored rule id
+mkdir -p "$TMP/urules"; printf -- '- id: many-goto\n  language: c\n  severity: warn\n  message: goto\n  query: (goto_statement) @hit\n' > "$TMP/urules/g.yml"
+U1="$( "$BIN" "$GF" --lint-rules="$TMP/urules" --no-cache 2>/dev/null )"
+UNEXT="$( lattr findings_next "$U1" )"
+[ "$UNEXT" = "--lint-rules=$TMP/urules --lint-select=many-goto --lint-max-per-rule=50000" ] \
+    && ok "user rules: findings_next keeps the rules directory and selects the floored id" \
+    || no "user rules: findings_next='$UNEXT'"
+U2="$( [ -n "$UNEXT" ] && "$BIN" "$GF" $UNEXT --no-cache 2>/dev/null )"
+URow="$( printf '%s' "$U2" | grep -oE '<rule name="many-goto"[^/]*/>' | head -1 )"
+case "$URow" in *'count="6000"'*) ! printf '%s' "$URow" | grep -q 'count_capped' ;; *) false ;; esac \
+    && ok "user rules: pasting it counts all 6000, and that row is no longer floored" || no "user rules: pasted run: $URow"
+if printf '%s' "$G1" | xmllint --noout - 2>/dev/null; then ok "floored answer is well-formed XML"; else no "floored answer is not well-formed XML"; fi
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

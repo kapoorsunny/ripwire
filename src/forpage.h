@@ -41,7 +41,7 @@
 
 #include "lexical.h"     // LexTermEvidence — the term masks + df the BM25 pass already accumulated
 #include "model.h"
-#include "nextverb.h"    // nextFlag / nextAttrXml / kNextAttrMaxBytes — the ONE next= spelling
+#include "nextverb.h"    // nextFlag / nextAttrXml — the ONE next= spelling
 #include "pageview.h"    // pageWindow / pageDisclosure — the shared --limit/--offset vocabulary
 #include "serialize.h"   // escapeXml, lensRowPath, ctxRootOpen, radixSortByScoreDescId
 #include "testmap.h"     // splitChangedFilesOfSymbols — the ONE "distinct files of a symbol set" walk (--affected's)

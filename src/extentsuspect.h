@@ -83,7 +83,8 @@ inline std::string_view extentSuspectReasons( std::uint8_t bits ) noexcept
 }
 
 // ── the two membership tables the rules key on (declarative, one lookup shape) ──────────────────────────────
-inline constexpr std::array<SymKind, 3> kExtentClassKinds = { SymKind::Class, SymKind::Struct, SymKind::Interface };
+inline constexpr std::array<SymKind, 6> kExtentClassKinds = { SymKind::Class, SymKind::Struct, SymKind::Interface,
+                                                              SymKind::NamedType, SymKind::Alias, SymKind::FuncType };   // the Struct split (model.h isStructOrNamedType)
 inline constexpr std::array<Lang, 3>    kHeadRuleLangs    = { Lang::C, Lang::Cpp, Lang::ObjC };   // R3's C family
 
 template<class T, std::size_t N>

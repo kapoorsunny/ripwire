@@ -14,6 +14,8 @@
 #   --arch --baseline    arch layering with baseline mode
 #   --around=SYM         ego-graph pack, walked over a SYMBOL SAMPLE (see §B4b below)
 #   --edit-check=SYM     contract-vs-HEAD bundle (CA4 §B15: this gate did not exercise it at all)
+#   --impact=SYM --legend=full   with a via="name" row: the present-only FE-B clause inside the legend comment
+#                        (CLI, columnar and the MCP twin — CodeRabbit 5468003465)
 #   + the additive-flag shapes (--for --detail/--with-graph, --pack-task, --lego, --exemplar, --query
 #     --adaptive, --expand+--outline+--pack-signatures together, --max-tokens): a verb's WIDEST form is
 #     where a second top-level element appears, and a bare invocation cannot see it (trap #7).
@@ -333,6 +335,34 @@ case "$MCPTXT" in
            || { no "#60 MCP explore rejected by xmllint"; printf '%s' "$MCPTXT" | xmllint --noout - 2>&1 | head -3; } ;;
 esac
 fi   # end of the python3-dependent #60 section
+
+# ── FE-B via="name" under --legend=full: --impact's present-only clause (CodeRabbit 5468003465) ──────────
+# viaNameLegend( present, impact = true ) is spliced INSIDE the --impact legend comment, on the CLI and on MCP, and
+# rides only when a shown row is via="name" and the posture is full — the compact default never carries it, which
+# is why no arm above could see "An --impact row" put a double hyphen inside a comment. Premise first: this root's
+# answer really carries a via="name" row AND the clause, so the well-formedness arms below are not vacuous.
+RE="$ROOT/test/receiverevidencefix/js"
+IMPF="$( "$BIN" "$RE" --no-cache --impact=lib/reply.js:send --legend=full 2>/dev/null )"
+if printf '%s' "$IMPF" | grep -q ' via="name"' && printf '%s' "$IMPF" | grep -q 'impact row reached only through such an edge'; then
+    ok "FE-B premise: --impact=lib/reply.js:send --legend=full carries a via=\"name\" row and the impact clause"
+else
+    no "FE-B premise: no via=\"name\" row or no impact clause in --impact=lib/reply.js:send --legend=full — the arms below prove nothing"
+fi
+check_xml "FE-B --impact with a via=\"name\" row, --legend=full"                  "$RE" --impact=lib/reply.js:send --legend=full
+check_xml "FE-B --impact with a via=\"name\" row, --legend=full --format=columnar" "$RE" --impact=lib/reply.js:send --legend=full --format=columnar
+if ! command -v python3 >/dev/null 2>&1; then
+    printf '  SKIP  FE-B MCP impact twin — python3 is not on PATH (prerequisite, not a failure)\n'
+else
+    MIMP="$( mcp_text impact "{\"path\":\"$RE\",\"symbol\":\"lib/reply.js:send\",\"legend\":\"full\"}" )"
+    case "$MIMP" in
+        __ERROR__*|"") no "FE-B MCP impact did not answer: ${MIMP:-empty}" ;;
+        *'impact row reached only through such an edge'*)
+            printf '%s' "$MIMP" | xmllint --noout - 2>/dev/null \
+                && ok "FE-B MCP impact (legend=full, a via=\"name\" row) is well-formed" \
+                || { no "FE-B MCP impact (legend=full, a via=\"name\" row) rejected by xmllint"; printf '%s' "$MIMP" | xmllint --noout - 2>&1 | head -3; } ;;
+        *) no "FE-B MCP impact premise: legend=full answer carries no impact clause — the arm proves nothing" ;;
+    esac
+fi
 
 if [ "$fail" -eq 0 ]; then
     echo "ALL PASS"

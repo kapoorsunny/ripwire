@@ -23,7 +23,7 @@
 #
 # THE CHECK (arm A). Walk EVERY commit in BASE..REF that touched test/regression.sh, and compare each
 # one against EACH of its OWN parents — one parent for an ordinary commit, two or more for a merge.
-# The merge case is not lost, it is simply the len(parents)>1 case of the same loop; arm (C) proves it
+# The merge case is not lost, it is simply the len(parents)>1 case of the same loop; arm (E) proves it
 # still fires. For a commit C with parent P:
 #
 #     vanished = loop(P) - loop(C) - tombstones_new(C)
@@ -31,11 +31,14 @@
 # Any name present in a parent's loop, absent from the child's, and not declared retired IN THAT SAME
 # COMMIT is named and fails.
 #
-# THE WINDOW. BASE is the merge-base of REF with its upstream tracking ref (falling back to
-# origin/main, then origin/HEAD). If no upstream resolves, or the merge-base IS REF — the ordinary
-# state on a freshly-pushed main, where the window would otherwise be empty and the gate would be
-# inert all over again — BASE falls back to REF's first parent, so the newest commit is always
-# examined. A root commit with no parents at all passes trivially and says so.
+# THE WINDOW. BASE is the merge-base of REF with the first of: its upstream tracking ref, origin/main,
+# origin/HEAD that is NOT already at or ahead of REF. A candidate whose merge-base IS REF is skipped, not
+# final: a CI checkout of a branch tracks its own pushed copy, and stopping there judged only the tip
+# (train 26b, 2026-10-08: workflow_dispatch green over 0 loop-touching commits while pull_request, detached
+# at refs/pull/N/merge with no upstream, fell through to origin/main and judged 25 — arm I). Only when
+# every candidate contains REF — the ordinary state on a freshly-pushed main, where the window would
+# otherwise be empty and the gate inert all over again — does BASE fall back to REF's first parent, so
+# the newest commit is always examined. A root commit with no parents at all passes trivially and says so.
 #
 # THE TOMBSTONE CONVENTION: a deliberate removal is not a violation, but it must be DECLARED, not merely
 # absent. In the SAME commit that drops NAME from the loop, add a standalone comment line anywhere in
@@ -47,15 +50,24 @@
 # vanish in that commit (either NAME is still in the loop, or NAME was never in the parent's loop) — a
 # tombstone nobody needed is itself worth noticing. Only NEWLY added tombstones are judged: a tombstone
 # is permanent once written, so judging the whole accumulated set at every commit would fire forever
-# after the first legitimate retirement.
+# after the first legitimate retirement. In a merge, a tombstone ANOTHER parent already carries is that
+# side's retirement arriving, not a new declaration: against a parent whose loop never had NAME (and with
+# NAME absent from the child's loop too) it is not judged stale (arms F/F2 green; the same merge with no
+# parent carrying it, arm G, and a merge that keeps NAME in its loop under an inherited tombstone, arm H,
+# stay red). The vanish side is unchanged: still per parent, against tombstones that parent lacks.
 #
-# THE MUTATION CONTROLS (arms B, C, D) — this gate spent months green while inert, so it now proves on
+# THE MUTATION CONTROLS (arms B..I) — this gate spent months green while inert, so it now proves on
 # every run that its walker can still go red. Each arm builds a throwaway git repository under a temp
 # directory (NOT this one: no object, ref, index or working-tree state of the repo under test is
-# touched) with a known-bad history and requires arm A's own walker to name the violation:
-#   (B) single-parent silent drop  → must be RED   (the failure the old gate missed entirely)
-#   (C) two-parent merge drop      → must be RED   (the failure the old gate did catch — preserved)
-#   (D) the same drop WITH a tombstone → must be GREEN, and a tombstone matching no vanish → RED
+# touched) with a known history and requires arm A's own walker to name the violation (or stay green):
+#   (B) single-parent silent drop        → must be RED   (the failure the old gate missed entirely)
+#   (C) the same drop WITH a tombstone   → must be GREEN
+#   (D) a tombstone matching no vanish   → must be RED
+#   (E) two-parent merge drop            → must be RED   (the failure the old gate did catch — preserved)
+#   (F, F2) merge inheriting a tombstone from either parent, other parent never had NAME → must be GREEN
+#   (G) the same merge, tombstone carried by NO parent → must be RED
+#   (H) merge keeping NAME in its loop under a tombstone one parent carries → must be RED
+#   (I) window derivation on a branch tracking its own pushed copy reaches origin/main → RED on a drop
 #
 # WHY docs/EVALS.md's gate-count pins do NOT get this same treatment (deliberately, not an oversight):
 # manifestcheck.sh already ties every "N gate scripts" / "loop ... names N" claim in EVALS.md to the
@@ -151,20 +163,28 @@ def walk( repo, base, ref, path = "test/regression.sh" ):
             skipped.append( "%s (child has no `for _g in ...; do` loop)" % child[ :12 ] )
             continue
         childTombs = tombstones( childText )
-        for par in parents_of( repo, child ):
+        parents = parents_of( repo, child )
+        tombsOf = { par: tombstones( loopAt( par ) ) for par in parents }
+        for par in parents:
             parText = loopAt( par )
             parLoop = loop_names( parText )
             if parLoop is None:
                 skipped.append( "%s^%s (parent pre-dates the loop file)" % ( child[ :12 ], par[ :8 ] ) )
                 continue
             pairs += 1
-            newTombs = childTombs - tombstones( parText )
+            newTombs = childTombs - tombsOf[ par ]
             vanished = parLoop - childLoop
             silent = sorted( vanished - newTombs )
             if silent:
                 violations.append( "%s (parent %s): %d entr%s vanished from the loop with no `# retired:` tombstone: %s" % (
                     child[ :12 ], par[ :12 ], len( silent ), "y" if len( silent ) == 1 else "ies", ", ".join( silent ) ) )
-            unneeded = sorted( newTombs - vanished )
+            # A merge's tombstone that ANOTHER parent already carries is that side's retirement arriving, not
+            # a declaration made here — exempt it, but only when NAME is in neither this parent's loop nor
+            # the child's (it cannot be a vanish against this parent, so there is nothing for it to match).
+            # A NAME still in the child's loop stays red (arm H). For an ordinary commit `inherited` is
+            # empty, so the rule is exactly the single-parent one.
+            inherited = set().union( *( tombsOf[ q ] for q in parents if q != par ) )
+            unneeded = sorted( t for t in newTombs - vanished if t in childLoop or t not in inherited )
             if unneeded:
                 stale.append( "%s (parent %s): tombstone(s) matching no vanish in that commit: %s" % (
                     child[ :12 ], par[ :12 ], ", ".join( unneeded ) ) )
@@ -184,8 +204,10 @@ def derive_base( repo, ref ):
         mb = mb.strip()
         if mb != refSha:
             return mb, "merge-base with %s" % upstream
-        # REF is already contained in its upstream: the window would be empty and this gate inert.
-        break
+        # REF is already contained in this candidate (a branch tracking its own pushed copy, as every CI
+        # checkout of a branch does): the window would be empty. Try the next candidate — origin/main
+        # gives the same window the pull_request event judges (arm I) — not the first-parent fallback.
+        continue
     if firstParent:
         return firstParent, "REF's first parent (no upstream ahead of REF — window would otherwise be empty)"
     return None, "REF is a root commit"
@@ -289,6 +311,70 @@ def buildMerge( repo ):
     m = commitLoop( repo, BASE_NAMES + [ "leftcheck" ], [ b, c ] )  # rightcheck lost in the resolution
     return a, m
 arm( "(E) mutation control, MERGE drop —", buildMerge, "rightcheck" )
+
+# ── (F) a merge that INHERITS a tombstone from one parent, the other parent never having had NAME ──────
+# The train-26b shape (red on PR #383, 2026-10-08): a lane added spikecheck and retired it inside its own
+# life, leaving `# retired: spikecheck`; every later merge brings that tombstone in from the parent that
+# carries it. Judged against the OTHER parent (no tombstone, no spikecheck) it used to look like a
+# tombstone newly declared for a vanish that never happened. It is the other side's retirement arriving,
+# not a new declaration — GREEN, in both parent orders (the train merges lanes as the second parent; the
+# GitHub PR merge commit puts main first and the train second).
+def buildInheritedTomb( carrierFirst ):
+    def build( repo ):
+        a  = commitLoop( repo, BASE_NAMES, [] )
+        l1 = commitLoop( repo, BASE_NAMES + [ "spikecheck" ], [ a ] )
+        l2 = commitLoop( repo, BASE_NAMES, [ l1 ], tombs = [ "spikecheck" ] )   # retired inside the lane
+        r  = commitLoop( repo, BASE_NAMES + [ "othercheck" ], [ a ] )           # never had spikecheck
+        m  = commitLoop( repo, BASE_NAMES + [ "othercheck" ], [ l2, r ] if carrierFirst else [ r, l2 ],
+                         tombs = [ "spikecheck" ] )
+        return a, m
+    return build
+arm( "(F) merge inheriting a tombstone, carrier = 2nd parent —", buildInheritedTomb( False ), None )
+arm( "(F2) merge inheriting a tombstone, carrier = 1st parent —", buildInheritedTomb( True ), None )
+
+# ── (G) the same merge where NO parent carried the tombstone — the merge itself declared it: RED ───────
+def buildMergeNewTomb( repo ):
+    a = commitLoop( repo, BASE_NAMES, [] )
+    l = commitLoop( repo, BASE_NAMES + [ "leftcheck" ], [ a ] )
+    r = commitLoop( repo, BASE_NAMES + [ "othercheck" ], [ a ] )
+    m = commitLoop( repo, BASE_NAMES + [ "leftcheck", "othercheck" ], [ r, l ], tombs = [ "spikecheck" ] )
+    return a, m
+arm( "(G) mutation control, MERGE declares a tombstone no parent carried —", buildMergeNewTomb, "spikecheck" )
+
+# ── (H) a merge that keeps NAME in the loop while one parent carries its tombstone: RED ───────────────
+# One side retired spikecheck, the other side still runs it, and the resolution kept it in the loop under
+# the inherited tombstone. Judged against the side without the tombstone that is a tombstone whose NAME
+# is still in the loop — the exception (F) makes is only for a NAME absent from both this parent's loop
+# and the child's, so this stays red.
+def buildMergeKeepsRetired( repo ):
+    a  = commitLoop( repo, BASE_NAMES + [ "spikecheck" ], [] )
+    l  = commitLoop( repo, BASE_NAMES, [ a ], tombs = [ "spikecheck" ] )
+    r  = commitLoop( repo, BASE_NAMES + [ "spikecheck", "othercheck" ], [ a ] )
+    m  = commitLoop( repo, BASE_NAMES + [ "spikecheck", "othercheck" ], [ r, l ], tombs = [ "spikecheck" ] )
+    return a, m
+arm( "(H) mutation control, MERGE keeps a NAME one parent retired —", buildMergeKeepsRetired, "spikecheck" )
+
+# ── (I) the WINDOW: a branch whose upstream is its own pushed copy still reaches back to origin/main ───
+# A CI checkout of a branch (workflow_dispatch, push) tracks origin/<branch> == REF, so the merge-base with
+# that upstream IS REF. Stopping there and falling back to REF's first parent judged ONE commit — the
+# dispatch run on train 26b was green over a window of zero loop-touching commits while the pull_request
+# run (detached at refs/pull/N/merge, no upstream → origin/main) judged all 25. The derived window must
+# be the same under both events: an earlier silent drop on the branch is named.
+def buildTrackedBranch( repo ):
+    a = commitLoop( repo, BASE_NAMES + [ "victimcheck" ], [] )
+    b = commitLoop( repo, BASE_NAMES, [ a ] )                        # silent drop, one commit below the tip
+    c = commitLoop( repo, BASE_NAMES + [ "newcheck" ], [ b ] )       # harmless tip that touches the loop
+    for args in ( [ "update-ref", "refs/remotes/origin/main", a ],
+                  [ "update-ref", "refs/remotes/origin/feature", c ],
+                  [ "update-ref", "refs/heads/feature", c ],
+                  [ "config", "remote.origin.url", "file:///nonexistent.invalid" ],
+                  [ "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*" ],
+                  [ "config", "branch.feature.remote", "origin" ],
+                  [ "config", "branch.feature.merge", "refs/heads/feature" ] ):
+        git( repo, args )
+    b_, _why = derive_base( repo, "feature" )
+    return ( b_ or c ), "feature"
+arm( "(I) mutation control, WINDOW on a branch tracking its own pushed copy —", buildTrackedBranch, "victimcheck" )
 
 sys.exit( bad )
 PY

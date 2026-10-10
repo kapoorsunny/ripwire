@@ -189,8 +189,8 @@ TABLE = {
     ( "src/serialize.h", "bodylessAttr" ): ( 1, "safe", "bodylessAttr[40] in packBodies (issue #60, integration/train-12): the exact twin of the packtask.h row above — same format, same 12 B of literal, one std::size_t (bodylessCount), 32 B against 39 usable + NUL, 7 B of margin, no string interpoland. Same [32]-on-arrival correction, widened in the same commit." ),
     ( "src/serialize.h", "fitAttr" ):  ( 1, "safe",       "fitAttr[96]: two %zu plus the literal ' over_ceiling=1'." ),
     ( "src/serialize.h", "attr" ):     ( 2, "safe",       "attr[352] x2: the per-symbol metric attrs. Widest 26 lit + 4x10 digits + 11 role + qbuf(<=95) + ambs(<=35: amb= + lpin=) + kbuf(<=23) = 230 B." ),
-    ( "src/serialize.h", "tail" ):     ( 2, "safe",       "tail[192] x2: the <d> row tail. Widest 34 lit+digits + inAttr(<=23) + lens(qbuf, <=79) + pure(9) = 145 B." ),
-    ( "src/serialize.h", "hdr" ): ( 15, "safe",       "hdr[64] x2 (packBodies/packOutline): '<b t=\"%s\" l=\"%u\" p=\"' — symTag's fixed vocabulary + a line number. THE ESCAPED PATH IS APPENDED AFTER, on std::string. snprintf-then-append: textbook safe." ),
+    ( "src/serialize.h", "tail" ):     ( 3, "safe",       "tail[192] x3: the <d> row tail. Widest 34 lit+digits + inAttr(<=23) + lens(qbuf, <=79) + pure(9) = 145 B. The third (lane/lean-answers-068, sigRowTail's zero-elision branch) prints cxAttr/ccxAttr/inAttr pre-formatted, each omitted at 0 — never wider than the second." ),
+    ( "src/serialize.h", "hdr" ): ( 13, "safe",       "hdr[64] x2 (packBodies/packOutline) (13: train 26b — count-floor-068 replaced the <lego> implementors= header writes, two hdr sites, with string appends): '<b t=\"%s\" l=\"%u\" p=\"' — symTag's fixed vocabulary + a line number. THE ESCAPED PATH IS APPENDED AFTER, on std::string. snprintf-then-append: textbook safe." ),
     ( "src/serialize.h", "db" ):       ( 1, "safe",       "db[64 + kPageDisclosureCap]: <deps files=...> plus pageDisclosure's own capped buffer, sized against that cap by construction." ),
     ( "src/serialize.h", "hb" ): ( 3, "latent",     "hb[176]: <health .../>; shape= is a fixed vocabulary but acd/nccd are %.1f/%.2f on DOUBLES, formally unbounded. Realistic worst case 66 lit + 60 digits + 24 float + 10 shape = 160 B, ~16 B of margin. Truncation drops the '/>' and orphans the element." ),
     ( "src/serialize.h", "fit" ):      ( 1, "safe",       "fit[160]: the JSON max_tokens/fit_bytes twin; the %s is the literal ',\"over_ceiling\":true'." ),
@@ -260,12 +260,18 @@ NUMERIC_ONLY = {
     ( "src/serialize.h", "...)" ): 1,
     ( "src/serialize.h", "callsHdr" ): 2,
     ( "src/serialize.h", "cb" ): 1,
+    ( "src/serialize.h", "ccxAttr" ): 1,   # lane/lean-answers-068: sigRowTail's zero elision, " ccx=\"{}\"" of one count (<= 17 B of 23)
     ( "src/serialize.h", "changedAttr" ): 1,
+    ( "src/serialize.h", "eAttr" ): 1,  # lane/for-spine-span-068 (2026-10-04): writeSigHeadWithEnd's ' e="{}"' — 5 B literal + one
+                                        #   std::uint32_t (10 digits) = 15 B against 23 usable + NUL. A count, no %s, nothing escaped.
+    ( "src/serialize.h", "cxAttr" ): 1,    # lane/lean-answers-068: the same, " cx=\"{}\"" (<= 16 B of 23)
     ( "src/serialize.h", "eb" ): 1,
+    ( "src/serialize.h", "eKey" ): 1,   # lane/for-spine-span-068: spliceJsonEndLine's JSON twin ',"e":{}' — 5 B + 10 digits = 15 B
+                                        #   against 23 usable + NUL. A count, no %s, nothing escaped.
     ( "src/serialize.h", "estAttr" ): 1,
     ( "src/serialize.h", "gb" ): 1,
     ( "src/serialize.h", "gfb" ): 1,
-    ( "src/serialize.h", "inAttr" ): 1,
+    ( "src/serialize.h", "inAttr" ): 2,    # +1 lane/lean-answers-068: the zero-elision branch's own " in=\"{}\"" (<= 16 B of 23)
     ( "src/serialize.h", "kbuf" ): 1,
     ( "src/serialize.h", "lb" ): 4,   # row 6 (2026-09-12): collectCalleeNameRow's line buffer (the merged <c n= l=> row) joined the two
                                       #   …and a FOURTH (2026-09-13, PR #215 item 8): appendMergedCalleeNameRows joins the row's
@@ -274,10 +280,14 @@ NUMERIC_ONLY = {
                                       #   "{}" of one std::uint32_t, ten digits worst case against 15 usable + NUL, no %s and
                                       #   nothing escaped, so it does not join the string-interpolating population
     ( "src/serialize.h", "lineAttr" ): 1,
-    ( "src/serialize.h", "nb" ): 3,   # row 6 (2026-09-12): appendCalleeNameRow's `"\" l=\"{}\"/>"` buffer went with the merge.
+    ( "src/serialize.h", "nb" ): 6,   # row 6 (2026-09-12): appendCalleeNameRow's `"\" l=\"{}\"/>"` buffer went with the merge.
                                       #   cut-fix lane A (2026-09-23): +2, sigsOpenTag's nb[96] — ' shown="{}" total="{}" capped="1"'
                                       #   (31 B literal + two size_t at 20 digits = 71 B worst case, against 95 usable + NUL) and
                                       #   ' docs_dropped="{}"' (16 B + 20 digits = 36 B). Counts only, no %s, nothing escaped.
+                                      #   lane/for-spine-span-068 (2026-10-04): +1, the same nb[96]'s ' docs_after_code="{}"'
+                                      #   (19 B + 20 digits = 39 B). A count, no %s, nothing escaped.
+                                      #   knob-honesty-068 (2026-10-07): +2 in the same nb[96] — ' next_offset="{}"' (15 B + 20
+                                      #   digits = 35 B) and ' next_budget_tokens="{}"' (22 B + 20 digits = 42 B). Counts only.
     ( "src/serialize.h", "precAttr" ): 1,
     ( "src/serialize.h", "rankAttr" ): 1,
     ( "src/serialize.h", "rc" ): 1,
@@ -594,7 +604,20 @@ if not bad:
 #            238 -> 239 calls/sites, 104 -> 105 rows). noteCacheReject's new `char detail[192]` names both version
 #            numbers on a refused cache blob; one formatTo of a literal and two std::uint32_t, rowed 'not-markup'
 #            (a stderr notice). Re-derived on the train 20 merged tree; no other train lane moves the population.
-EXPECTED = { "mentions": 351, "calls": 241, "sites": 241, "rows": 105, "widthforms": 0 }
+#            2026-10-07 (lane/lean-answers-068, --for zero elision in serialize.h sigRowTail): +4 calls/+4 mentions/+4
+#            sites/+2 rows (351 -> 355 mentions, 241 -> 245 calls/sites, 105 -> 107 rows): new cxAttr[24] and ccxAttr[24]
+#            rows, a second inAttr[24] site and a third tail[192] site, all in the branch that omits a zero cx=/ccx=/in=.
+#            Each formats one integer or pre-formatted numeric attributes; classified above. Re-derived, not summed.
+#            train 26b (lean-answers merged onto the train's 352/242/242/107): re-derived on the merged tree.
+#            2026-10-07 (lane/knob-honesty-068): +2 calls/+2 mentions/+2 sites, rows unchanged — sigsOpenTag's existing nb[96]
+#            formats the cut's resume index (' next_offset="{}"') and the MCP machine continuation (' next_budget_tokens="{}"'):
+#            one size_t each, no string argument (35 B / 42 B worst case against 95 usable + NUL).
+#            train 26b (knob-honesty merged onto the train's 356/246/246/109): re-derived on the merged tree.
+#            2026-10-08 (lane/cr-qd-kinds-068, the defect-shape kind): +5 mentions, no call/site/row (351 -> 356). Five
+#            lines NAME rw::formatTo without calling it: the format-arity family table and two comments in
+#            src/defectshape.h, the defect-shape legend sentence (verbs_quality.h) and the --help paragraph (cli.h).
+#            train 26b (cr-qd-kinds merged onto the train's 358/248/248/109): re-derived on the merged tree.
+EXPECTED = { "mentions": 363, "calls": 248, "sites": 248, "rows": 109, "widthforms": 0 }
 #            2026-09-30 (#325 ruby_bases_unscoped=): +2 calls/+2 mentions/+2 sites, rows unchanged — graphGaugeAttrXml/Json (graphlegend.h) each format the absent-at-zero Ruby gauge into the SAME local buf[160]: one size_t, no string argument (21 + 20 digits worst case).
 #            2026-09-04 (capture-audit L6, H9): +1 call/+1 mention, sites/rows UNCHANGED — re-read, not
 #            re-counted. packConnect gained ONE snprintf into a new `char connectCeiling[32]` for the

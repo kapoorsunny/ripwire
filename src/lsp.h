@@ -35,6 +35,7 @@
 
 #include "infra/os.h"        // rw::os::realpath / getcwd / stat — the root-is-a-directory check at initialize, the launch-cwd base for relative index paths
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
@@ -358,28 +359,30 @@ inline int lspKindOf( rw::SymKind k ) noexcept
         case rw::SymKind::Macro:     return 14;   // Constant
         case rw::SymKind::Field:     return 8;    // Field
         case rw::SymKind::ModuleScope: return 2;  // Module — LSP's own word for a file's top-level scope
+        case rw::SymKind::NamedType: return 5;    // Class — LSP has no defined-type/alias kind; gopls files a non-struct named type here too
+        case rw::SymKind::Alias:     return 5;    // Class (as above)
+        case rw::SymKind::FuncType:  return 5;    // Class (as above)
         case rw::SymKind::Other:     break;
     }
     return 13;   // Variable — the neutral bucket
 }
 
+// The hover word per SymKind, a declarative table in enum order (CONTRIBUTING §3's table-over-switch rule; it was a
+// switch, and the three Go named-type kinds made it a near-clone of model.h's langTag switch). Sized by kSymKindCount, and
+// the static_assert below rejects an empty slot: std::array value-initializes the elements an initializer list leaves out,
+// so the size alone let an appended kind without a word compile to a nullptr hover word (CodeRabbit 5468003465).
+inline constexpr std::array<const char*, rw::kSymKindCount> kLspKindWords = {
+    "function", "method", "class", "struct", "interface", "variable", "section", "macro", "field",
+    "symbol",          // Other
+    "module scope",    // ModuleScope
+    "type", "type alias", "function type"   // NamedType, Alias, FuncType
+};
+static_assert( std::ranges::none_of( kLspKindWords, []( const char* w ) { return w == nullptr; } ),
+               "every SymKind needs a hover word in kLspKindWords (an initializer list shorter than kSymKindCount leaves nullptr)" );
 inline const char* lspKindWord( rw::SymKind k ) noexcept
 {
-    switch( k )
-    {
-        case rw::SymKind::Function:  return "function";
-        case rw::SymKind::Method:    return "method";
-        case rw::SymKind::Class:     return "class";
-        case rw::SymKind::Struct:    return "struct";
-        case rw::SymKind::Interface: return "interface";
-        case rw::SymKind::Var:       return "variable";
-        case rw::SymKind::Section:   return "section";
-        case rw::SymKind::Macro:     return "macro";
-        case rw::SymKind::Field:     return "field";
-        case rw::SymKind::ModuleScope: return "module scope";
-        case rw::SymKind::Other:     break;
-    }
-    return "symbol";
+    EXPECTS( std::size_t( k ) < kLspKindWords.size(), "a symbol's kind is a SymKind enumerator (the cache validates the byte)" );
+    return kLspKindWords[ std::size_t( k ) ];
 }
 
 // ─── file identity: a client URI → an index fileId ──────────────────────────────────────────────────

@@ -214,6 +214,22 @@ command -v xmllint >/dev/null 2>&1 && { if xmllint --noout "$MAP"; then ok "xmll
 SPLIT="$DIR/split"; sed 's/></>\n</g' "$MAP" >"$SPLIT"
 rowOf(){ awk -v pat="$1" '$0 ~ pat{f=1;print;next} /^<s /{f=0} f' "$SPLIT"; }   # an <s> row + its <c> children
 edgesTo(){ echo "$1" | grep -c "<c n=\"$2\""; }                                  # how many <c> rows of that name
+# An ABSENCE arm on a --callers answer: read only off a run that succeeded and produced its <callers> root. A crash or a
+# refusal leaves the capture empty, and a bare `grep -q ROW && no || ok` reads that as a PASS (checklist 14).
+#   callersLacks DIR SYMBOL ROW-PATTERN FAIL-MESSAGE PASS-MESSAGE
+callersLacks(){
+    local out
+    if ! out="$( "$BIN" "$1" --no-cache --callers="$2" 2>"$DIR/absent.err" )"; then
+        no "--callers=$2 exited non-zero, so its absence arm proves nothing: $( head -3 "$DIR/absent.err" )"; return
+    fi
+    case "$out" in
+        *'<callers'*) ;;
+        *) no "--callers=$2 produced no <callers> root, so its absence arm proves nothing"; return ;;
+    esac
+    if echo "$out" | grep -q "$3"; then no "$4"; else ok "$5"; fi
+}
+# how many <c> edges of that name; FE-B: a merged via="name" row <c … x="N"/> stands for N edges (serialize.h writeMapCalleeRows)
+edgesTo(){ echo "$1" | grep -o "<c n=\"$2\"[^>]*>" | awk '{ n = 1; if ( match( $0, / x="[0-9]+"/ ) ) n = substr( $0, RSTART + 4, RLENGTH - 5 ) + 0; s += n } END { print s + 0 }'; }
 
 echo "=== the fixture parsed the way this gate assumes ==="
 for want in 'n="add" sc="Calc"' 'n="add" sc="Tally"' 'n="run" sc="Engine"' 'n="run" sc="Motor"' \
@@ -237,7 +253,7 @@ CL="$( "$BIN" "$FIX" --no-cache --callers=Calc::add 2>/dev/null )"
 echo "$CL" | grep -q 'n="qualified_call"' && ok "--callers=Calc::add lists qualified_call" \
     || no "--callers=Calc::add does not list qualified_call: $( echo "$CL" | grep -o '<callers[^>]*' )"
 CT="$( "$BIN" "$FIX" --no-cache --callers=Tally::add 2>/dev/null )"
-echo "$CT" | grep -q 'n="qualified_call"' && no "--callers=Tally::add STILL lists qualified_call — the wrong half of the split survived" || ok "--callers=Tally::add does not list qualified_call"
+callersLacks "$FIX" Tally::add 'n="qualified_call"' "--callers=Tally::add STILL lists qualified_call — the wrong half of the split survived" "--callers=Tally::add does not list qualified_call"
 echo "$CT" | grep -q 'count="0"' && ok "…and reports count=\"0\" (Tally::add has no caller in this tree)" \
     || no "--callers=Tally::add did not report count=0: $( echo "$CT" | grep -o '<callers[^>]*' )"
 
@@ -248,8 +264,7 @@ S="$( rowOf 'n="scoped_call" ' )"
 CE="$( "$BIN" "$FIX" --no-cache --callers=Engine::run 2>/dev/null )"
 echo "$CE" | grep -q 'n="scoped_call"' && ok "--callers=Engine::run lists scoped_call" \
     || no "--callers=Engine::run does not list scoped_call"
-CM="$( "$BIN" "$FIX" --no-cache --callers=Motor::run 2>/dev/null )"
-echo "$CM" | grep -q 'n="scoped_call"' && no "--callers=Motor::run lists scoped_call — Outer::Engine reached Other::Motor" || ok "--callers=Motor::run does not list scoped_call"
+callersLacks "$FIX" Motor::run 'n="scoped_call"' "--callers=Motor::run lists scoped_call — Outer::Engine reached Other::Motor" "--callers=Motor::run does not list scoped_call"
 
 A="$( rowOf 'n="absolute_call" ' )"
 [ "$( edgesTo "$A" ping )" -eq 1 ] && ok "::Top.ping → exactly one edge named ping (the absolute spelling has no scope: child)" \
@@ -257,8 +272,7 @@ A="$( rowOf 'n="absolute_call" ' )"
 CP="$( "$BIN" "$FIX" --no-cache --callers=Top::ping 2>/dev/null )"
 echo "$CP" | grep -q 'n="absolute_call"' && ok "--callers=Top::ping lists absolute_call" \
     || no "--callers=Top::ping does not list absolute_call"
-CR="$( "$BIN" "$FIX" --no-cache --callers=Radar::ping 2>/dev/null )"
-echo "$CR" | grep -q 'n="absolute_call"' && no "--callers=Radar::ping lists absolute_call — ::Top reached Radar" || ok "--callers=Radar::ping does not list absolute_call"
+callersLacks "$FIX" Radar::ping 'n="absolute_call"' "--callers=Radar::ping lists absolute_call — ::Top reached Radar" "--callers=Radar::ping does not list absolute_call"
 
 echo "=== a MODULE is a receiver too (Util.format, and the :: spelling of the same call) ==="
 M="$( rowOf 'n="module_call" ' )"
@@ -363,8 +377,7 @@ MQ="$( "$BIN" "$MUT" --no-cache 2>/dev/null | sed 's/></>\n</g' | awk '/n="quali
 MCL="$( "$BIN" "$MUT" --no-cache --callers=Tally::add 2>/dev/null )"
 echo "$MCL" | grep -q 'n="qualified_call"' && ok "mutation: Tally.add → --callers=Tally::add now lists qualified_call" \
     || no "mutation: the edge did not follow the receiver: $MQ"
-MCC="$( "$BIN" "$MUT" --no-cache --callers=Calc::add 2>/dev/null )"
-echo "$MCC" | grep -q 'n="qualified_call"' && no "mutation: --callers=Calc::add still lists qualified_call — the pin is not reading the receiver" || ok "mutation: Calc::add no longer lists it"
+callersLacks "$MUT" Calc::add 'n="qualified_call"' "mutation: --callers=Calc::add still lists qualified_call — the pin is not reading the receiver" "mutation: Calc::add no longer lists it"
 
 echo
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

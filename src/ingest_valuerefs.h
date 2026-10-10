@@ -34,6 +34,12 @@
 //   Through: name=the container/parameter called through; fieldName=the written callee (through=);
 //            composeRel=the key (".k", "[k]", "*" computed, "" bare); qualifier="p" (a parameter: argCount is its
 //            index), "l" (a local container) or "f" (a file-scope container).
+//   Depth cut (role Value, at most one per file, after its rows): name="" (no identifier is empty); qualifier="d"
+//            (model.h kValueRefDepthCutScope); argCount=the subtrees kVrMaxDepth stopped the walk above (saturating);
+//            startByte/line=the first one. Not a row: valuerefindex.h counts it, and every answer that reads value
+//            references discloses it (value_refs_depth_capped= / value_refs_depth_at=), except --quality-delta's dead kind
+//            and its value-ref-excluded= count, --verify uses()/unused() (count= is a floor there) and the LSP
+//            references/hover handlers (named deferrals).
 // A local/file Through survives only when the same scope fed that container a function value (the filter at
 // scope exit / file end), so an ordinary `x.m()` adds nothing; a parameter Through always survives — its
 // values arrive from callers elsewhere.
@@ -41,7 +47,8 @@
 // FLOORS (stated in the legend and pinned by recallshapecheck): a member or qualified value (obj.f, self.f,
 // ns::f, &Cls::m) and a function as the OBJECT of a member access (f.bind, f.name) are not rows; an import
 // alias is a local binding; a macro body is opaque; classes are not functions; Python attribute calls never
-// count as a call through a dict; nodes deeper than kVrMaxDepth are not visited.
+// count as a call through a dict; nodes deeper than kVrMaxDepth are not visited — DISCLOSED, never silent: the file's
+// depth-cut record (below) makes value_refs= / --dead-code say the count is a floor and name the first cut site.
 
 namespace rw
 {
@@ -51,7 +58,7 @@ namespace
 
 using VrFam = ValueRefFamily;   // model.h: the one armed-language table the resolver indexes too
 
-inline constexpr std::uint32_t kVrMaxDepth   = 512;   // the value-uses pass's own depth guard (ingest_sidecap.h kSideDepthUses)
+inline constexpr std::uint32_t kVrMaxDepth   = 512;   // the value-uses pass's own depth guard (ingest_sidecap.h kSideDepthUses); a cut is disclosed as value_refs_depth_capped= (valuerefs.h)
 inline constexpr std::size_t   kVrTextCap    = 96;    // a written slot / callee longer than this is cut with "…"
 
 // A written slot or callee, made attribute-safe: whitespace runs collapse to one space (an XML attribute may not
@@ -146,6 +153,23 @@ struct VrScope
     std::vector<RawRef>           pending;         // calls through a container declared here, awaiting `fed`
 };
 
+// The walk's DISCLOSE sink for the depth cap: the subtrees kVrMaxDepth stopped it above, and the first one's site.
+struct VrDepthCut
+{
+    enum class DisclosureWhy : std::uint8_t
+    {
+        SubtreesBelowMaxDepth,   // nodes past kVrMaxDepth were not visited: their value references are not captured
+    };
+    std::uint32_t subtrees  = 0;
+    std::uint32_t startByte = 0;
+    std::uint32_t line      = 0;
+    bool          disclosed = false;
+    void disclose( DisclosureWhy ) noexcept
+    {
+        disclosed = true;
+    }
+};
+
 struct VrAnc
 {
     TSNode        node {};
@@ -203,10 +227,17 @@ public:
         enter( root, 0 );
         for( ;; )
         {
-            if( m_anc.size() < kVrMaxDepth && ts_tree_cursor_goto_first_child( &cur ) )
+            if( m_anc.size() < kVrMaxDepth )
             {
-                enter( ts_tree_cursor_current_node( &cur ), ts_tree_cursor_current_field_id( &cur ) );
-                continue;
+                if( ts_tree_cursor_goto_first_child( &cur ) )
+                {
+                    enter( ts_tree_cursor_current_node( &cur ), ts_tree_cursor_current_field_id( &cur ) );
+                    continue;
+                }
+            }
+            else if( ts_node_child_count( m_anc.back().node ) > 0 )
+            {
+                noteDepthCut( m_anc.back().node );   // the cap stops the walk ABOVE these children: one subtree not visited
             }
             bool done = false;
             for( ;; )
@@ -240,6 +271,10 @@ public:
             {
                 m_out.push_back( std::move( t ) );
             }
+        }
+        if( m_depthCut.subtrees > 0 )
+        {
+            emitDepthCut();
         }
     }
 
@@ -711,6 +746,107 @@ private:
         return s;
     }
 
+    // A C declarator wrapper between a parameter list and the node that owns the declarator chain.
+    static constexpr std::string_view kDeclaratorWrappers[] = {
+        "function_declarator", "abstract_function_declarator", "pointer_declarator", "abstract_pointer_declarator",
+        "reference_declarator", "abstract_reference_declarator", "parenthesized_declarator",
+        "abstract_parenthesized_declarator", "attributed_declarator", "array_declarator", "abstract_array_declarator",
+    };
+    static bool isDeclaratorWrapper( const char* t ) noexcept
+    {
+        return std::ranges::find( kDeclaratorWrappers, std::string_view( t ) ) != std::ranges::end( kDeclaratorWrappers );
+    }
+
+    // Is node kind `t` (about to be entered; its parent is m_anc.back()) a parameter list, or a parameter of one, that
+    // belongs to no function this walk has opened? A parameter declares its name only inside the function that OWNS the
+    // list — the innermost scope, a function, whose own declarator / `parameters` holds it. A prototype (`void
+    // set_handler( void (*handler)( int ) );`), a function-pointer typedef or parameter (`typedef void (*fn_t)( int sig
+    // );`), a C++ member declaration, a Go func type or interface method (`type H func( w Writer )`) and a TS function type,
+    // signature or `declare function` open no scope, so their names used to land in the ENCLOSING scope — the file scope
+    // at top level — and hid every same-named function there (`signal( SIGINT, handler )` lost its row). Python has no
+    // bodiless signature. A C parameter list NOT under a function declarator (a C++ catch clause, a template parameter
+    // list) keeps declaring into the innermost scope, as before.
+    bool foreignParameters( const char* t ) const noexcept
+    {
+        if( m_anc.size() < 2 )
+        {
+            return false;
+        }
+        const VrScope& s      = m_scopes.back();
+        const VrAnc&   parent = m_anc.back();
+        switch( m_fam )
+        {
+            case VrFam::C:
+            {
+                if( !( kindIs( t, "parameter_declaration" ) || kindIs( t, "optional_parameter_declaration" ) ) || !kindIs( parent.kind, "parameter_list" ) )
+                {
+                    return false;
+                }
+                std::size_t j = m_anc.size() - 2;
+                if( !kindIs( m_anc[j].kind, "function_declarator" ) && !kindIs( m_anc[j].kind, "abstract_function_declarator" ) )
+                {
+                    return false;   // a catch clause, a template parameter list: unchanged
+                }
+                while( j > 0 && isDeclaratorWrapper( m_anc[j].kind ) )
+                {
+                    --j;
+                }
+                return !( s.isFunction && ts_node_eq( m_anc[j].node, s.node ) );
+            }
+            case VrFam::Go:
+            {
+                if( !( kindIs( t, "parameter_declaration" ) || kindIs( t, "variadic_parameter_declaration" ) ) || !kindIs( parent.kind, "parameter_list" ) )
+                {
+                    return false;
+                }
+                return !( s.isFunction && ts_node_eq( m_anc[ m_anc.size() - 2 ].node, s.node ) );   // receiver, parameters and named results
+            }
+            case VrFam::Js:
+            {
+                return kindIs( t, "formal_parameters" ) && !( s.isFunction && ts_node_eq( parent.node, s.node ) );
+            }
+            case VrFam::Py:
+            case VrFam::None: break;
+        }
+        return false;
+    }
+
+    // ── the depth cut ──────────────────────────────────────────────────────────────────────────────────
+    // A node at kVrMaxDepth whose children the walk does not visit: a value reference below it is never captured. The
+    // first one's site is kept as the clue the answers print (value_refs_depth_at=).
+    void noteDepthCut( TSNode n ) noexcept
+    {
+        if( m_depthCut.subtrees == 0 )
+        {
+            m_depthCut.startByte = ts_node_start_byte( n );
+            m_depthCut.line      = ts_node_start_point( n ).row + 1;
+        }
+        if( m_depthCut.subtrees < UINT32_MAX )
+        {
+            ++m_depthCut.subtrees;
+        }
+    }
+
+    // The file's ONE depth-cut record (RECORD SHAPE in the header comment): the cut is disclosed through it on the
+    // answers that read value references (valuerefs.h value_refs_depth_capped=, --dead-code; the named exceptions are in
+    // the header comment), and it is cached with the file's other references, so a warm run discloses it too.
+    void emitDepthCut()
+    {
+        EXPECTS( m_depthCut.subtrees > 0, "a depth-cut record is written only when the cap stopped the walk" );
+        DISCLOSE( m_depthCut, VrDepthCut::DisclosureWhy::SubtreesBelowMaxDepth,
+                  "value references: subtrees below kVrMaxDepth were not visited (value_refs_depth_capped=)" );
+        RawRef r;
+        r.fileId        = m_fileId;
+        r.startByte     = m_depthCut.startByte;
+        r.line          = m_depthCut.line;
+        r.lang          = m_lang;
+        r.role          = RefRole::Value;
+        r.qualifier     = std::string( 1, kValueRefDepthCutScope );   // name stays "": no identifier is empty
+        r.argCount      = static_cast<std::uint16_t>( std::min<std::uint32_t>( m_depthCut.subtrees, 0xFFFFu ) );
+        r.argCountKnown = true;
+        m_out.push_back( std::move( r ) );
+    }
+
     // ── the walk ───────────────────────────────────────────────────────────────────────────────────────
     void enter( TSNode n, TSFieldId field )
     {
@@ -734,7 +870,10 @@ private:
             m_scopes.push_back( openScope( n, a.kind, sk ) );
             a.opensScope = true;
         }
-        harvest( n, a.kind, m_scopes.back().decls );
+        if( !foreignParameters( a.kind ) )
+        {
+            harvest( n, a.kind, m_scopes.back().decls );
+        }
         m_anc.push_back( a );
         const std::size_t i = m_anc.size() - 1;
         if( m_fam == VrFam::Py && kindIs( a.kind, "decorated_definition" ) )
@@ -959,12 +1098,12 @@ private:
             if( kindIs( kt, "field_designator" ) )
             {
                 const std::string nm( text( ts_node_named_child( k, 0 ) ) );
-                into = "." + nm;
+                into = "." + vrClean( nm );
                 key  = "." + nm;
                 return;
             }
             const std::string w( text( ts_node_named_child( k, 0 ) ) );
-            into = "[" + w + "]";
+            into = "[" + vrClean( w ) + "]";   // `[A +\n 1] = f`: an expression, maybe multi-line — written like every other slot
             key  = "[" + w + "]";
             return;
         }
@@ -1003,7 +1142,7 @@ private:
         }
         if( vrKeyKind( kt ) == VrKeyKind::Number )
         {
-            into = "[" + std::string( w ) + "]";
+            into = "[" + vrClean( w ) + "]";   // the written slot is capped; the match key stays whole (no two keys collide)
             key  = "[" + std::string( w ) + "]";
             return;
         }
@@ -1013,7 +1152,7 @@ private:
             key  = "*";
             return;
         }
-        into = "." + std::string( w );           // JS property_identifier / Go struct field name
+        into = "." + vrClean( w );               // JS property_identifier / Go struct field name, capped as above
         key  = "." + std::string( w );
     }
 
@@ -1095,7 +1234,7 @@ private:
                 return false;
             }
             const auto [ cont, id ] = containerOf( j - 1 );
-            s.into = cont + "." + std::string( text( self.node ) );
+            s.into = cont + "." + vrClean( text( self.node ) );
             s.container = id;
             s.key = "." + std::string( text( self.node ) );
             s.scope = id.empty() ? 'x' : 'f';
@@ -1538,6 +1677,7 @@ private:
     std::vector<VrAnc>             m_anc;
     std::vector<std::string>       m_fileFed;
     std::vector<RawRef>            m_filePending;
+    VrDepthCut                     m_depthCut;
     TSFieldId m_fValue = 0, m_fKey = 0, m_fLeft = 0, m_fRight = 0, m_fFunction = 0, m_fName = 0, m_fDeclarator = 0;
     TSFieldId m_fConsequence = 0, m_fAlternative = 0, m_fParameters = 0, m_fParameter = 0, m_fObject = 0, m_fProperty = 0, m_fField = 0;
     TSFieldId m_fArgument = 0, m_fOperand = 0, m_fAttribute = 0, m_fOperator = 0, m_fPattern = 0, m_fDefinition = 0;

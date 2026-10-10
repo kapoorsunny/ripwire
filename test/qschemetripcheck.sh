@@ -34,12 +34,52 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-10-08, train 26b final regeneration (all thirteen lanes merged, the path-gap name fix on top): RE-DERIVED ONCE with
+#   UPDATE_GOLDEN=1 on the merged tree (hash a1e54fc30b…9141af3). Watched text: kParserVer 156 (rich file tag 157; above
+#   FE-B's 154/155, honesty-small's and the cr2 follow-up's 145, cr-qd's 148), kCacheVersion 29 (FE-B's ref record),
+#   kQSnapCacheScheme 19 (the cr2 follow-up's dead-set move took 18 and cr-qd-kinds' defect-shape records also took 18 for a
+#   different scheme: renumbered 19, both quality.h notes kept), quality.h's mirrors 156/29, and cr-qd's defectSitesOf
+#   in the manifest. Replaces the PENDING line that stood here since the FE-B merge; the lane entries below are history.
+# 2026-10-08, lane FE-B fix round 2 (review B4): RE-DERIVED with UPDATE_GOLDEN=1 (hash 34d7ef2e81…a5bd559d). kParserVer
+#   152 -> 154 (binding spans and tombstones, type parameters; 153 is 152's rich tag); quality.h's mirror with it.
+#   kCacheVersion and kQSnapCacheScheme unchanged. The train renumbers if needed.
+# 2026-10-07, lane FE-B fix round 1 (review B3): RE-DERIVED with UPDATE_GOLDEN=1 (hash e6abc48760…048773). kParserVer
+#   150 -> 152 (Java/C#/Kotlin/Swift declarations record RecvType/MemberType; 151 is 150's rich tag), the quality.h
+#   mirror with it. kCacheVersion and kQSnapCacheScheme unchanged. The train renumbers if needed.
+# 2026-10-07, lane FE-B merged onto train 26a (cd87e30e): RE-DERIVED with UPDATE_GOLDEN=1 (hash abf245ceff…678aeb).
+#   kParserVer 148 -> 150 (FE-B's receiver chain + bind kinds on top of #373; 149 is 148's rich tag), kCacheVersion
+#   28 -> 29 (FE-B's ref record), quality.h mirrors with them. kQSnapCacheScheme stays 17. The train renumbers if needed.
+# 2026-10-04, lane/fe-b-receiver-evidence: RE-DERIVED with UPDATE_GOLDEN=1 (hash 9e06e28ba5…36253dbb). kParserVer 141 -> 146
+#   (above train 25's 143/144; the ref record gains the receiver chain memberPath/memberCtor and the receiver-evidence
+#   binding kinds), kCacheVersion 28 -> 29; quality.h's mirrors move with them. kQSnapCacheScheme stays 17: a snapshot's meaning is unchanged, and the
+#   edges it reads are re-derived under the new kParserVer. The train renumbers and re-derives.
+# 2026-10-08, lane/cr-qd-kinds-068 fix round 1: RE-PINNED with UPDATE_GOLDEN=1. defectSitesOf collects the tree's
+#   macro names for the C++ scanner (format-arity's F1 skip) and the scanners record fewer sites; the blob shape is
+#   unchanged and 18 never shipped, so kQSnapCacheScheme stays 18 (its v18 note says so); the producer identity keeps
+#   this build's blobs apart from the phase-2 build's.
+# 2026-10-08, lane/cr-qd-kinds-068 cleanup: RE-PINNED with UPDATE_GOLDEN=1 (hash 2fdb42dc0a…3c1b8d). Refactor only:
+#   computeSnapshot projects defectSitesOf's records with std::ranges::transform instead of a helper loop (the same
+#   records in the same order); kQSnapCacheScheme stays 18.
+# 2026-10-07, lane/cr-qd-kinds-068 (the defect-shape kind): RE-DERIVED with UPDATE_GOLDEN=1 (hash 2244e7390c…a55ef7).
+#   kQSnapCacheScheme 17 -> 18: the blob gained the defect-shape (anchor, site) records after publicApi (serializeSnapshot,
+#   deserializeSnapshot and computeSnapshot all moved), a BLOB SHAPE change. The manifest gains defectSitesOf (the site
+#   identity the baseline stores); the scanners it calls live in defectshape.h, outside the manifest — disclosed in the
+#   quality.h comment. kParserVer / kCacheVersion unchanged. The train may renumber the scheme.
 # 2026-10-04, train 26a (PR #373, Ruby method lookup, merged onto main 255dc199): RE-DERIVED ONCE on the merged tree with
 #   UPDATE_GOLDEN=1 (hash 9fe75d7e33…283213). The only watched text that moved is the kParserVer declaration: 143 -> 148,
 #   above the branch's 145 and the 145–147 other branch builds have used (148's full-use file tag is 149); quality.h's
 #   kIngestParserVerMirror moves with it. kCacheVersion stays main's 28 (the branch side said 27). kQSnapCacheScheme
 #   stays 17: what a Snapshot means is unchanged — with kParserVer set back to 143, the merged tree hashes to main's pin
 #   32240f4552…2dafcc. The two feat/ruby-method-lookup entries below are the branch's own history.
+# 2026-10-04, lane honesty-small-068: RE-DERIVED with UPDATE_GOLDEN=1 (hash a4e37a094b…735858). kParserVer 143 -> 145 (Go named
+#   types get their kind from the type_spec form and `type A = B` is indexed; 145 because 143's full-use file tag is 144)
+#   with quality.h's mirror; one hashed quality.h predicate reads isStructOrNamedType (behaviour-identical: the new kinds
+#   admit exactly what Struct did). kQSnapCacheScheme stays 17. A lane-local number: the train renumbers.
+# 2026-10-04, train 25 re-review fixes: RE-DERIVED with UPDATE_GOLDEN=1 (hash a4e37a094b…735858). kParserVer 143 -> 145
+#   (a prototype's / func type's parameter declares nothing in the enclosing scope; a file's value walk cut at
+#   kVrMaxDepth gains a depth-cut record; the remaining written key slots are capped) with quality.h's mirror; 145
+#   because 143's full-use file tag is 144. kQSnapCacheScheme 17 -> 18: the dead set moved (a function that only
+#   stores itself is no longer value-referenced). No assertion changed.
 # 2026-10-04, train 25 review fixes: RE-DERIVED with UPDATE_GOLDEN=1 (hash 32240f4552…2dafcc). kParserVer 141 -> 143 (two
 #   extraction changes: a declaration named like the JS global object is a JsShadow binding; value-reference slot text
 #   is cut on a UTF-8 boundary and JS string keys are capped) with quality.h's mirror; 143 because 141's full-use file

@@ -285,8 +285,9 @@ case "$promptBytes" in ''|*[!0-9]*) exit 0;; esac
 [ "$promptBytes" -le 8192 ] || exit 0
 
 # HARNESS/SYSTEM EVENT GUARD, checked before the classifier is ever invoked. A background-task completion
-# (`<task-notification>…</task-notification>`) or an injected reminder (`<system-reminder>…</system-reminder>`)
-# can arrive on this same channel, not from the user, and `--help-task` has no concept of "this names no
+# (`<task-notification>…</task-notification>`), an injected reminder (`<system-reminder>…</system-reminder>`),
+# an MCP channel event (`<channel …>`) or a sub-agent hand-back (`<agent-message …>`) (issue #381) can
+# arrive on this same channel, not from the user, and `--help-task` has no concept of "this names no
 # task" — it answers the report prose anyway (docs/EVALS.md, the routing-noise round). Narrow and
 # POSITIONAL on purpose: only the prompt's own leading bytes, after whitespace, are tested, so a genuine
 # prompt that merely mentions one of these markers mid-sentence is untouched. The classifier is never
@@ -296,23 +297,43 @@ case "$promptBytes" in ''|*[!0-9]*) exit 0;; esac
 # blank line before the marker kept that leading newline in `rest` and missed the case match below,
 # falling through to a real classifier call and status="abstain" logging instead of "skip-system". This
 # form strips the full leading run of [:space:] bytes from the whole string in one pass.
-lead="${prompt%%[![:space:]]*}"
+# ---- BEGIN MIRRORED BLOCK rw_is_harness_event (issue #381) ------------------------------------------------
+# KEEP BYTE-IDENTICAL in hooks/ripwire-claude-route.sh and hooks/ripwire-codex-route.sh; test/routehookcheck.sh
+# extracts both copies and diffs them (the rw_is_ripwire_call pattern). The list of harness-event wrappers is
+# data in ONE place per file: the C++ classifier keeps the same list in src/taskroute.h (kHarnessEventTags).
+# rw_is_harness_event REST — REST is the prompt with its leading whitespace already stripped. True when it
+# begins with a wrapper Claude Code uses to deliver something that is not user input: a background-task
+# completion or an injected reminder (matched with their closing `>`), or an MCP channel event / sub-agent
+# hand-back (`<channel` / `<agent-message`, which carry attributes, so they match only as the opening tag:
+# followed by a space or `>`). `<channelz>`, `<channels>`, `<agent-messages>` and a prompt that merely
+# MENTIONS a wrapper mid-sentence are not matches.
+rw_is_harness_event()
+{
+    case "$1" in
+        '<task-notification>'*|'<system-reminder>'*) return 0 ;;
+        '<channel '*|'<channel>'*|'<agent-message '*|'<agent-message>'*) return 0 ;;
+    esac
+    return 1
+}
+# ---- END MIRRORED BLOCK rw_is_harness_event ---------------------------------------------------------------
+# The lead strip is the six ASCII bytes src/taskroute.h's looksLikeSystemEvent strips (space \t \n \v \f \r), written
+# out: bash's [:space:] also matches U+00A0 and other Unicode spaces in a UTF-8 locale, which the classifier keeps.
+lead="${prompt%%[!$' \t\n\v\f\r']*}"
 rest="${prompt#"$lead"}"
-case "$rest" in
-    '<task-notification>'*|'<system-reminder>'*)
-        if meter_home; then
-            promptHash="$( hash_text "$prompt" )"
-            [ -n "$session" ] || session="prompt:$promptHash"
-            sessionHash="$( hash_text "$session" )"
-            now="$( date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || true )"
-            jq -cn --arg at "$now" --arg hash "$promptHash" --arg sessionHash "$sessionHash" \
-                --argjson bytes "$promptBytes" \
-                '{v:2,at:$at,event:"UserPromptSubmit",status:"skip-system",intent:"",recommended:"",
-                  session_hash:$sessionHash,prompt_hash:$hash,prompt_bytes:$bytes}' >>"$routingLog" 2>/dev/null || true
-        fi
-        exit 0
-        ;;
-esac
+if rw_is_harness_event "$rest"
+then
+    if meter_home; then
+        promptHash="$( hash_text "$prompt" )"
+        [ -n "$session" ] || session="prompt:$promptHash"
+        sessionHash="$( hash_text "$session" )"
+        now="$( date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || true )"
+        jq -cn --arg at "$now" --arg hash "$promptHash" --arg sessionHash "$sessionHash" \
+            --argjson bytes "$promptBytes" \
+            '{v:2,at:$at,event:"UserPromptSubmit",status:"skip-system",intent:"",recommended:"",
+              session_hash:$sessionHash,prompt_hash:$hash,prompt_bytes:$bytes}' >>"$routingLog" 2>/dev/null || true
+    fi
+    exit 0
+fi
 
 route="$( ripwire "$cwd" --help-task="$prompt" 2>/dev/null )" || exit 0
 # The root's ATTRIBUTE, not a byte prefix: since the compact legend became the CLI default (L1) the root reads

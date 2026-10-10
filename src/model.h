@@ -43,7 +43,7 @@ template<class K, class V> using HashMap = ankerl::unordered_dense::map<K, V>;
 using NodeId = std::uint32_t;
 inline constexpr NodeId kNoNode = 0xFFFFFFFFu;
 
-// symbol kind → the terse XML attribute (t="fn|method|cls|struct|iface|var|sec|macro|modscope").
+// symbol kind → the terse XML attribute (t="fn|method|cls|struct|iface|var|sec|macro|modscope|type|alias|functype").
 // Macro (the macro-edges round) is APPENDED before Other so no existing kind renumbers: a preprocessor
 // `#define` definition (@definition.macro — C/C++ preproc_def/preproc_function_def, Rust macro_definition).
 // Previously the C/Rust captures mapped to Function, which read as a lie on every t= surface; the kind now
@@ -65,12 +65,23 @@ inline constexpr NodeId kNoNode = 0xFFFFFFFFu;
 // mintModuleScopeOwners() appends one per file that has a file-scope call, AFTER the parse cache is released,
 // so it is the owner a top-level statement or an anonymous callback body attributes to. It is a CALLER, never a
 // callee: nothing in any language can name `<file-scope>`, so it takes no in-edge and cannot become a rank hub.
-enum class SymKind : std::uint8_t { Function, Method, Class, Struct, Interface, Var, Section, Macro, Field, Other, ModuleScope };
+// NamedType / Alias / FuncType (honesty-small-068) are APPENDED after ModuleScope so no existing kind renumbers. They
+// split the old `@definition.type` → Struct bucket where a grammar's syntax PROVES the type's form, which today is Go
+// alone: `type N string` / `type L[T any] []T` (a defined type over a non-struct, non-interface, non-func form, or over
+// another named type) is t="type", `type F func(...)` is t="functype", `type A = B` is t="alias" (a floor: a Go 1.24
+// generic alias `type A[T any] = B` reads t="type", because the grammar gives it no type_alias node). A Go struct or
+// interface keeps t="struct"/t="iface". Every other language's @definition.type capture still maps to Struct (C/C++
+// typedef and enum, TS/Swift/Dart aliases, Java/C#/PHP/GDScript enums, Elixir @type) — a disclosed floor, not a claim
+// that those are structs. The three kinds BEHAVE as Struct did everywhere a predicate reads the kind
+// (isStructOrNamedType below), so only the label changes: a label-normalised base-vs-head sample over Go fixtures and
+// 26 argv found no other byte moved (2026-10-04, this lane). Dropping the helper moved nothing on
+// those probes either, so it is a guard for predicates no Go fixture reaches today, not a proven behaviour.
+enum class SymKind : std::uint8_t { Function, Method, Class, Struct, Interface, Var, Section, Macro, Field, Other, ModuleScope, NamedType, Alias, FuncType };
 // The number of SymKind enumerators, and the bound a cached def's kind byte is VALIDATED against on the way
 // back in (ingest_cache.h ByteR::enumU8). The static_assert is not a restatement: enumCountIsExact asks the
 // compiler whether the last enumerator is the last NAMED value, so appending a kind without moving this is a
 // build error rather than a validator that silently refuses the new kind's every cached record.
-inline constexpr std::size_t kSymKindCount = static_cast<std::size_t>( SymKind::ModuleScope ) + 1;
+inline constexpr std::size_t kSymKindCount = static_cast<std::size_t>( SymKind::FuncType ) + 1;
 static_assert( enumCountIsExact<SymKind, kSymKindCount>(), "kSymKindCount must name the LAST SymKind enumerator — move it with the append" );
 
 inline const char* symTag( SymKind k ) noexcept
@@ -88,8 +99,23 @@ inline const char* symTag( SymKind k ) noexcept
         case SymKind::Field:     return "field";  // member variable (id=path::Owner::field; use-sites via --uses=Owner.field)
         case SymKind::Other:     return "other";
         case SymKind::ModuleScope: return "modscope";   // the file's module scope: n="<file-scope>", no body to expand
+        case SymKind::NamedType: return "type";     // Go `type N string`: a defined type whose WRITTEN form is not a struct/iface/func literal
+        case SymKind::Alias:     return "alias";    // Go `type A = B`: another name for B
+        case SymKind::FuncType:  return "functype"; // Go `type F func(...)`: a named function type
     }
     return "other";   // a byte past the enum; a NEW SymKind is a -Werror=switch error above, never a silent "other"
+}
+
+// The kinds the `@definition.type` bucket mapped to Struct before honesty-small-068 split Go's: every predicate that
+// admitted Struct as "a named type" (callable as a conversion, a method owner, a type-like row) admits these too, so
+// the split changes the t= LABEL and nothing else. Read this, not `== SymKind::Struct`, wherever the question is
+// "is this a struct-or-named-type definition".
+// The three split kinds are the LAST three enumerators, so they are one range; the asserts pin that.
+static_assert( SymKind::Alias == SymKind( unsigned( SymKind::NamedType ) + 1 ) && SymKind::FuncType == SymKind( unsigned( SymKind::NamedType ) + 2 )
+               && kSymKindCount == unsigned( SymKind::FuncType ) + 1, "NamedType..FuncType are the last, contiguous kinds" );
+inline bool isStructOrNamedType( SymKind k ) noexcept
+{
+    return k == SymKind::Struct || k >= SymKind::NamedType;
 }
 
 // #324: a ModuleScope owner is SYNTHETIC (comment above the enum) — a CALLER minted after the tags.scm pass,
@@ -367,6 +393,9 @@ inline bool isJsTsBuiltinMember( std::string_view ctor, std::string_view name ) 
 //             field reuse (graph.h valueRefIndex reads exactly these): fieldName = the slot as written (into=),
 //             recvVar = the simple container identifier, composeRel = the normalised key, qualifier = scope char +
 //             file-shadow flag, argCount = the argument index.
+//             ONE Value record per file may instead be the DEPTH CUT (qualifier = kValueRefDepthCutScope, name = "",
+//             which no identifier is): the walk stopped at its depth cap there and argCount subtrees were not visited
+//             (saturating), line = the first one. It is no row; valuerefindex.h counts it for the answers' depth disclosure.
 //   Through — a call THROUGH a value: a called parameter, `tbl[k](…)` / `tbl.k(…)` on a container that received a
 //             function value. name = the container, fieldName = the written callee, composeRel = the key,
 //             qualifier = p|l|f, argCount = the parameter index. Joined to Value rows only (called_by=/through=, a
@@ -406,6 +435,9 @@ inline ValueRefFamily valueRefFamily( Lang l ) noexcept
 {
     return enumTableAt( kValueRefFamilyOfLang, l, ValueRefFamily::None );
 }
+// The scope char (qualifier[0]) of a file's depth-cut Value record (see RefRole::Value above): written by
+// src/ingest_valuerefs.h, read by src/valuerefindex.h — distinct from every row scope (f l a p x).
+inline constexpr char kValueRefDepthCutScope = 'd';
 
 // Essential-complexity ev_why= reason vocabulary (the essential-complexity design note, §5.1). PUBLIC the
 // moment it ships (test/attrvocabcheck.sh's standing posture; test/essentialcxcheck.sh pins the spellings):
@@ -648,7 +680,7 @@ struct FnLocalScope
 // an unrelated Join#aliases. Gate: test/rubybarecallcheck.sh ("Ruby has no declarations").
 inline bool isDefinitionNotDeclaration( const Symbol& s ) noexcept
 {
-    const bool kotlinType = s.lang == Lang::Kotlin && ( s.kind == SymKind::Class || s.kind == SymKind::Struct || s.kind == SymKind::Interface );
+    const bool kotlinType = s.lang == Lang::Kotlin && ( s.kind == SymKind::Class || isStructOrNamedType( s.kind ) || s.kind == SymKind::Interface );
     return s.endByte > s.sigEndByte || kotlinType || s.lang == Lang::Ruby;
 }
 
@@ -744,7 +776,7 @@ struct Reference
     std::string   calleeName;             // referenced name (final identifier segment)
     std::string   qualifier;              // explicit scope at the call site (`A` in `A::b()`); "" if bare/method — for canonical resolve
     std::string   recvVar;                // receiver variable identifier when recv==NamedVar/FieldOfVar (`x` in `x->m()`); "" otherwise — for Rule 2
-                                          //   A Ruby receiver the code BUILDS carries its type here instead (rubyTypedRecvOf below).
+                                          //   A Ruby receiver the code BUILDS leaves it empty: its type is memberCtor/memberVia (rubyTypedRecvOf).
     std::string   fieldName;              // member variable name when isCompose (e.g. "m_pool"); ALSO the INTERMEDIATE
                                           //   field of a depth-2 chained receiver when recv is FieldOfThis/FieldOfVar
                                           //   (`this->m_pool.run()` → "m_pool") — the two are mutually exclusive
@@ -764,17 +796,29 @@ struct Reference
     //   `new X()`). Read only by graph.h's FalseEdgeRules. false/"" for every other language and every non-call ref.
     bool          memberCall = false;
     std::string   memberRoot;
+    // FE-B (test/receiverevidencecheck.sh): the rest of a member call's receiver chain, for the receiver-evidence rule
+    //   (graph.h ReceiverEvidence). memberPath is the member names BETWEEN memberRoot and the callee, '.'-joined —
+    //   "bucket" for `this.bucket.listSchemas()`, "req.raw.headers" for `ctx.req.raw.headers.get()`, "" for `root.m()`.
+    //   memberCtor is the class a CONSTRUCTED receiver names, final segment — "Reply" for `new Reply( r ).send()`, Go
+    //   "Merger" for `(&Merger{}).Len()` — with memberRoot "" (a construction has no root identifier). Both "" for every
+    //   other shape and every language that records no member-call shape.
+    std::string   memberPath;
+    std::string   memberCtor;
+    // FE-B on #373: a Ruby receiver the code BUILDS (`User.new`, a finder, a FactoryBot build, a let or local holding one)
+    //   carries its type here, out of band: memberCtor = the class's constant as written (or the factory name when
+    //   memberFactory), memberVia = the method that built it. recvVar is then empty. Read through rubyTypedRecvOf.
+    std::string   memberVia;
+    bool          memberFactory = false;
 };
 
 // A Ruby call whose RECEIVER the code builds (parser version 132, test/rubytypedrecvcheck.sh): `c = Client.new` then `c.get`,
 // `let( :user ) { create( :user ) }` then `user.activate!`, `User.find_by( … ).activate!`. ingest_binds.h reads the shape
-// by Ruby's own local rule and writes the type into Reference::recvVar as "<Class>.<via>" — the class's constant as written
-// and the method that built it (`User.find_by`, `OpenSSL::Cipher.new`) — or ":<factory>.<via>" for a FactoryBot build (`:user.create`), whose class
-// only the tree's factory definitions know (graph.h rubyFactoryClasses). The receiver KIND is left as it was (NamedVar,
-// FieldOfVar), so every rule that does not read the type sees the call exactly as before; and a `.` is in no Ruby
-// identifier or constant segment, so no receiver the tool recorded before can read as a type.
-inline constexpr char kRubyTypedRecvSep = '.';
-
+// by Ruby's own local rule and writes the type into the reference's OWN fields (FE-B on #373: it used to ride recvVar as an
+// in-band "<Class>.<via>" token): Reference::memberCtor = the class's constant as written (`User`, `OpenSSL::Cipher`), or
+// the factory name with memberFactory set for a FactoryBot build, whose class only the tree's factory definitions know
+// (graph.h rubyFactoryClasses); memberVia = the method that built it (`find_by`, `new`, `create`). recvVar is left empty,
+// and the receiver KIND as it was (NamedVar, FieldOfVar), so every rule that does not read the type sees the call exactly
+// as before.
 struct RubyTypedRecv
 {
     std::string_view type;              // the class's constant as written (`User`, `Admin::User`), or the factory name
@@ -782,22 +826,15 @@ struct RubyTypedRecv
     bool             factory = false;   // `type` names a FactoryBot factory, not a class
 };
 
-inline std::string rubyTypedRecvToken( std::string_view type, std::string_view via, bool factory )
-{
-    return std::string( factory ? ":" : "" ).append( type ).append( 1, kRubyTypedRecvSep ).append( via );
-}
 
 // the type a Ruby reference's receiver was built as, or nullopt for every other reference
 inline std::optional<RubyTypedRecv> rubyTypedRecvOf( const Reference& r ) noexcept
 {
-    const std::size_t sep = r.lang == Lang::Ruby ? r.recvVar.find( kRubyTypedRecvSep ) : std::string::npos;
-    if( sep == std::string::npos )
+    if( r.lang != Lang::Ruby || r.memberCtor.empty() || r.memberVia.empty() )
     {
         return std::nullopt;
     }
-    const std::string_view token = r.recvVar;
-    const bool             factory = token.starts_with( ':' );
-    return RubyTypedRecv { token.substr( factory ? 1 : 0, sep - ( factory ? 1 : 0 ) ), token.substr( sep + 1 ), factory };
+    return RubyTypedRecv { r.memberCtor, r.memberVia, r.memberFactory };
 }
 
 // RSpec's targets (test/rubyrspectargetcheck.sh, parser version 133): inside an example group, the receiver-less builder
@@ -1027,9 +1064,35 @@ enum class LocalBindKind : std::uint8_t
                    //     has no constant: var="self", at the directive's own start byte (ingest_binds.h
                    //     captureRubyClassMixins). Read by graph.h's class-object lookup ONLY (rubyFqnAncestry). APPENDED,
                    //     as above.
+    // FE-B (test/receiverevidencecheck.sh): the receiver-evidence facts graph.h ReceiverEvidence reads, and NOTHING else.
+    //   Every other binding consumer filters by kind or skips these five by isReceiverEvidenceKind below — a field name
+    //   recorded here is not a local of the method that assigns it, and a type written on a parameter is not a class the
+    //   file "names" for the builtin-method gate. APPENDED (cache u8).
+    RecvType,      // a parameter or local whose class the source states: var = the name, typeName = the class's final
+                   //     segment, importedName = the written type whole. A TS/Python/Go parameter's annotation, a JS
+                   //     `const x = new Foo()`, a Go `var x T` / `x := T{…}` / `x := &T{…}`, and a Go METHOD RECEIVER — the
+                   //     receiver's record sets isFromAssignment (the method's own class, which Go spells nowhere else), and
+                   //     so does a JS `Foo.prototype.m = function …` (var "", typeName Foo): that member's class.
+    MemberType,    // a field whose class the source states: var = the field, typeName = the class's final segment.
+                   //     fromSymbol is the def that states it — a Python method's `self.x = Foo()`, a JS/TS method's
+                   //     `this.x = new Foo()`, a Go struct's `x T` — and the owning class is that def's class. A Go
+                   //     EMBEDDED field (`struct { u.Chars }`) sets isFromAssignment: its methods are promoted.
+    MethodAlias,   // a local bound to an object's method: var = the local, typeName = the object's variable,
+                   //     importedName = the method (Python `feed = parser.feed`).
+    NameAlias,     // a file's local spelling of an imported class: var = the local name, typeName = the name it imports
+                   //     (Python `from m import Stylesheet as Sheet`; JS/TS read their JsImport records instead).
+    StaticMember,  // a JS/TS class member declared `static`: var = the member's name, typeName "static", recorded INSIDE its
+                   //     body so it attributes to the member. A call on the CLASS reaches only these, a call on an INSTANCE
+                   //     only the others (the two sides of the lookup; #373's Ruby class-object rule, here for JS/TS).
 };
 // The number of LocalBindKind enumerators — the bound readBind validates a cached kind byte against (see kSymKindCount).
-inline constexpr std::size_t kLocalBindKindCount = static_cast<std::size_t>( LocalBindKind::RubyClassMixin ) + 1;
+inline constexpr std::size_t kLocalBindKindCount = static_cast<std::size_t>( LocalBindKind::StaticMember ) + 1;
+// FE-B: the five kinds only graph.h ReceiverEvidence reads (see RecvType above).
+inline bool isReceiverEvidenceKind( LocalBindKind k ) noexcept
+{
+    return k == LocalBindKind::RecvType || k == LocalBindKind::MemberType || k == LocalBindKind::MethodAlias || k == LocalBindKind::NameAlias
+        || k == LocalBindKind::StaticMember;
+}
 // The importedName of a Ruby class-object binding that acts on each class INCLUDING the module, not on the module
 // (LocalBindKind::RubySingletonDef, RubyClassMixin; parser version 145): written in a concern's `included do`, or a def
 // in its `class_methods do`.

@@ -79,7 +79,8 @@ struct Snapshot
 #endif
 
 #if PROFILE_PMC_VERBOSE
-  #define PMC_DIAG( ... ) rw::emitRaw( stderr, "prof::pmc: " __VA_ARGS__  )
+  // `fmt` is a std::format string (rw::emitTo's spelling, `{}` not `%s`); the prefix is concatenated onto the literal.
+  #define PMC_DIAG( fmt, ... ) rw::emitTo( stderr, "prof::pmc: " fmt __VA_OPT__( , ) __VA_ARGS__ )
 #else
   #define PMC_DIAG( ... ) ( (void) 0 )
 #endif
@@ -238,7 +239,7 @@ inline bool resolve_event( kpep_db* db, const char* alias, kpep_event** out ) no
     // try the alias verbatim first (some DBs expose the friendly name directly)
     if( g_api.kpep_db_event( db, alias, out ) == 0 && *out )
     {
-        PMC_DIAG( "resolved '%s' -> '%s' (verbatim)\n", alias, alias );
+        PMC_DIAG( "resolved '{}' -> '{}' (verbatim)\n", alias, alias );
         return true;
     }
 
@@ -258,7 +259,7 @@ inline bool resolve_event( kpep_db* db, const char* alias, kpep_event** out ) no
             }
             if( g_api.kpep_db_event( db, probe, out ) == 0 && *out )
             {
-                PMC_DIAG( "resolved '%s' -> '%s'\n", alias, probe );
+                PMC_DIAG( "resolved '{}' -> '{}'\n", alias, probe );
                 return true;
             }
         }
@@ -275,6 +276,8 @@ struct PerfState
     kpep_db*     db            = nullptr;
     kpep_config* cfg           = nullptr;
     uint32_t     classes       = 0;
+    int          prev_forced   = 0;     // kpc_force_all_ctrs_get() before we took the counters: what release() restores
+    bool         forced        = false; // we took the counters (force_all_ctrs_set succeeded): release() owes them back
     uint32_t     counter_count = 0;     // raw counters per thread read
     unsigned     event_count   = 0;     // logical events we configured
 
@@ -286,12 +289,33 @@ struct PerfState
 inline PerfState     g_perf;
 inline std::once_flag g_once;
 
+// Frees the kpep db/config when the arming sequence ends, however it ends: the kpc words and slot map it needs
+// were copied out into g_perf by then.
+struct ConfigFreer
+{
+    ~ConfigFreer()
+    {
+        if( g_perf.cfg )
+        {
+            g_api.kpep_config_free( g_perf.cfg );
+            g_perf.cfg = nullptr;
+        }
+        if( g_perf.db )
+        {
+            g_api.kpep_db_free( g_perf.db );
+            g_perf.db = nullptr;
+        }
+    }
+};
+
 // global, one-time: load the ABI, build the config, arm the counters
 inline void ensure_global_init() noexcept
 {
     std::call_once( g_once, []() noexcept
     {
-        PMC_DIAG( "init: euid=%u (root needed unless entitled)\n", unsigned( geteuid() ) );
+        const ConfigFreer freeConfig;   // every `return` below is a degrade or the end of arming: the kpep objects are dead weight either way
+
+        PMC_DIAG( "init: euid={} (root needed unless entitled)\n", unsigned( geteuid() ) );
 
         if( !load_api() )
         {
@@ -326,7 +350,7 @@ inline void ensure_global_init() noexcept
             kpep_event* ev = nullptr;
             if( !resolve_event( g_perf.db, kDefaultSelection[ i ], &ev ) )
             {
-                PMC_DIAG( "skip '%s' (not in this core's DB)\n", kDefaultSelection[ i ] );
+                PMC_DIAG( "skip '{}' (not in this core's DB)\n", kDefaultSelection[ i ] );
                 continue;
             }
 
@@ -334,7 +358,7 @@ inline void ensure_global_init() noexcept
             const int rc = g_api.kpep_config_add_event( g_perf.cfg, &ev, 0, &err );
             if( rc != 0 )
             {
-                PMC_DIAG( "skip '%s' (add rc=%d err=%u; PMC budget?)\n", kDefaultSelection[ i ], rc, err );
+                PMC_DIAG( "skip '{}' (add rc={} err={}; PMC budget?)\n", kDefaultSelection[ i ], rc, err );
                 continue;
             }
 
@@ -382,13 +406,13 @@ inline void ensure_global_init() noexcept
         // arm: take ownership of all counters, push the config, start counting.
         // The force/set calls are the privileged ones — they fail without root or
         // the entitlement, or if another tool (Instruments) holds the counters.
-        int prev = 0;
-        g_api.kpc_force_all_ctrs_get( &prev );
+        g_api.kpc_force_all_ctrs_get( &g_perf.prev_forced );
         if( g_api.kpc_force_all_ctrs_set( 1 ) != 0 )
         {
             PMC_DIAG( "FAIL kpc_force_all_ctrs_set (privilege? counters busy?)\n" );
             return;
         }
+        g_perf.forced = true;   // from here release() must hand the counters back, whichever later step fails
 
         if( g_api.kpc_set_config( g_perf.classes, regs ) != 0 )
         {
@@ -403,8 +427,27 @@ inline void ensure_global_init() noexcept
         }
 
         g_perf.ok = true;
-        PMC_DIAG( "OK: %u events armed, %u raw counters\n", g_perf.event_count, g_perf.counter_count );
+        PMC_DIAG( "OK: {} events armed, {} raw counters\n", g_perf.event_count, g_perf.counter_count );
     } );
+}
+
+// Teardown: stop counting and hand the counters back (kpc_force_all_ctrs_set to what it was before we took
+// them), so a privileged run does not leave the PMU forced and armed after exit. Called once, after the exit
+// report has rendered (profileScope.h Reporter); counting for the calling thread stops with it, every other
+// thread's flag dies with the thread. active() is false afterwards, so a late read() returns zeros.
+inline void release() noexcept
+{
+    if( g_perf.ok )
+    {
+        g_perf.ok = false;
+        g_api.kpc_set_counting( 0 );
+        g_api.kpc_set_thread_counting( 0 );
+    }
+    if( g_perf.forced )
+    {
+        g_perf.forced = false;
+        g_api.kpc_force_all_ctrs_set( g_perf.prev_forced );
+    }
 }
 
 // per-thread: enable counting for the calling thread (each profiled thread does
@@ -439,7 +482,7 @@ ALWAYS_INLINE Snapshot read() noexcept
     if( !logged )
     {
         logged = true;
-        PMC_DIAG( "first read: rc=%d cc=%u raw[0..2]=%llu,%llu,%llu\n", rc, g_perf.counter_count,
+        PMC_DIAG( "first read: rc={} cc={} raw[0..2]={},{},{}\n", rc, g_perf.counter_count,
                   (unsigned long long) raw[ 0 ], (unsigned long long) raw[ 1 ], (unsigned long long) raw[ 2 ] );
     }
 #endif
@@ -627,7 +670,7 @@ inline bool open_group( ThreadCounters& tc, const unsigned* tableIndices, unsign
         const long fd     = sys_perf_event_open( &attr, 0, -1, groupFd, 0 );
         if( fd < 0 )
         {
-            PMC_DIAG( "open '%s' failed (errno=%d) — column dropped%s\n", desc.alias, errno, isLeader ? ", leadership passes to the next event that opens" : "" );
+            PMC_DIAG( "open '{}' failed (errno={}) — column dropped{}\n", desc.alias, errno, isLeader ? ", leadership passes to the next event that opens" : "" );
             continue;                              // graceful per-event skip, leader included — same rule as the kperf side
         }
 
@@ -647,7 +690,7 @@ inline bool arm_and_verify( ThreadCounters& tc, GroupRead* out ) noexcept
     if( ::ioctl( tc.fds[ 0 ], PERF_EVENT_IOC_RESET,  PERF_IOC_FLAG_GROUP ) != 0 ||
         ::ioctl( tc.fds[ 0 ], PERF_EVENT_IOC_ENABLE, PERF_IOC_FLAG_GROUP ) != 0 )
     {
-        PMC_DIAG( "group reset/enable ioctl failed (errno=%d)\n", errno );
+        PMC_DIAG( "group reset/enable ioctl failed (errno={})\n", errno );
         return false;
     }
 
@@ -660,7 +703,7 @@ inline bool arm_and_verify( ThreadCounters& tc, GroupRead* out ) noexcept
     const ssize_t got = ::read( tc.fds[ 0 ], out, sizeof( *out ) );
     if( got < ssize_t( 3 * sizeof( std::uint64_t ) ) || out->nr != tc.fd_count )
     {
-        PMC_DIAG( "group verify read got=%zd nr=%llu (want %u fds) — over PMU budget?\n",
+        PMC_DIAG( "group verify read got={} nr={} (want {} fds) — over PMU budget?\n",
                   got, ( unsigned long long ) ( got > 0 ? out->nr : 0 ), tc.fd_count );
         return false;
     }
@@ -680,7 +723,7 @@ inline bool map_value_indices( ThreadCounters& tc, const GroupRead& probe ) noex
         std::uint64_t id = 0;
         if( ::ioctl( tc.fds[ slot ], PERF_EVENT_IOC_ID, &id ) != 0 )
         {
-            PMC_DIAG( "PERF_EVENT_IOC_ID failed for slot %u (errno=%d)\n", slot, errno );
+            PMC_DIAG( "PERF_EVENT_IOC_ID failed for slot {} (errno={})\n", slot, errno );
             return false;
         }
 
@@ -696,7 +739,7 @@ inline bool map_value_indices( ThreadCounters& tc, const GroupRead& probe ) noex
         }
         if( !found )
         {
-            PMC_DIAG( "id %llu for slot %u missing from group read\n", ( unsigned long long ) id, slot );
+            PMC_DIAG( "id {} for slot {} missing from group read\n", ( unsigned long long ) id, slot );
             return false;
         }
     }
@@ -735,7 +778,7 @@ inline void select_and_arm_first_thread( ThreadCounters& tc ) noexcept
             g_perf.event_count = openedCount;
             g_perf.ok          = true;
             tc.ok              = true;
-            PMC_DIAG( "OK: %u events armed (pinned group)\n", openedCount );
+            PMC_DIAG( "OK: {} events armed (pinned group)\n", openedCount );
             return;
         }
 
@@ -765,7 +808,7 @@ inline void select_and_arm_first_thread( ThreadCounters& tc ) noexcept
                 candidates[ candidateCount++ ] = openedRows[ i ];
             }
         }
-        PMC_DIAG( "dropped '%s', retrying with %u events\n", kEvents[ openedRows[ dropIndex ] ].alias, candidateCount );
+        PMC_DIAG( "dropped '{}', retrying with {} events\n", kEvents[ openedRows[ dropIndex ] ].alias, candidateCount );
     }
 
     tc.close_all();
@@ -806,6 +849,15 @@ inline void ensure_thread_counting() noexcept
     }
 }
 
+// Teardown. The group's fds are the whole of this backend's footprint and ThreadCounters closes them when its
+// thread exits; this closes the CALLING thread's now (the main thread's thread_local is destroyed before the
+// exit report's static destructor runs), and ends the "active" claim so a late read() returns zeros.
+inline void release() noexcept
+{
+    t_counters.close_all();
+    g_perf.ok = false;
+}
+
 // hot path: one grouped read() syscall returns every counter for the calling thread
 ALWAYS_INLINE Snapshot read() noexcept
 {
@@ -841,6 +893,7 @@ namespace pmc
 {
 
 inline void        ensure_thread_counting() noexcept {}
+inline void        release() noexcept {}
 ALWAYS_INLINE Snapshot read() noexcept { return {}; }
 inline bool        active()      noexcept { return false; }
 inline unsigned    event_count() noexcept { return 0; }

@@ -834,8 +834,26 @@ struct LintRulesRun
 // ONE constant so the two tallies are capped on the same scale and `capped="1"` means the same thing in both.
 inline constexpr std::size_t kLintMaxPerRule = 5000;
 
-inline LintRulesRun runLintRules( const IngestResult& ing, const std::vector<LintRule>& rules )
+// knob-honesty-068: the budget a run actually spends — --lint-max-per-rule=N when given, else the default above. A floored
+// rule (count_capped="1") is then one call from its total: the answer's findings_next= re-runs it under a 10x budget.
+inline std::size_t lintMaxPerRuleOf( int flagValue ) noexcept
 {
+    return flagValue > 0 ? std::size_t( flagValue ) : kLintMaxPerRule;
+}
+
+// The budget a floored answer's findings_next= asks for: 10x the one that floored it — a re-run still floored names its own,
+// so the chain terminates (the raw capture stream is finite). Saturating at `most`, the flag's own domain ceiling
+// (cli.h kLintMaxPerRuleMost): it used to saturate at INT_MAX, above that ceiling, so a run floored at a budget over
+// most/10 named a --lint-max-per-rule= value the parser refuses (CodeRabbit 5468003465 follow-through).
+constexpr std::size_t lintNextMaxPerRule( std::size_t spent, std::size_t most ) noexcept
+{
+    constexpr std::size_t kGrowth = 10;
+    return spent >= most / kGrowth ? most : spent * kGrowth;
+}
+
+inline LintRulesRun runLintRules( const IngestResult& ing, const std::vector<LintRule>& rules, std::size_t maxPerRule = kLintMaxPerRule )
+{
+    EXPECTS( maxPerRule > 0, "runLintRules: a zero budget would floor every rule at nothing (lintMaxPerRuleOf never returns 0)" );
     using namespace lintdetail;
     std::vector<LintFinding> out;
     std::vector<std::string> saturatedRuleIds;
@@ -883,7 +901,7 @@ inline LintRulesRun runLintRules( const IngestResult& ing, const std::vector<Lin
     std::vector<std::string>    uncompiledQueries;   // §L10: query TEXT of every spec that compiled for no grammar
     std::vector<std::string>    regexRefused;        // src/regexguard.h: the rules' #match? patterns are user-authored
     AstRegexUndecided           regexUndecided;
-    AstQueryGroup               userRules{ &specs, kLintMaxPerRule, &uncompiledQueries };
+    AstQueryGroup               userRules{ &specs, maxPerRule, &uncompiledQueries };
     userRules.regexRefusedOut   = &regexRefused;
     userRules.regexUndecidedOut = &regexUndecided;
     const std::vector<AstMatch> ms = std::move( astQueryGrouped( ing, { userRules } )[0] );
@@ -898,7 +916,7 @@ inline LintRulesRun runLintRules( const IngestResult& ing, const std::vector<Lin
                 ++rawForRule;
             }
         }
-        if( rawForRule >= kLintMaxPerRule )
+        if( rawForRule >= maxPerRule )
         {
             saturatedRuleIds.push_back( r.id );
         }

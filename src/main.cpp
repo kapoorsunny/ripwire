@@ -1,6 +1,7 @@
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
 #include "gitcmd.h"         // rw::gitCmd — every git child starts with --no-optional-locks -c core.fsmonitor=false
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
+#include <future>            // std::async — the history walk that runs beside the ingest
 
 // main.cpp — ripwire entry point: parse args → ingest → graph → PageRank → minified XML,
 // plus --map-diff (teleport toward git-changed files) and --pack-top-n (append source).
@@ -16,6 +17,7 @@
 #include "serialize.h"
 #include "pageview.h"              // §P8: the ONE --limit/--offset window + root-element shown=/capped= disclosure
 #include "graphlegend.h"           // §H4 §3.4: the ONE counts_floor= marker + the shared graph-count legend wording
+#include "pathgaps.h"              // PATH-GAP: --path's gap analysis + clause, shared with MCP path_between
 #include "columnar.h"              // RESEARCH lever 1: opt-in columnar re-serialization for the flat list verbs (--format=columnar)
 #include "redact.h"                // RedactCounts + reportRedactions for the emitted-body secret redaction
 #include "filter.h"
@@ -40,6 +42,7 @@
                                    //   BEFORE mcp.h so mcpverbs.h's explore verb can reach packTaskPartitionText (same rule packtask.h follows).
 #include "tracelocus.h"            // L4: the shared --from-trace / MCP from_trace bundle assembler (fromTraceBundleText)
 #include "callhierarchy.h"        // H14/M13: the shared --callers/--callees / MCP find_* 1-hop computation (CLI == MCP rows)
+#include "countfloor.h"     // count-floor: a row's callers=/implementors= floor marker and its follow-up (CLI and MCP share it)
 #include "editcheck.h"             // L4: the shared --edit-check / MCP edit_check contract-comparison core (editCheckBundleText)
 #include "slice.h"                 // lane/paper-slice: --slice=SYM[:VAR] — the ARISE-motivated def-use slice core (sliceBundleText)
 #include "editpreview.h"           // card A1: the PRE-APPLY contract preview (editpreview::run) — BEFORE mcp.h, which
@@ -1866,6 +1869,7 @@ int runDefaultMap( const MainDispatch& d )
                                 recentOf };
     mapAnn.recentMinedHistory = recentAnyHistory;   // the block rides on the FACT (serialize.h writeRecentRows)
     mapAnn.recentMergeBombsSkipped = recentMergeBombsSkipped;   // rides <recent> (the rows' own window), filled by assignment like seed
+    mapAnn.viaLegendStripped = cfg.legend == "compact" && !cfg.json;   // FE-B: the rewrite would strip the map's via comment
     mapAnn.notesDegraded = d.notesDegraded;   // L3 follow-up (CodeRabbit 4053600616): onto every <r> this run emits
     mapAnn.codeFirstRows = isDefaultMapScope;   // the code-first row pick + its data_sections_cut= / next= (serialize.h)
     // C1-b (2026-09-12): --in=DIR — the scoped block and the map stub, filled by assignment like seed. The two next= strings
@@ -1917,7 +1921,7 @@ int runDefaultMap( const MainDispatch& d )
         {
             return {};
         }
-        serialize( m, ing, rank, g.outOff, g.outTargets, k, cfg.mostImportantLast, cfg.metrics, fanInPtr, &g.ambOut, cfg.stable, mapProvPtr, cboPtr, testedPtr, lcom4Ptr, ampPtr, &g.unresolvedOut, g.bindLabel.empty() ? nullptr : &g.bindLabel, mapAutoOrder, /*outEstTokens=*/nullptr, extraPayloadTokens, mapAnn, /*statsFirstScreen=*/false, mapRootArg, &g.locPinOut, g.externalCalls, &g.declinedOut, g.gateDeclinedCalls );
+        serialize( m, ing, rank, g.outOff, g.outTargets, k, cfg.mostImportantLast, cfg.metrics, fanInPtr, &g.ambOut, cfg.stable, mapProvPtr, cboPtr, testedPtr, lcom4Ptr, ampPtr, &g.unresolvedOut, g.bindLabel.empty() ? nullptr : &g.bindLabel, mapAutoOrder, /*outEstTokens=*/nullptr, extraPayloadTokens, mapAnn, /*statsFirstScreen=*/false, mapRootArg, &g.locPinOut, g.externalCalls, &g.declinedOut, g.gateDeclinedCalls, g.outNameOnly.empty() ? nullptr : &g.outNameOnly );
         const rw::MemoryStreamBytes measured = probe.finish();
         return measured.isWhole ? std::string( measured.bytes ) : std::string();
     };
@@ -1930,7 +1934,7 @@ int runDefaultMap( const MainDispatch& d )
             DISCLOSE( maxTokensFit, rw::MapAnnotations::MaxTokensFit::DisclosureWhy::ProbeUnmeasured, "runDefaultMap: open_memstream failed for the --max-tokens fit probe — the map is emitted unshaped and its ceiling unverified" );
             return 0;
         }
-        serialize( m, ing, rank, g.outOff, g.outTargets, k, cfg.mostImportantLast, cfg.metrics, fanInPtr, &g.ambOut, cfg.stable, mapProvPtr, cboPtr, testedPtr, lcom4Ptr, ampPtr, &g.unresolvedOut, g.bindLabel.empty() ? nullptr : &g.bindLabel, mapAutoOrder, /*outEstTokens=*/nullptr, extraPayloadTokens, mapAnn, /*statsFirstScreen=*/false, mapRootArg, &g.locPinOut, g.externalCalls, &g.declinedOut, g.gateDeclinedCalls );
+        serialize( m, ing, rank, g.outOff, g.outTargets, k, cfg.mostImportantLast, cfg.metrics, fanInPtr, &g.ambOut, cfg.stable, mapProvPtr, cboPtr, testedPtr, lcom4Ptr, ampPtr, &g.unresolvedOut, g.bindLabel.empty() ? nullptr : &g.bindLabel, mapAutoOrder, /*outEstTokens=*/nullptr, extraPayloadTokens, mapAnn, /*statsFirstScreen=*/false, mapRootArg, &g.locPinOut, g.externalCalls, &g.declinedOut, g.gateDeclinedCalls, g.outNameOnly.empty() ? nullptr : &g.outNameOnly );
         const rw::MemoryStreamBytes measured = probe.finish();
         if( !measured.isWhole )
         {
@@ -1974,7 +1978,7 @@ int runDefaultMap( const MainDispatch& d )
         }
         serializeJson( m, ing, rank, g.outOff, g.outTargets, k, cfg.mostImportantLast, cfg.metrics,
                        fanInPtr, &g.ambOut, cfg.stable, cboPtr, testedPtr, lcom4Ptr, ampPtr, &g.unresolvedOut,
-                       g.bindLabel.empty() ? nullptr : &g.bindLabel, mapAutoOrder, /*outEstTokens=*/nullptr, mapProvPtr, mapAnn, mapRootArg, &g.locPinOut, g.externalCalls, &g.declinedOut, g.gateDeclinedCalls );
+                       g.bindLabel.empty() ? nullptr : &g.bindLabel, mapAutoOrder, /*outEstTokens=*/nullptr, mapProvPtr, mapAnn, mapRootArg, &g.locPinOut, g.externalCalls, &g.declinedOut, g.gateDeclinedCalls, g.outNameOnly.empty() ? nullptr : &g.outNameOnly );
         const rw::MemoryStreamBytes measured = probe.finish();
         if( !measured.isWhole )
         {
@@ -2318,7 +2322,7 @@ int runDefaultMap( const MainDispatch& d )
     if( !expandNodes.empty() )
     {
         bodiesSection = rw::chargeSection( [ & ]( std::FILE* f )
-            { packBodies( f, ing, expandNodes, cfg.packBudgetBytes, g.outOff, g.outTargets, cfg.compress, redactPtr,
+            { packBodies( f, ing, expandNodes, cfg.packBudgetBytes, g.outOff, g.outTargets, g.outNameOnly, cfg.compress, redactPtr,
                           expandRanges.empty() ? nullptr : &expandRanges, d.notesPtr, /*outEmitted=*/nullptr,
                           /*truncateOversizedFirst=*/true, /*withFileContext=*/true, mapRootArg, &calleeOrder ); },   // V1: octocode F2 sibs=/inc=
             rw::kBytesPerTokenBody );
@@ -2658,7 +2662,7 @@ int runDefaultMap( const MainDispatch& d )
         // not as the literal source token, for that same reason (the count is a naive grep over this file).
         if( !expandNodes.empty() && noteAppliesToBundle )   // !serveWholeFile is this whole branch's precondition (see the if above)
         {
-            emitSection( bodiesSection, [ & ]{ packBodies( out, ing, expandNodes, cfg.packBudgetBytes, g.outOff, g.outTargets, cfg.compress, redactPtr,
+            emitSection( bodiesSection, [ & ]{ packBodies( out, ing, expandNodes, cfg.packBudgetBytes, g.outOff, g.outTargets, g.outNameOnly, cfg.compress, redactPtr,
                                                            expandRanges.empty() ? nullptr : &expandRanges, d.notesPtr, /*outEmitted=*/nullptr,
                                                            /*truncateOversizedFirst=*/true, /*withFileContext=*/true, mapRootArg, &calleeOrder ); } );
             bodiesEmittedEarly = true;
@@ -2682,11 +2686,11 @@ int runDefaultMap( const MainDispatch& d )
         {
             serializeJson( out, ing, rank, g.outOff, g.outTargets, mapTopK, cfg.mostImportantLast, cfg.metrics,
                            fanInPtr, &g.ambOut, cfg.stable, cboPtr, testedPtr, lcom4Ptr, ampPtr, &g.unresolvedOut,
-                           g.bindLabel.empty() ? nullptr : &g.bindLabel, mapAutoOrder, &mapEstTokens, mapProvPtr, mapAnn, mapRootArg, &g.locPinOut, g.externalCalls, &g.declinedOut, g.gateDeclinedCalls );
+                           g.bindLabel.empty() ? nullptr : &g.bindLabel, mapAutoOrder, &mapEstTokens, mapProvPtr, mapAnn, mapRootArg, &g.locPinOut, g.externalCalls, &g.declinedOut, g.gateDeclinedCalls, g.outNameOnly.empty() ? nullptr : &g.outNameOnly );
         }
         else
         {
-            serialize( out, ing, rank, g.outOff, g.outTargets, mapTopK, cfg.mostImportantLast, cfg.metrics, fanInPtr, &g.ambOut, cfg.stable, mapProvPtr, cboPtr, testedPtr, lcom4Ptr, ampPtr, &g.unresolvedOut, g.bindLabel.empty() ? nullptr : &g.bindLabel, mapAutoOrder, &mapEstTokens, payloadTokens, mapAnn, /*statsFirstScreen=*/false, mapRootArg, &g.locPinOut, g.externalCalls, &g.declinedOut, g.gateDeclinedCalls );
+            serialize( out, ing, rank, g.outOff, g.outTargets, mapTopK, cfg.mostImportantLast, cfg.metrics, fanInPtr, &g.ambOut, cfg.stable, mapProvPtr, cboPtr, testedPtr, lcom4Ptr, ampPtr, &g.unresolvedOut, g.bindLabel.empty() ? nullptr : &g.bindLabel, mapAutoOrder, &mapEstTokens, payloadTokens, mapAnn, /*statsFirstScreen=*/false, mapRootArg, &g.locPinOut, g.externalCalls, &g.declinedOut, g.gateDeclinedCalls, g.outNameOnly.empty() ? nullptr : &g.outNameOnly );
         }
     }
     else
@@ -2732,7 +2736,7 @@ int runDefaultMap( const MainDispatch& d )
     }
     if( !expandNodes.empty() && !serveWholeFile && !bodiesEmittedEarly )   // #289: already served ahead of the map below
     {
-        emitSection( bodiesSection, [ & ]{ packBodies( out, ing, expandNodes, cfg.packBudgetBytes, g.outOff, g.outTargets, cfg.compress, redactPtr,
+        emitSection( bodiesSection, [ & ]{ packBodies( out, ing, expandNodes, cfg.packBudgetBytes, g.outOff, g.outTargets, g.outNameOnly, cfg.compress, redactPtr,
                                                        expandRanges.empty() ? nullptr : &expandRanges, d.notesPtr, /*outEmitted=*/nullptr,
                                                        /*truncateOversizedFirst=*/true, /*withFileContext=*/true, mapRootArg, &calleeOrder ); } );   // L3: --expand bodies surface notes; V1: sibs=/inc=
     }
@@ -3696,6 +3700,26 @@ static std::string_view scipIndexUnreadableReason( const std::string& scipPath )
     return {};
 }
 
+// --for / --metrics / --exemplar mine 18 months of history after the graph build (the amp=/churn= block in
+// dispatchMain). That walk is `git` subprocesses plus a blob read and touches nothing the ingest produces, so it
+// starts BEFORE the ingest, one thread per root, and runs beside it; the amp=/churn= block only resolves each walk's
+// paths against `ing`. Empty when no such verb runs — and for --help-task, the one verb that answers between the
+// two, because a run that stops before the block still waits for its walks (a std::async future joins).
+static std::vector<std::future<rw::quality::HistoryWalk>> startHistoryWalks( const rw::Config& cfg, bool multiRoot,
+                                                                         const std::vector<rw::WorkspaceRoot>& ws, const std::string& root )
+{
+    std::vector<std::future<rw::quality::HistoryWalk>> walks;
+    if( ( !cfg.metrics && cfg.forTask.empty() && cfg.exemplar.empty() ) || !cfg.helpTask.empty() )
+    {
+        return walks;
+    }
+    for( std::size_t r = 0; r < ( multiRoot ? ws.size() : 1u ); ++r )
+    {
+        walks.push_back( std::async( std::launch::async, [ rootArg = multiRoot ? ws[r].arg : root ]() { return rw::quality::gitHistoryWalk( rootArg ); } ) );
+    }
+    return walks;
+}
+
 static int dispatchMain( const rw::Config& cfg, char** argv );
 
 // The key for a SHARED root (`r` = the map family, `ctx` = the bundle family) is read off the ANSWER, never off a flag order.
@@ -4329,7 +4353,8 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
             mcpRoots.emplace_back( r );
         }
         return runMcp( { .topK = cfg.topK, .stable = cfg.stable, .noRedact = cfg.noRedact, .root = std::string( cfg.rootPath ),
-                         .roots = mcpRoots, .toolMask = tools.mask, .toolSpec = std::string( cfg.mcpTools ) } );   // P2-C: --mcp turns --stable on by default (set in parseArgs); A3-F3: the server redacts by default like the CLI
+                         .roots = mcpRoots, .toolMask = tools.mask, .toolSpec = std::string( cfg.mcpTools ),
+                         .legendInline = cfg.mcpLegend == "inline" } );   // P2-C: --mcp turns --stable on by default (set in parseArgs); A3-F3: the server redacts by default like the CLI
     }
 
     // ── multi-root workspace refusals: each cut verb refuses with ONE clear stderr
@@ -5034,6 +5059,7 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
     // confident, wrong zero; --quality-panel builds two of its six families out of exactly those two lenses.
     const bool needsValueUses = rw::needsValueUses( cfg );   // cli.h — ONE definition, and --doctor's
                                                             // rich_verbs= roster is derived from it
+    std::vector<std::future<quality::HistoryWalk>> historyWalks = startHistoryWalks( cfg, multiRoot, ws, root );
     IngestResult ing;
     if( multiRoot )
     {
@@ -5224,6 +5250,8 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
             // churn work, sets byte-identical to the old gitCommitFileSets("18 months ago", 30).
             // Multi-root (§5): one popen PER root, each resolved only against its own files; the per-commit
             // sets concatenate (commits are disjoint across repos) and churn accumulates per file.
+            ASSUME( historyWalks.size() == ( multiRoot ? ws.size() : 1u ),
+                    "this block runs under startHistoryWalks' condition (--help-task has already answered), so every root's walk was started" );
             std::vector<std::vector<std::uint32_t>> commits;
             if( multiRoot )
             {
@@ -5233,7 +5261,7 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
                     // Y2: the memoized form — skips the 431 ms `git log --name-only` walk on a
                     // warm (repo, HEAD sha, window, boundary-sha) hit; see quality.h's qchurn family.
                     std::vector<std::vector<std::uint32_t>> part =
-                        quality::gitCoChangeAndChurnCached( ws[r].arg, ing, "18 months ago", 30,
+                        quality::resolveHistoryWalk( historyWalks[ r ].get(), ing,
                                              cfg.forTask.empty() ? 0u : 12u,
                                              cfg.forTask.empty() ? nullptr : &rootChurn, r );
                     for( std::vector<std::uint32_t>& c : part )
@@ -5256,7 +5284,7 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
             else
             {
                 // Y2: memoized — see the multi-root branch above.
-                commits = quality::gitCoChangeAndChurnCached( root, ing, "18 months ago", 30,
+                commits = quality::resolveHistoryWalk( historyWalks[ 0 ].get(), ing,
                                                cfg.forTask.empty() ? 0u : 12u,
                                                cfg.forTask.empty() ? nullptr : &forChurn );
             }

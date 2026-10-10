@@ -1615,6 +1615,250 @@ vri_arm "RV3 MCP session: a chmod rebuilds the index with unchanged content — 
 vri_arm "RV4 MCP session: a new non-source file rebuilds the index — the value-ref index is rebuilt too (vri=1), same rows" 's["got"][3] == ["1","1"] and s["rows"][3] == s["rows"][0]'
 vri_arm "RV5 MCP session: the server exited 0 with no sanitizer report (meaningful on an ASan build)" 's["rc"] == 0 and s["san"] == 0'
 
+# ── re-review fixes (CodeRabbit's second pass on the reference-as-value round) ─────────────────────────────────────
+# RP: a parameter declares its name only inside the function that OWNS the list — a prototype, a function-pointer
+#    typedef or parameter, a C++ member declaration, a Go func type / interface method and a TS function type, `declare
+#    function` or interface signature hide nothing (they used to land in the enclosing scope: at file scope they hid the
+#    function in the whole file). Near misses: a defined function's own parameter still hides it.
+# RS: a function that only stores ITSELF (`timer_set( tick )` inside tick) is still dead — the CSR drops a recursive
+#    self-call too; one stored by another function is not. --safe-delete reads the same rule; the row is still served.
+# RD: --callees rows are per binding site: two calls through one slot are one row, and sites= counts binding sites.
+# RZ: the value walk's depth cap is disclosed (value_refs_depth_capped= / value_refs_depth_at=) on every answer that
+#    reads value references for the cut file's language family — absent below the cap, absent for another family.
+# RK: every written key slot is capped and newline-free (a C `[expr]` designator, a numeric key, an identifier key).
+echo "-- re-review fixes"
+mkdir -p "$FX/proto" "$FX/protogo" "$FX/protots" "$FX/self" "$FX/dup" "$FX/deep" "$FX/deep2" "$FX/deepneg" "$FX/keys"
+printf 'void handler(int sig) { (void)sig; }\n' >"$FX/proto/a.c"
+cat >"$FX/proto/b.c" <<'EOF'
+#include <signal.h>
+extern void handler(int);
+void set_handler(void (*handler)(int));                              /* @P_PROTO */
+typedef void (*fn_t)(int handler);                                   /* @P_TYPEDEF */
+void install(void) { signal(SIGINT, handler); }                      /* @P_USE */
+void wrap(void (*handler)(int)) { signal(SIGINT, handler); }         /* @P_PARAM */
+void wrap2(void (*cb)(int handler)) { signal(SIGINT, handler); }     /* @P_INNER */
+EOF
+cat >"$FX/proto/c.cpp" <<'EOF'
+void hook(int x) { (void)x; }
+int reg(void (*f)(int));
+struct S { void set(int hook); int go() { return reg(hook); } };    // @P_MEMBER
+EOF
+printf 'module example.com/p\n\ngo 1.22\n' >"$FX/protogo/go.mod"
+printf 'package p\n\nfunc w(x int) int { return x }\n' >"$FX/protogo/a.go"
+cat >"$FX/protogo/b.go" <<'EOF'
+package p
+
+type H func(w int) int // @G_TYPE
+
+type I interface{ Do(w int) int } // @G_IFACE
+
+func Use() H { return w } // @G_USE
+
+func Run(w int) H { _ = w; return nil } // @G_PARAM
+EOF
+printf 'export function onDone(x: number) { return x; }\n' >"$FX/protots/a.ts"
+cat >"$FX/protots/b.ts" <<'EOF'
+import { onDone } from './a';
+type Cb = (onDone: number) => void;                                  // @T_TYPE
+declare function later(onDone: number): void;                        // @T_DECL
+interface Hooks { fire(onDone: number): void; }                      // @T_IFACE
+export function go(): (x: number) => number { return onDone; }       // @T_USE
+export function wrapT(onDone: number) { return [onDone]; }           // @T_PARAM
+EOF
+arm "RP1 callers handler: a prototype's and a typedef's parameter named handler hide nothing in the file" \
+    proto --callers=a.c:handler attr:value_refs=2 nvr:2 'vr:bind=@P_USE;into=signal#arg1' 'vr:bind=@P_INNER;into=signal#arg1'
+arm "RP2 callers handler (near miss): a defined function's own parameter still hides it" proto --callers=a.c:handler attr:value_refs=2 'novr:bind=@P_PARAM'
+arm "RP3 callers hook (C++): a member DECLARATION's parameter is no class member — the method body still sees ::hook" \
+    proto --callers=c.cpp:hook attr:value_refs=1 'vr:bind=@P_MEMBER;into=reg#arg0'
+arm "RP4 callers w (Go): a func type's and an interface method's parameter hide nothing; a function's own parameter does" \
+    protogo --callers=a.go:w attr:value_refs=1 nvr:1 'vr:bind=@G_USE;into=(return)' 'novr:bind=@G_PARAM'
+arm "RP5 callers onDone (TS): a function type's, a declare function's and an interface signature's parameter hide nothing; a function's own parameter does" \
+    protots --callers=a.ts:onDone attr:value_refs=1 nvr:1 'vr:bind=@T_USE;into=(return)' 'novr:bind=@T_PARAM'
+
+cat >"$FX/self/t.c" <<'EOF'
+void timer_set(void (*f)(void));
+static void tick(void) { timer_set(tick); }   /* @S_TICK */
+static void tock(void) { timer_set(tock); }
+void boot(void) { timer_set(tock); }          /* @S_BOOT */
+EOF
+arm "RS1 dead-code: tick, stored only by itself, is listed; value-ref-excluded= counts tock alone" \
+    self --dead-code attr:count=1 nd:1 'd:n=tick' 'nod:n=tock' attr:value-ref-excluded=1 'legend:in another function or at file scope'
+arm "RS2 safe-delete tick: a dead-code candidate again — its self-row is still served and still a use site" \
+    self --safe-delete=tick attr:dead_code_candidate=1 attr:value_refs=1 attr:uses=1 'vr:bind=@S_TICK;in_id=tick'
+arm "RS3 safe-delete tock (near miss): another function stores it — not a candidate" \
+    self --safe-delete=tock attr:dead_code_candidate=0 attr:value_refs=2 'vr:bind=@S_BOOT;in_id=boot'
+
+cat >"$FX/dup/t.js" <<'EOF'
+function f() { return 1; }
+function g() { return 2; }
+function h() { return 3; }
+const TABLE = { k: g };                                                          // @D_TABLE
+const T2 = { a: h, b: h };
+function store() { const tbl = {}; tbl.k = f; tbl.k(); tbl.k(); return tbl; }   // @D_STORE
+function store2() { const t = {}; t.k = f; t.j = f; t.j(); t.k(); return t; }
+function run() { TABLE.k(); TABLE.k(); }
+function run2(x) { T2[x](); T2[x](); }
+module.exports = { store, store2, run, run2 };
+EOF
+arm "RD1 callees store: two calls through one stored slot are ONE row" \
+    dup --callees=store attr:value_refs=1 el:vrs:total=1 nvr:1 'vr:to=f;bind=@D_STORE;into=tbl.k;through=tbl.k;sites=-'
+arm "RD2 callees run: two calls through a slot one site fills — sites= absent (one binding site)" \
+    dup --callees=run attr:value_refs=1 nvr:1 'vr:to=g;bind=@D_TABLE;through=TABLE.k;sites=-'
+arm "RD3 callees run2 (near miss): two binding sites behind one computed slot, called twice — sites=2, not 4" \
+    dup --callees=run2 attr:value_refs=1 nvr:1 'vr:to=h;through=T2[x];sites=2'
+arm "RD4 callees store2 (near miss): two binding sites in one function are two rows, each with its own call (called in reverse order)" \
+    dup --callees=store2 attr:value_refs=2 nvr:2 'vr:to=f;into=t.k;through=t.k' 'vr:to=f;into=t.j;through=t.j'
+cli dup --callees=store "$TMP/cli.dupstore.xml"
+mcp_call find_symbol '{"path":"'"$FX/dup"'","symbol":"store"}' >"$TMP/mcp.dupstore.json"
+verdict "RD5 MCP find_symbol(store).valueCallees == CLI --callees (one row)" "$( python3 "$TMP/par.py" json "$TMP/cli.dupstore.xml" "$TMP/mcp.dupstore.json" valueCallees )"
+cli dup --callees=run2 "$TMP/cli.duprun2.xml"
+mcp_call find_symbol '{"path":"'"$FX/dup"'","symbol":"run2"}' >"$TMP/mcp.duprun2.json"
+verdict "RD6 MCP find_symbol(run2).valueCallees == CLI --callees (sites=2)" "$( python3 "$TMP/par.py" json "$TMP/cli.duprun2.xml" "$TMP/mcp.duprun2.json" valueCallees )"
+
+python3 - "$FX" <<'EOF'
+import os, sys
+fx = sys.argv[1]
+s = "static int handler(int x) { return x; }\nint reg(int (*f)(int));\nint pick(int k) {\n    if (k == 0) return 0;\n"
+for i in range( 1, 300 ):
+    s += "    else if (k == %d) return %d;\n" % ( i, i )
+s += "    else return reg(handler);\n}\n"
+open( os.path.join( fx, "deep", "elif.c" ), "w" ).write( s )        # a 300-link else-if chain nests past the 512-level cap
+open( os.path.join( fx, "deep", "side.py" ), "w" ).write( "def py_fn():\n    return 1\n\nPT = [py_fn]\n" )
+# deep2: the same chain, plus a SHALLOW store of the same function — the shape --callers' next=--uses sends a reader to:
+# the shallow use is a row, the one below the cap is not, and a count that reads as complete is the false answer.
+d2 = ( "static void handler( int s ) { (void)s; }\nvoid reg( void (*)( int ) );\n"
+       "static void table_user( void ) { reg( handler ); }   /* @DZ_SHALLOW */\nvoid run( int x )\n{\n    if( x == 0 ) { }\n" )
+for i in range( 1, 300 ):
+    d2 += "    else if( x == %d ) { }\n" % i
+d2 += "    else { reg( handler ); }\n}\n"
+open( os.path.join( fx, "deep2", "elif.c" ), "w" ).write( d2 )
+open( os.path.join( fx, "deepneg", "near.c" ), "w" ).write(
+    "static int handler(int x) { return x; }\nint reg(int (*f)(int));\nint install(void) { return reg("
+    + "(" * 200 + "handler" + ")" * 200 + "); }\n" )                   # deep, but under the cap
+EOF
+arm "RZ1 callers handler: the use sits below the value walk's depth cap — no row, and the root says the count is a floor" \
+    deep --callers=handler attr:defs=1 noattr:value_refs attr:value_refs_depth_capped=1 'attr:value_refs_depth_at!=' 'legend:value_refs_depth_capped=' 'legend:value_refs_depth_at='
+cli deep --callers=handler "$TMP/cli.deep.xml"
+res="$( python3 - "$TMP/cli.deep.xml" <<'EOF'
+import re, sys
+m = re.search( r'value_refs_depth_at="elif\.c:([0-9]+)"', open( sys.argv[1], encoding="utf-8" ).read() )
+print( "OK" if m and 5 <= int( m.group( 1 ) ) <= 303 else "FAIL value_refs_depth_at is not a line of the else-if chain: %r" % ( m.group( 0 ) if m else None ) )
+EOF
+)"
+verdict "RZ2 value_refs_depth_at= names the cut file and a line inside the chain (the clue where to read)" "$res"
+arm "RZ3 dead-code: handler is listed AND the root says a table below the cap would be unseen" \
+    deep --dead-code 'd:n=handler' attr:value_refs_depth_capped=1 'attr:value_refs_depth_at!=' 'legend:value_refs_depth_capped='
+arm "RZ4 safe-delete / impact carry the same disclosure (every surface that reads value references)" \
+    deep --safe-delete=handler attr:dead_code_candidate=1 attr:value_refs_depth_capped=1 'legend:value_refs_depth_capped='
+arm "RZ4b impact handler: the disclosure beside reaches=" deep --impact=handler attr:value_refs_depth_capped=1 'legend:value_refs_depth_capped='
+arm "RZ5 callers py_fn (near miss): a Python function — the C file's cut is another family's, no disclosure" \
+    deep --callers=py_fn attr:value_refs=1 noattr:value_refs_depth_capped noattr:value_refs_depth_at 'nolegend:value_refs_depth_capped='
+arm "RZ6 callers handler (near miss): 200 levels deep is under the cap — the row, no disclosure" \
+    deepneg --callers=handler attr:value_refs=1 nvr:1 noattr:value_refs_depth_capped
+arm "RZ6b dead-code (near miss): under the cap, handler is held and no disclosure rides" \
+    deepneg --dead-code attr:value-ref-excluded=1 'nod:n=handler' noattr:value_refs_depth_capped
+( cd "$FX/deep" && "$BIN" . --callers=handler --no-cache --json >"$TMP/j.deep.json" 2>/dev/null )
+mcp_call find_referencing_symbols '{"path":"'"$FX/deep"'","symbol":"handler"}' >"$TMP/mcp.deep.json"
+mcp_call find_symbol '{"path":"'"$FX/deep"'","symbol":"handler"}' >"$TMP/mcp.deep2.json"
+res="$( python3 - "$TMP/cli.deep.xml" "$TMP/j.deep.json" "$TMP/mcp.deep.json" "$TMP/mcp.deep2.json" <<'EOF'
+import json, re, sys
+x = open( sys.argv[1], encoding="utf-8" ).read()
+want = ( re.search( r'value_refs_depth_capped="([0-9]+)"', x ), re.search( r'value_refs_depth_at="([^"]*)"', x ) )
+if not all( want ):
+    print( "FAIL the CLI XML carries no depth disclosure" ); raise SystemExit
+want = ( int( want[0].group( 1 ) ), want[1].group( 1 ) )
+for f in sys.argv[2:]:
+    raw = open( f ).read()
+    try:
+        j = json.loads( raw )
+    except ValueError:
+        print( "FAIL %s is not JSON: %r" % ( f.rsplit( "/", 1 )[-1], raw[:120] ) ); raise SystemExit
+    got = ( j.get( "value_refs_depth_capped" ), j.get( "value_refs_depth_at" ) )
+    if got != want:
+        print( "FAIL %s carries %r, the CLI %r" % ( f.rsplit( "/", 1 )[-1], got, want ) ); raise SystemExit
+print( "OK" )
+EOF
+)"
+verdict "RZ7 CLI --json, MCP find_referencing_symbols and find_symbol carry the CLI's value_refs_depth_capped / _at" "$res"
+cache="$TMP/deepcache"; mkdir -p "$cache"
+( cd "$FX/deep" && TMPDIR="$cache/" "$BIN" . --callers=handler >"$TMP/deep.cold.xml" 2>/dev/null; TMPDIR="$cache/" "$BIN" . --callers=handler >"$TMP/deep.warm.xml" 2>/dev/null )
+if grep -q 'value_refs_depth_capped="1"' "$TMP/deep.warm.xml" && cmp -s "$TMP/deep.cold.xml" "$TMP/deep.warm.xml"; then
+    ok "RZ8 a WARM run (cached facts) discloses the cut exactly as the cold run did"
+else
+    no "RZ8 the warm run lost or changed the depth disclosure: $( grep -o 'value_refs_depth[a-z_]*="[^"]*"' "$TMP/deep.warm.xml" | tr '\n' ' ' )"
+fi
+( cd "$FX/deep" && "$BIN" . --callers=handler --no-cache --legend=full >"$TMP/full.deep.xml" 2>/dev/null )
+run_check "RZ9 callers legend (full) defines value_refs_depth_capped= and value_refs_depth_at=" "$FX/deep" "$TMP/full.deep.xml" \
+    'attr:value_refs_depth_capped=1' 'legend:value_refs_depth_capped=' 'legend:value_refs_depth_at='
+
+# RZ10..RZ17: the readers a --callers answer's next= sends the reader to. --uses and --path read the same value references,
+# so a count beside a cut file is a floor on them too (a shallow use is a row; the one below the cap is not).
+arm "RZ10 uses handler: count=1 (the shallow store) and the root says the use below the cap is unseen" \
+    deep2 --uses=handler attr:count=1 nu:1 'u:role=value;p=@DZ_SHALLOW' attr:value_refs_depth_capped=1 'attr:value_refs_depth_at!=' 'legend:value_refs_depth_capped=' 'legend:value_refs_depth_at='
+arm "RZ11 path run,handler: no directed call path, to_value_refs=1 (the shallow store) and the root says it is a floor" \
+    deep2 --path=run,handler attr:reachable=0 attr:to_value_refs=1 attr:value_refs_depth_capped=1 'attr:value_refs_depth_at!=' 'legend:value_refs_depth_capped='
+arm "RZ11b callers handler: the disclosure --uses and --path repeat (one cut, read by every reader)" \
+    deep2 --callers=handler attr:value_refs=1 attr:value_refs_depth_capped=1 'attr:value_refs_depth_at!='
+cli deep2 --uses=handler "$TMP/cli.deep2.uses.xml"
+cli deep2 --path=run,handler "$TMP/cli.deep2.path.xml"
+mcp_call uses '{"path":"'"$FX/deep2"'","symbol":"handler","legend":"compact"}' >"$TMP/mcp.deep2.uses.xml"
+mcp_call path_between '{"path":"'"$FX/deep2"'","from":"run","to":"handler","legend":"compact"}' >"$TMP/mcp.deep2.path.xml"
+run_check "RZ12 MCP uses: count=1 and the depth disclosure, root and legend, as the CLI" "$FX/deep2" "$TMP/mcp.deep2.uses.xml" \
+    attr:count=1 'u:role=value;p=@DZ_SHALLOW' attr:value_refs_depth_capped=1 'attr:value_refs_depth_at!=' 'legend:value_refs_depth_capped=' 'legend:value_refs_depth_at='
+run_check "RZ13 MCP path_between: to_value_refs=1 and the depth disclosure, root and legend, as the CLI" "$FX/deep2" "$TMP/mcp.deep2.path.xml" \
+    attr:reachable=0 attr:to_value_refs=1 attr:value_refs_depth_capped=1 'attr:value_refs_depth_at!=' 'legend:value_refs_depth_capped='
+res="$( python3 - "$TMP/cli.deep2.uses.xml" "$TMP/mcp.deep2.uses.xml" "$TMP/cli.deep2.path.xml" "$TMP/mcp.deep2.path.xml" <<'EOF'
+import re, sys
+def disc( f ):
+    x = open( f, encoding="utf-8" ).read()
+    root = re.search( r"<(uses|path)\b[^>]*>", x ).group( 0 )
+    return re.findall( r'value_refs_depth_(?:capped|at)="[^"]*"', root )
+for cli, mcp in ( ( sys.argv[1], sys.argv[2] ), ( sys.argv[3], sys.argv[4] ) ):
+    a, b = disc( cli ), disc( mcp )
+    if len( a ) != 2 or a != b:
+        print( "FAIL %s carries %r, %s carries %r" % ( cli.rsplit( "/", 1 )[-1], a, mcp.rsplit( "/", 1 )[-1], b ) ); raise SystemExit
+print( "OK" )
+EOF
+)"
+verdict "RZ14 the CLI and the MCP twin carry byte-equal value_refs_depth_capped= / _at= on --uses and --path" "$res"
+arm "RZ15 uses handler (near miss): 200 levels is under the cap — the row, no disclosure" \
+    deepneg --uses=handler attr:count=1 'u:role=value' noattr:value_refs_depth_capped noattr:value_refs_depth_at 'nolegend:value_refs_depth_capped='
+arm "RZ15b path install,handler (near miss): under the cap — to_value_refs=1 and no disclosure" \
+    deepneg --path=install,handler attr:reachable=0 attr:to_value_refs=1 noattr:value_refs_depth_capped noattr:value_refs_depth_at 'nolegend:value_refs_depth_capped='
+arm "RZ15c uses py_fn (near miss): a Python function beside the cut C file — another family, no disclosure" \
+    deep --uses=py_fn 'u:role=value' noattr:value_refs_depth_capped noattr:value_refs_depth_at 'nolegend:value_refs_depth_capped='
+mcp_call uses '{"path":"'"$FX/deepneg"'","symbol":"handler","legend":"compact"}' >"$TMP/mcp.deepneg.uses.xml"
+mcp_call path_between '{"path":"'"$FX/deepneg"'","from":"install","to":"handler","legend":"compact"}' >"$TMP/mcp.deepneg.path.xml"
+run_check "RZ16 MCP uses (near miss): under the cap — the row, no disclosure" "$FX/deepneg" "$TMP/mcp.deepneg.uses.xml" \
+    attr:count=1 'u:role=value' noattr:value_refs_depth_capped noattr:value_refs_depth_at 'nolegend:value_refs_depth_capped='
+run_check "RZ16b MCP path_between (near miss): under the cap — to_value_refs=1 and no disclosure" "$FX/deepneg" "$TMP/mcp.deepneg.path.xml" \
+    attr:to_value_refs=1 noattr:value_refs_depth_capped noattr:value_refs_depth_at 'nolegend:value_refs_depth_capped='
+arm "RZ17 path run,reg where a directed path EXISTS (near miss): no value-reference read, so no disclosure" \
+    deep2 --path=run,reg attr:reachable=1 noattr:to_value_refs noattr:value_refs_depth_capped 'nolegend:value_refs_depth_capped='
+
+python3 - "$FX" >"$TMP/keys.expect" <<'EOF'
+import os, sys
+fx = sys.argv[1]
+open( os.path.join( fx, "keys", "k.c" ), "w" ).write(
+    "static int fk(int x) { return x; }\nstatic int fs(int x) { return x; }\nenum { A = 1, B = 2 };\n"
+    "static int (*tk[8])(int) = { [ A +\n      B ] = fk };\n"
+    "static int (*ts[8])(int) = { [ 2 ] = fs };\n" )
+num, ident = "1" * 300, "a" * 300
+open( os.path.join( fx, "keys", "k.js" ), "w" ).write(
+    "function jn() { return 1; }\nfunction ji() { return 2; }\n"
+    "const JN = { %s: jn };\nconst JI = { %s: ji };\nmodule.exports = { JN, JI };\n" % ( num, ident ) )
+E = "…"
+print( "tk[A + B]" )                    # the designator expression, its newline collapsed — no &#10; in the attribute
+print( "ts[2]" )                        # a short designator: whole
+print( "JN[" + "1" * 96 + E + "]" )     # a 300-digit numeric key: capped
+print( "JI." + "a" * 96 + E )           # a 300-character identifier key: capped
+EOF
+i=0; while IFS= read -r want; do i=$(( i + 1 )); kexp[$i]="$want"; done <"$TMP/keys.expect"
+arm "RK1 callers fk: a multi-line C designator [A + B] is written on one line" keys --callers=fk attr:value_refs=1 "vr:into=${kexp[1]}"
+arm "RK2 callers fs (near miss): a short designator is whole" keys --callers=fs attr:value_refs=1 "vr:into=${kexp[2]}"
+arm "RK3 callers jn: a 300-digit numeric key is capped" keys --callers=jn attr:value_refs=1 "vr:into=${kexp[3]}"
+arm "RK4 callers ji: a 300-character identifier key is capped" keys --callers=ji attr:value_refs=1 "vr:into=${kexp[4]}"
+
 echo
 if [ "$fail" -eq 0 ]; then echo "recallshapecheck: ALL PASS ($n CLI arms + parity)"; else echo "recallshapecheck: FAIL"; fi
 exit "$fail"

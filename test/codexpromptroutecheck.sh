@@ -134,6 +134,51 @@ jq -e -s 'any(.[]; .event == "RouteObservation" and .outcome == "adopted" and .p
     && ok "adopted rows record the recommended verb as observed, not a leading modifier flag" \
     || no "adopted row recorded a modifier flag as the observed verb"
 
+# MCP channel events (`<channel source="…">`) and sub-agent hand-backs (`<agent-message from="…">`) reach
+# UserPromptSubmit like a prompt but are harness events (issue #381): no classifier call, no context, a
+# status=skip-system row. The stub ripwire above recommends for any text without "abstain", so a routed
+# prompt is visible as output. Own RIPWIRE_HOME so the counted log above is undisturbed. Near-misses
+# (`<channelz>`, `<channels>`, `<agent-messages>`) and a mid-sentence mention still route.
+CH="$TMP/chan"; mkdir -p "$CH"
+chan_case()   # chan_case LABEL SESSION PROMPT WANT(skip|route)
+{
+    _cj="$( jq -cn --arg p "$3" --arg c "$TMP/repo" --arg s "$2" '{prompt:$p,cwd:$c,session_id:$s}' )"
+    _co="$( printf '%s\n' "$_cj" | PATH="$TMP/bin:$PATH" RIPWIRE_HOME="$CH" "$HOOK" )"
+    _cst="$( jq -rs --arg sh "$( printf '%s' "$2" | cksum | cut -d' ' -f1 )" '[.[] | select(.session_hash == $sh)] | last | .status // "none"' "$CH/routing.jsonl" 2>/dev/null )"
+    if [ "$4" = skip ]; then
+        [ -z "$_co" ] && [ "$_cst" = "skip-system" ] && ok "$1: skipped (status=skip-system, nothing injected)" \
+            || no "$1: expected skip, got status=[$_cst] out=[${_co:+set}]"
+    else
+        [ -n "$_co" ] && [ "$_cst" = "recommend" ] && ok "$1: still routes" \
+            || no "$1: expected a route, got status=[$_cst] out=[${_co:+set}]"
+    fi
+}
+CHT='understand parseArgs without broad reads'
+chan_case "channel event"                 cx1 "<channel source=\"x\">$CHT</channel>" skip
+chan_case "channel event, leading blank line" cx2 "$( printf '  \n\t<channel source="x">%s' "$CHT" )" skip
+chan_case "bare <channel> tag"            cx3 "<channel>$CHT</channel>" skip
+chan_case "agent-message hand-back"       cx4 "<agent-message from=\"w\">$CHT</agent-message>" skip
+chan_case "agent-message, leading blank line" cx5 "$( printf '\n\n <agent-message from="w">%s' "$CHT" )" skip
+chan_case "leading \\v before <channel>"    cx11 "$( printf '\v<channel source="x">%s' "$CHT" )" skip
+chan_case "leading \\f before <agent-message>" cx12 "$( printf ' \f<agent-message from="w">%s' "$CHT" )" skip
+chan_case "\\v then near-miss <channelz>"   cx13 "$( printf '\v<channelz> %s' "$CHT" )" route
+chan_case "near-miss <channelz>"          cx6 "<channelz> $CHT" route
+chan_case "near-miss <channels>"          cx7 "<channels> $CHT" route
+chan_case "near-miss <agent-messages>"    cx8 "<agent-messages> $CHT" route
+chan_case "mid-sentence <channel> mention" cx9 "what does <channel source=\"x\"> mean? $CHT" route
+chan_case "mid-sentence <agent-message> mention" cx10 "what does <agent-message from=\"w\"> mean? $CHT" route
+# A Unicode space before the wrapper is not stripped (D-N1): the hook's strip is the six ASCII bytes, as src/taskroute.h's,
+# never bash's locale-dependent [:space:] (which matches U+00A0 in a UTF-8 locale on macOS bash 3.2). Run under a UTF-8
+# locale; without one installed the arm SKIPs by name.
+UTF8LOC=""
+for _l in en_US.UTF-8 C.UTF-8; do locale -a 2>/dev/null | grep -qix "$_l" && { UTF8LOC="$_l"; break; }; done
+if [ -z "$UTF8LOC" ]; then
+    echo "  SKIP  U+00A0 arms: no UTF-8 locale installed (locale -a lists neither en_US.UTF-8 nor C.UTF-8)"
+else
+    LC_ALL="$UTF8LOC" LANG="$UTF8LOC" chan_case "U+00A0 before <channel> under $UTF8LOC routes" cx14 "$( printf '\302\240<channel source="x">%s' "$CHT" )" route
+    LC_ALL="$UTF8LOC" LANG="$UTF8LOC" chan_case "U+00A0 before <agent-message> under $UTF8LOC routes" cx15 "$( printf '\302\240 <agent-message from="w">%s' "$CHT" )" route
+fi
+
 OFF="$( printf '%s\n' "{\"prompt\":\"$PROMPT\",\"cwd\":\"$TMP/repo\",\"session_id\":\"route-off\"}" | \
     PATH="$TMP/bin:$PATH" RIPWIRE_HOME="$TMP/off" RIPWIRE_ROUTE_METER=0 "$HOOK" )"
 [ -n "$OFF" ] && [ ! -e "$TMP/off" ] \

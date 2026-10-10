@@ -44,13 +44,17 @@
 # the map header, and every absence-marked row field of the map legend, read from source, has a compact reading — so the
 # next one cannot land undefined.
 #
-# Usage:  RIPWIRE_BIN=build/ripwire bash test/compactlegendcheck.sh
+# Usage:  bash test/compactlegendcheck.sh [BIN]   |   RIPWIRE_BIN=build/ripwire bash test/compactlegendcheck.sh
+# BIN is $1, else RIPWIRE_BIN, else build/ripwire; the first output line names the binary used (a mutant run against the
+# wrong binary gave false greens when this gate read RIPWIRE_BIN only — knob-honesty-068 delta review N7).
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
-BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
+echo "compactlegendcheck: BIN=$BIN"
+[ -x "$BIN" ] || { echo "compactlegendcheck: no ripwire binary at $BIN — build first"; exit 2; }
 FIX="$ROOT/test/fixture"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 # HERMETIC HOME (0.6.6 review M2): the (U)/(UG) probe runs bare --scan-skills, which walks the skill homes under $HOME
@@ -288,6 +292,19 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # outside-import/use,super-past-the-tree;...)" (was "(builtin/stdlib-name-...,external-import,...)"), +106 B — and the
 # est_tokens= that prices them, 858 -> 901 (header and root). Checked: the new output differs from the pin by exactly
 # those two clauses and that figure; the six other pins are unchanged.
+# RE-ANCHORED 2026-10-08 (train 26b: lean-answers merged onto for-spine-span), for.xml only: 4201 -> 4117 B, est_tokens=
+# 1683 -> 1650. The two lanes' changes compose (e= rows and clause, then the zero elision and its clause); undoing ONLY
+# the zero elision (est_tokens=/at= masked) gives the previous pin exactly. at= is stored masked, as before. The six other
+# pins are unchanged.
+# RE-ANCHORED BY HAND 2026-10-04 (lane for-spine-span-068, by design), for.xml only: the four <d> rows gain e="N" (the
+# definition's last line) right after l=, the full legend gains the present-only e= clause ("; e= on a d row: the 1-based
+# line where that definition ends, …", 221 B), and est_tokens= moves 1580 -> 1683 with the bytes (3937 -> 4194 B).
+# Checked: removing the four e= attributes and that clause and masking est_tokens leaves the pin byte-identical (at=
+# masked); no docs_after_code (the fixture has no markdown row). The six other pins are unchanged.
+# RE-ANCHORED BY HAND 2026-10-04 (lane/lean-answers-068), for.xml only: a --for lens row omits a zero cx=/ccx=/in= and the
+# v1 legend says "each absent when 0;". Checked mechanically: restoring the zeros on every r= row and removing that clause
+# gives the previous pin byte for byte with at= and est_tokens= masked (est_tokens= prices the shorter bytes). The six
+# other pins are unchanged.
 PIN_DIR="$ROOT/test/compactlegendfix/pre_l1_full"
 # the one normalisation, in python on BOTH sides so no sed dialect decides it (BSD sed appends a final newline, GNU
 # sed does not): at="…" masked, trailing newlines dropped.
@@ -500,6 +517,12 @@ probeFor()
 # --impact=distance probe; 797 on the base binary b343b988). The answer now carries by_depth= on the root and d= on its
 # first <s> row (the listing runs nearest first, graph.h orderByDepthThenRank), and the compact legend reads both: the
 # present-only <s d=N> row (+64 B with its separator) and by_depth= (+63 B). Both are absent at reaches="0". No other schema moved.
+# RE-PINNED 2026-10-04 (lane count-floor-068, CALLSITE-LINE): ripwire.safe-delete/v1 720 -> 820 (measured 805, the
+# --safe-delete=distance probe; 715 on the base binary 255dc199). Each caller row now carries sites_l=, its call-site LINES
+# beside p= (the caller's definition line): an edit decision needs the lines to open, and graded answers that named every
+# caller were scored wrong for printing only definition lines. The compact legend reads it (+90 B with its separator: what
+# it is, and that it is not proof each line binds to this definition). callers_floor=/uses_floor=/risk=unmodelled are
+# present-only and ride neither this probe nor any other pinned one. No other schema moved.
 # RE-PINNED BACK 2026-09-30 (train22 fixups, review M2): ripwire.scan-skills/v1 520 -> 380 (measured 369). An earlier commit on
 # this branch pinned 520 from the developer's own HOME (a Codex install's .py helpers made the answer carry
 # code_not_flow_scanned=); the gate now runs under an empty HOME of its own, so the probe measures the same bytes everywhere.
@@ -510,6 +533,24 @@ probeFor()
 # its definition as two contracts — so the schema had no XML answer to pin. It now answers about the definition.
 # the pins follow the definitions, measured + 10 rounded up to 10.
 # schema                      pin  measured
+# RE-PINNED 2026-10-04 (lane/lean-answers-068), two new definitions, each measured on this gate's fixture against the
+# base binary (255dc199) — no prose was added to any reading that already rode:
+#   ripwire.for/v1 738->761: " (absent cx/ccx/in = 0)" (+23 B) — the --for lens omits a zero cx=/ccx=/in=.
+#   ripwire.whereis/v1 611->887: the default listing's readings — listing=, the <refs count= next=> element (and the
+#   generic next= reading it pulls in), head_date= (the tip/date hoist) and complete='s "(of its listing=)" (+276 B). The
+#   answer they ride is the lean one: its rows shrink from every reference to the definitions alone.
+# RE-PINNED 2026-10-07 (lane/lean-answers-068 fix round 1, review B1 + its non-blocking item 2), measured on this gate's
+# fixture: ripwire.whereis/v1 887->1023: the listing= reading gains "; default: defs only if strictly shorter than all"
+# (+49 B: the default now serves the defs page only when it is strictly shorter than the all page) and "; a def the
+# parser does not model (define_method, setattr, assignment) is a counted ref" (+87 B) — +136 B, nothing else moved.
+# Both ride only a page that carries listing=. The OLD path keeps its own pin: the whereis-listing=all twin after the
+# universe loop holds the whole-list page's legend at 700 B (measured 692), so it cannot grow inside this headroom.
+# RE-PINNED 2026-10-08 (lane/lean-answers-068 fix round 2, review D1), measured on this gate's fixture: ripwire.whereis/v1
+# 1023->1037, pin 1040->1050 (measured + 10 rounded up to 10): the listing= reading "default: defs only if strictly shorter
+# than all" becomes "default: defs if it lists more defs than all, else if shorter" (+14 B) because the default now serves
+# the defs page whenever it lists MORE definitions than the all page under the row cap, whatever its bytes. Rides only a
+# page that carries listing=; nothing else moved. The OLD path keeps its pin: the whereis-listing=all twin holds the
+# whole-list page's legend at 700 B (measured 692, unchanged).
 PIN_TABLE='
 ripwire.edit-check/v1             610   595
 ripwire.map/v1                   910   892
@@ -566,24 +607,57 @@ ripwire.callers/v1               330   317
 ripwire.callees/v1                500   484
 ripwire.uses/v1                   510   500
 ripwire.batch/v1                  250   238
-ripwire.safe-delete/v1           720   708
+ripwire.safe-delete/v1           820   805
 ripwire.at/v1                    180   161
 ripwire.from-trace/v1            1300  1281
 ripwire.plan-lint/v1              570   551
 ripwire.merge-scout/v1            570   558
-ripwire.whereis/v1                630   611
+ripwire.whereis/v1               1050  1037
 ripwire.community/v1             730   719
 ripwire.layout/v1                1220  1203
 ripwire.pack-task/v1             990   974
 ripwire.pack-top-n/v1            760   745
 ripwire.expand/v1                280   265
 ripwire.expand-file/v1            360   342
-ripwire.for/v1                    750   738
+ripwire.for/v1                    775   761
 '
 pinFor()
 {
     printf '%s\n' "$PIN_TABLE" | awk -v schema="$1" '$1 == schema { printf "%s", $2; exit }'
 }
+# (U-twin) the pre-2026-10-04 ripwire.safe-delete/v1 pin, kept (PROCESS rule 4: a re-pin keeps a twin for the old path).
+# The 720 -> 820 re-pin above paid for ONE reading, the caller row's sites_l= (+90 B with its separator). Everything else
+# in that prose legend still fits the OLD 720 B: the same --safe-delete=distance probe, with exactly that reading cut out
+# of a copy of the compact answer, is measured by the same `leg prose` operand the (U) arm uses. The cut is taken only when
+# a caller row carries sites_l= AND the reading occurs once; any other premise FAILs (a cut that removes nothing proves nothing).
+( cd "$REPO" && "$BIN" . --safe-delete=distance --legend=compact >"$TMP/sdt.c" 2>/dev/null </dev/null \
+  && "$BIN" . --safe-delete=distance --legend=full >"$TMP/sdt.full" 2>/dev/null </dev/null ); rcSdt=$?
+sdtCut="$( python3 - "$TMP/sdt.c" "$TMP/sdt.cut" <<'PY'
+import re, sys
+doc = open( sys.argv[1], encoding = "utf-8", errors = "replace" ).read()
+reading = " c sites_l=: its call-site lines (p= is the caller's def line); not proof each binds here."
+body = re.sub( r"<!--.*?-->", "", doc, flags = re.S )
+if not re.search( r'<c [^>]*sites_l="[0-9]', body ):
+    print( "NOPREMISE no caller row carries sites_l=" ); sys.exit( 0 )
+if doc.count( reading ) != 1:
+    print( "NOPREMISE the sites_l= reading occurs %d times, not once" % doc.count( reading ) ); sys.exit( 0 )
+open( sys.argv[2], "w", encoding = "utf-8" ).write( doc.replace( reading, "", 1 ) )
+print( len( reading.encode() ) )
+PY
+)"
+if [ "$rcSdt" -ne 0 ]; then
+    no "(U-twin) --safe-delete=distance exited $rcSdt — the twin cannot measure"
+else
+    case "$sdtCut" in
+        NOPREMISE*) no "(U-twin) safe-delete twin cannot measure: ${sdtCut#NOPREMISE }" ;;
+        *)  sdtRest="$( leg prose "$TMP/sdt.cut" "$TMP/sdt.full" )"
+            if [ -n "$sdtRest" ] && [ "$sdtRest" -eq "$sdtRest" ] 2>/dev/null && [ "$sdtRest" -le 720 ]; then
+                ok "(U-twin) safe-delete compact prose minus the sites_l= reading ($sdtCut B) is $sdtRest B <= 720 B (the pre-CALLSITE-LINE pin)"
+            else
+                no "(U-twin) safe-delete compact prose minus the sites_l= reading ($sdtCut B) is ${sdtRest:-?} B > 720 B — the rest re-inflated"
+            fi ;;
+    esac
+fi
 nXml=0; nXmlBad=0; nRefuse=0; nSkip=0; loopBytes=0; xmlVerbs=""; nDefBad=0
 # (UG) rv-r1-L1-2: EVERY XML verb the flag universe reaches, EVERY instance of every attribute its DEFAULT answer carries,
 # defined `name=` in that answer's own legend (legendcoveragecheck (G)'s predicate, on this gate's fixture). No floor.
@@ -710,6 +784,18 @@ else
 fi
 [ "$nRefuse" -ge 60 ] && ok "(U) $nRefuse non-XML flags refuse --legend=compact (empty stdout, non-zero exit); $nSkip write/serve/exec flags not probed" \
                       || no "(U) only $nRefuse non-XML flags refused compact (want ≥ 60)"
+# (U-TWIN) the whole-list whereis page (--whereis-listing=all, the pre-listing answer) keeps its OWN pin: the default's pin
+# rose to 1040 B for the listing= readings, and without this twin the old path could grow inside that headroom unseen.
+# 700 = measured 692 (the base's 611 plus the head_date= reading) + 10, rounded up to 10.
+( cd "$REPO" && "$BIN" . --whereis=distance --whereis-listing=all >"$TMP/wall.c" 2>/dev/null </dev/null ); rcWall=$?
+( cd "$REPO" && "$BIN" . --whereis=distance --whereis-listing=all --legend=full >"$TMP/wall.f" 2>/dev/null </dev/null )
+wallLb="$( leg prose "$TMP/wall.c" "$TMP/wall.f" )"
+if [ "$rcWall" -eq 0 ] && [ "$( leg schema "$TMP/wall.c" )" = "ripwire.whereis/v1" ] && ! grep -o '<whereis [^>]*>' "$TMP/wall.c" | grep -q ' listing=' \
+   && [ -n "$wallLb" ] && [ "$wallLb" -gt 0 ] 2>/dev/null && [ "$wallLb" -le 700 ]; then
+    ok "(U-TWIN) --whereis=distance --whereis-listing=all compact PROSE legend is $wallLb B (<= its 700 B pin; the default's pin is 1040)"
+else
+    no "(U-TWIN) --whereis-listing=all compact PROSE legend is '${wallLb:-none}' B (pin 700; exit $rcWall): $( leg legend "$TMP/wall.c" | head -c 200 )"
+fi
 
 echo
 echo "=== (F) the DEFAULT is the default posture; --legend=full restores MORE legend over the SAME payload (L1) ==="
@@ -764,7 +850,50 @@ ds, df = rows( sys.argv[ 1 ] ); fs, ff = rows( sys.argv[ 2 ] )
 lostSym = sorted( fs - ds ); lostFiles = sorted( ff - df )
 print( len( ds ), len( fs ), len( lostSym ) + len( lostFiles ), ( lostSym + lostFiles )[ :3 ] )
 PY
-p1n=0; p1bad=0; p1more=0
+# THE ONE EXEMPTION (knob-honesty-068 round 3, orchestrator ruling option B, 2026-10-08; PROCESS rule 4 — re-ruled by the
+# orchestrator, not reworded by the lane). Ruling C3 pays for a capped <sigs> next= in rows ONLY when that is what makes the
+# answer fit. At a tight budget the compact header can finish LARGER than --legend=full's (full's rung zero drops its long prose
+# clauses; compact's own drop cannot pay, verbs_for.h "AND THE DROP MUST PAY"), and then full keeps a row unpaid that the compact
+# answer must pay to fit: P1, P4 and C3 cannot all hold on that argv (lane report, fix round 2 "BLOCKING"). Option D (serve
+# full's header there) was built and measured — branch lane/compact-header-068 — and leaves the default answer's own legend
+# short of definitions (G4: bodies=/bundle=/reason=/task=/pure= undefined in full's header; legendcoveragecheck (G)/(A)/(E)
+# red), so the ruling fell back to B: a lost row is EXEMPT only where ALL of these hold on that very argv —
+#   • the default's header (root open tag + the legend comments right after it) is strictly LARGER than --legend=full's;
+#   • the default fits its own budget (est_tokens <= the budget, no over_ceiling="1") — P4 then holds outright;
+#   • the default's <sigs> carries next= — the row went to pay for the call that recovers it (C3), not to anything else.
+# Every other lost row is still a P1 failure (the TWIN: P1 on every argv the exemption does not name), each exempt run is
+# printed (never silent), and arm (P1-B) below pins the predicate itself, on synthetic headers and on two short-root argv.
+cat > "$TMP/p1d.py" <<'PY'
+import re, sys
+def doc( path ):
+    return open( path, encoding = "utf-8", errors = "replace" ).read()
+def header( t ):   # the root open tag + the comments right after it (the legend); -1 when there is no <ctx> root
+    m = re.match( r"\s*<ctx\s[^>]*>", t )
+    if not m: return -1
+    i = m.end()
+    while t.startswith( "<!--", i ):
+        j = t.find( "-->", i ); i = len( t ) if j < 0 else j + 3
+    return i
+def est( t ):
+    m = re.search( r'<ctx\s[^>]*\sest_tokens="([0-9]+)"', t ); return int( m.group( 1 ) ) if m else -1
+d, f = doc( sys.argv[ 1 ] ), doc( sys.argv[ 2 ] )
+over = 1 if re.match( r'\s*<ctx\s[^>]*\sover_ceiling="1"', d ) else 0
+nxt  = 1 if re.search( r'<sigs\s[^>]*\snext="', d ) else 0
+print( header( d ), header( f ), est( d ), est( f ), over, nxt )
+PY
+# p1HeaderLarger DEFAULT_HDR FULL_HDR — the exemption's header comparison, ONE spelling (arm (P1-B) pins it, and a mutant of it).
+p1HeaderLarger(){ [ "$1" -gt "$2" ]; }
+# p1Exempt DEF FULL BUDGET — 0 when a lost row is the ruled exemption; leaves the facts it read in $p1facts either way. Every
+# field is checked present and numeric before any comparison (CHECKLIST 14): an unreadable answer is never exempt.
+p1Exempt(){
+    set -- $( python3 "$TMP/p1d.py" "$1" "$2" ) "$3"
+    if [ $# -ne 7 ] || ! printf '%s' "$1$2$3$4$5$6$7" | grep -qE '^[0-9]+$'; then
+        p1facts="unreadable answer ($*)"; return 1
+    fi
+    p1facts="header $1 B vs full's $2 B, est_tokens $3 (full $4) of $7, over_ceiling=$5, sigs next=$6"
+    p1HeaderLarger "$1" "$2" && [ "$3" -le "$7" ] && [ "$5" -eq 0 ] && [ "$6" -eq 1 ]
+}
+p1n=0; p1bad=0; p1more=0; p1exempt=0
 for task in "rank symbols by pagerank" "token budget ceiling ladder" "parse command line flags" "legend posture compact" "escapeXml"; do
     for tb in 700 1500 3000 6000; do
         "$BIN" "$ROOT/src" --for="$task" --token-budget=$tb >"$TMP/p1.def" 2>/dev/null
@@ -772,19 +901,101 @@ for task in "rank symbols by pagerank" "token budget ceiling ladder" "parse comm
         set -- $( python3 "$TMP/rows.py" "$TMP/p1.def" "$TMP/p1.full" | tr -d "[](),'" )
         p1n=$(( p1n + 1 ))
         if [ "${3:-1}" -ne 0 ]; then
-            p1bad=$(( p1bad + 1 )); no "(P1) --for='$task' --token-budget=$tb: the default LOST $3 answer row(s) that --legend=full carries (default $1, full $2 symbol rows): ${4:-} ${5:-} ${6:-}"
+            p1lost="the default LOST $3 answer row(s) that --legend=full carries (default $1, full $2 symbol rows): ${4:-} ${5:-} ${6:-}"
+            if p1Exempt "$TMP/p1.def" "$TMP/p1.full" "$tb"; then
+                p1exempt=$(( p1exempt + 1 )); printf '  ..    (P1 exempt, ruling B) --for=%s --token-budget=%s: %s; %s\n' "'$task'" "$tb" "$p1lost" "$p1facts"
+            else
+                p1bad=$(( p1bad + 1 )); no "(P1) --for='$task' --token-budget=$tb: $p1lost — not the ruled exemption ($p1facts)"
+            fi
         fi
         [ "${1:-0}" -gt "${2:-0}" ] && p1more=$(( p1more + 1 ))
         grep -q '<sigs [^>]*capped="1"' "$TMP/p1.full" && head -c 300 "$TMP/p1.def" | grep -qF 'schema="ripwire.for/v1"' && p1bind=$(( ${p1bind:-0} + 1 ))
     done
 done
-[ "$p1bad" -eq 0 ] && [ "$p1n" -eq 20 ] && ok "(P1) rows(default) ⊇ rows(--legend=full) on all $p1n budgeted --for runs (5 tasks x 4 budgets)"
+[ "$p1bad" -eq 0 ] && [ "$p1n" -eq 20 ] && ok "(P1) rows(default) ⊇ rows(--legend=full) on all $p1n budgeted --for runs (5 tasks x 4 budgets) but the $p1exempt the ruled exemption names (header larger than full's, fits its budget, the row paid for <sigs next=>)"
 # THE BINDING GUARD (L1 fix round): it asked for a run where the default carries MORE rows. Since the fix round the compact
 # header defines task=/next=/pure=/<field> and its sig charge is capped at the full dialect's (verbs_for.h runForLens), so
 # the default buys no row it cannot pay for and "more" is no longer the claim. What the superset arm needs is that the
 # budget BINDS (the full answer's <sigs> was cut) on a default that IS the compact posture — else it compares nothing.
 [ "${p1bind:-0}" -gt 0 ] && ok "(P1) the arm binds: on ${p1bind} of $p1n runs the budget cut the full answer's <sigs> and the default is the compact posture (default carries more rows on $p1more)" \
                         || no "(P1) on none of $p1n runs did the budget cut the full answer's <sigs> under a compact default — the superset arm proved nothing"
+
+# (P1-B) THE EXEMPTION, PINNED (knob-honesty-068 round 3, ruling B). Three parts:
+#   1. the header comparison on synthetic sizes — larger is exempt, a tie and a smaller header are not (a mutant of
+#      p1HeaderLarger goes red here even where no live argv lands on the boundary);
+#   2. FIXED ARMS on a SHORT RELATIVE root (`src`, run from $ROOT): the sweep above runs on "$ROOT/src", and that path rides the
+#      header the rows are budgeted against, so a checkout path longer than ~52 chars hid these two (green locally, red on CI's
+#      shorter path at 4acbcd22: default 7 vs full 8, 9 vs 10). Each must keep every row full keeps OR be the ruled exemption,
+#      and P4 holds on both whatever the branch: inside the budget, or no further over it than full;
+#   3. the TWIN on the same root: at --token-budget=6000 the compact header is the SMALLER one, so the exemption cannot apply
+#      and P1 holds strictly.
+# …and a sentinel: MCP `for` has ONE dialect (it declares no `legend` field, src/mcprefusal.h; the compact layer never runs on
+# it), so no compact header exists there to exceed full's; it goes red the day MCP `for` gains a compact dialect.
+p1bbad=0
+if p1HeaderLarger 1201 1000 && ! p1HeaderLarger 1000 1000 && ! p1HeaderLarger 900 1000; then
+    ok "(P1-B) the exemption's header comparison: a larger default header is exempt, a tie and a smaller one are not"
+else
+    p1bbad=$(( p1bbad + 1 )); no "(P1-B) the exemption's header comparison is not 'strictly larger' (1201>1000 exempt, 1000=1000 and 900<1000 not)"
+fi
+# …and the other two conditions, on synthetic answers (each a near miss the predicate could wave through): the positive is a
+# larger header that fits and paid for next=; over the budget, labelled over_ceiling="1", or with no <sigs next=> is not exempt.
+p1syn(){ printf '<ctx task="t" est_tokens="%s"%s><!-- %s --><sigs shown="1"%s></sigs></ctx>' "$1" "$2" "$3" "$4" >"$TMP/p1s.def"; }
+printf '<ctx task="t" est_tokens="1400"><!-- short --><sigs shown="2"></sigs></ctx>' >"$TMP/p1s.full"
+p1synbad=""
+p1syn 1450 "" "a much longer legend comment" ' next="x"';                   p1Exempt "$TMP/p1s.def" "$TMP/p1s.full" 1500 || p1synbad="$p1synbad positive($p1facts)"
+p1syn 1550 "" "a much longer legend comment" ' next="x"';                   p1Exempt "$TMP/p1s.def" "$TMP/p1s.full" 1500 && p1synbad="$p1synbad over-budget"
+p1syn 1450 ' over_ceiling="1"' "a much longer legend comment" ' next="x"';  p1Exempt "$TMP/p1s.def" "$TMP/p1s.full" 1500 && p1synbad="$p1synbad over_ceiling"
+p1syn 1450 "" "a much longer legend comment" "";                            p1Exempt "$TMP/p1s.def" "$TMP/p1s.full" 1500 && p1synbad="$p1synbad no-next"
+p1syn 1450 "" "tiny" ' next="x"';                                           p1Exempt "$TMP/p1s.def" "$TMP/p1s.full" 1500 && p1synbad="$p1synbad smaller-header"
+if [ -z "$p1synbad" ]; then
+    ok "(P1-B) the exemption on synthetic answers: exempt only when the header is larger AND it fits AND <sigs next=> rides (4 near misses refused)"
+else
+    p1bbad=$(( p1bbad + 1 )); no "(P1-B) the exemption on synthetic answers misjudged:$p1synbad"
+fi
+p1b_arm(){   # p1b_arm TASK BUDGET MODE(either|strict)
+    ( cd "$ROOT" && "$BIN" src --for="$1" --token-budget="$2" ) >"$TMP/p1b.def" 2>/dev/null
+    ( cd "$ROOT" && "$BIN" src --for="$1" --token-budget="$2" --legend=full ) >"$TMP/p1b.full" 2>/dev/null
+    local task="$1" tb="$2" mode="$3"
+    set -- $( python3 "$TMP/rows.py" "$TMP/p1b.def" "$TMP/p1b.full" | tr -d "[](),'" )
+    local drows="${1:-}" frows="${2:-}" lost="${3:-}"
+    set -- $( python3 "$TMP/p1d.py" "$TMP/p1b.def" "$TMP/p1b.full" )
+    if [ $# -ne 6 ] || ! printf '%s' "$1$2$3$4$drows$frows$lost" | grep -qE '^[0-9]+$'; then
+        p1bbad=$(( p1bbad + 1 )); no "(P1-B) --for='$task' --token-budget=$tb on root src: could not read both answers (a <ctx> root, est_tokens=, rows) — got '$*' rows='$drows/$frows/$lost'"; return
+    fi
+    local dh="$1" fh="$2" de="$3" fe="$4" why=""
+    [ "$de" -gt "$tb" ] && [ "$de" -gt "$fe" ] && why="$why P4: est_tokens $de over the budget AND over full's $fe;"
+    if [ "$mode" = strict ]; then
+        [ "$lost" -ne 0 ] && why="$why P1: lost $lost row(s) full carries (default $drows, full $frows);"
+        p1HeaderLarger "$dh" "$fh" && why="$why twin premise: the compact header ($dh B) is no longer the smaller one (full's $fh B);"
+        branch="P1 strict, header $dh B < full's $fh B"
+    elif [ "$lost" -ne 0 ]; then
+        if p1Exempt "$TMP/p1b.def" "$TMP/p1b.full" "$tb"; then branch="exempt ($p1facts)"
+        else why="$why P1: lost $lost row(s) full carries (default $drows, full $frows) and is not the ruled exemption ($p1facts);"; fi
+    else
+        branch="P1 holds"
+    fi
+    if [ -n "$why" ]; then
+        p1bbad=$(( p1bbad + 1 )); no "(P1-B) --for='$task' --token-budget=$tb on root src:$why"
+    else
+        ok "(P1-B) --for='$task' --token-budget=$tb on root src: rows $drows (full $frows), est $de (full $fe): $branch"
+    fi
+}
+p1b_arm "rank symbols by pagerank" 1500 either
+p1b_arm "parse command line flags" 1500 either
+p1b_arm "rank symbols by pagerank" 6000 strict
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"for","arguments":{"path":"src","task":"parse command line flags","budget_tokens":1500}}}' \
+    | ( cd "$ROOT" && "$BIN" --mcp 2>/dev/null ) | tail -1 >"$TMP/p1b.mcp"
+if grep -q '<ctx ' "$TMP/p1b.mcp"; then
+    if grep -q 'schema=\\"ripwire.for' "$TMP/p1b.mcp"; then
+        p1bbad=$(( p1bbad + 1 )); no "(P1-B) MCP for now answers in a compact dialect (schema=) — its header must face the same P1/P4 arms as the CLI's"
+    else
+        ok "(P1-B) MCP for budget_tokens=1500 on path src answers in its one (full) dialect — no compact header exists to exceed full's"
+    fi
+else
+    p1bbad=$(( p1bbad + 1 )); no "(P1-B) MCP for budget_tokens=1500 on path src produced no <ctx> answer — the sentinel proves nothing"
+fi
+[ "$p1bbad" -eq 0 ] && ok "(P1-B) the ruled exemption is pinned: its comparison, the short-root fixed arms, the scope twin and the MCP sentinel"
 
 # (P2) the default map's --token-budget gate decides on the price the default PRINTS. It used to decide on the full
 # dialect's price before the compact layer ran, so a map that fits once compacted was withheld (exit 3). Budget = the
@@ -843,6 +1054,45 @@ for tb in 850 1000 1100 1200; do
     fi
 done
 [ "$p4bad" -eq 0 ] && ok "(P4) at --token-budget 850/1000/1100/1200 the compact --for answer is inside its budget or no further over it than the full one"
+# (P4 floor twin — knob-honesty-068; orchestrator rulings 2026-10-07, PROCESS rules 4/5) A capped <sigs> under a hard ceiling
+# names the call that recovers its cut (next=) and pays for it from its rows where that makes the answer fit. At 500 tokens
+# this fixture's block is at its rank 1..4 floor in BOTH dialects and the answer is past its ceiling paid or not: no row is
+# dropped for the handle (ruling C3), it still ships, unpaid, and the overshoot is DISCLOSED — root over_ceiling="1" with the
+# unpaid clause defining it, est_tokens pricing the bytes delivered (P3's rule), and the P4 claim itself (compact no further
+# over than full). Near miss at 750: paying is what makes it fit — est_tokens <= budget in both dialects, next= rides, no
+# over_ceiling= and no unpaid clause (a label riding every capped answer would pass the 500 half alone).
+p4floor_bad=0
+for tb in 500 750; do
+    for lg in compact full; do
+        ( cd "$P4" && "$BIN" . --for="widget routine dispatcher" --token-budget=$tb --legend=$lg 2>/dev/null ) >"$TMP/p4f.$lg"
+    done
+    pc="$( grep -o 'est_tokens="[0-9]*"' "$TMP/p4f.compact" | head -1 | tr -dc '0-9' )"; pf="$( grep -o 'est_tokens="[0-9]*"' "$TMP/p4f.full" | head -1 | tr -dc '0-9' )"
+    for lg in compact full; do
+        f="$TMP/p4f.$lg"; pb="$( wc -c <"$f" | tr -d ' ' )"; pe="$( grep -o 'est_tokens="[0-9]*"' "$f" | head -1 | tr -dc '0-9' )"
+        root="$( grep -oE '^<ctx [^>]*>' "$f" | head -1 )"; sigs="$( grep -oE '<sigs [^>]*>' "$f" | tail -1 )"
+        hasnext=0; case "$sigs" in *' capped="1"'*' next="--for='*) hasnext=1;; esac
+        over=0; [ "${root#* over_ceiling=\"1\"}" != "$root" ] && over=1
+        clause=0; grep -qF '[over_ceiling=1 also when the sigs next= rides unpaid: no row is dropped to pay for it on an answer that would not fit either way]' "$f" && clause=1
+        if [ -z "$pe" ] || [ "$hasnext" -ne 1 ]; then
+            p4floor_bad=$(( p4floor_bad + 1 )); no "(P4 floor twin) --token-budget=$tb --legend=$lg: est_tokens=${pe:-?}, <sigs> next= present=$hasnext — a capped block must carry its next="
+            continue
+        fi
+        if [ "$tb" -eq 500 ]; then
+            truth=$(( pb * 100 / 250 )); floor=$(( pb * 100 / 255 )); diff=$(( pe - truth )); [ "$diff" -lt 0 ] && diff=$(( -diff ))
+            shown="$( printf '%s' "$sigs" | grep -oE ' shown="[0-9]+"' | tr -dc '0-9' )"
+            if [ "$over" -ne 1 ] || [ "$clause" -ne 1 ] || [ "${shown:-99}" -gt 4 ] || [ $(( diff * 100 )) -gt $(( truth * 12 )) ] || [ "$pe" -lt "$floor" ]; then
+                p4floor_bad=$(( p4floor_bad + 1 )); no "(P4 floor twin) --token-budget=500 --legend=$lg: over_ceiling=$over clause=$clause shown=${shown:-?} est_tokens=$pe for $pb B — the floor's unpaid next= must ride labelled and honestly priced"
+            fi
+        elif [ "$pe" -gt "$tb" ] || [ "$over" -ne 0 ] || [ "$clause" -ne 0 ]; then
+            p4floor_bad=$(( p4floor_bad + 1 )); no "(P4 floor twin) near miss --token-budget=$tb --legend=$lg: est_tokens=$pe over_ceiling=$over clause=$clause — a paid next= must fit with no label"
+        fi
+    done
+    lim=$tb; [ "${pf:-0}" -gt "$lim" ] && lim=$pf
+    if [ -z "$pc" ] || [ "$pc" -gt "$lim" ]; then
+        p4floor_bad=$(( p4floor_bad + 1 )); no "(P4 floor twin) --token-budget=$tb: compact est_tokens=${pc:-?} over the budget AND over the full answer's ${pf:-?}"
+    fi
+done
+[ "$p4floor_bad" -eq 0 ] && ok "(P4 floor twin) at 500 both dialects ship <sigs> next= unpaid at the rank 1..4 floor with over_ceiling=\"1\", the unpaid clause and an honest est_tokens, the 750 run's paid next= fits with no label, compact never further over than full"
 
 # (P5) the BUDGET LEDGER survives compaction (orchestrator rule, METHODOLOGY §9.3/§9.4: never cut silently). --pack-task's
 # full legend ends with "budget=N bytes (T-token target, ceiling C) | ranking: … | bodies: … | callers: … | notes: … | tests:
@@ -938,7 +1188,11 @@ echo
 # RE-ANCHORED 2026-09-26 (lane impact-depth-065, depth-labelled --impact): 7,500 → 7,700 B, measured 7,622 (7,495 on the
 # base binary b343b988). The loop's --impact=distance probe now carries by_depth= and d=, and its compact legend reads both
 # (+127 B, the (U) table's ripwire.impact/v1 row); the other nine verbs unmoved. Same rule: the next multiple of 100 B.
-echo "=== (L) the canonical ten-verb edit loop: compact legend bill ≤ 7,700 B (34,431 B in full on the fixture) ==="
+# RE-ANCHORED 2026-10-08 (train 26b): 7,700 → 7,800 B, measured 7,711. Attributed on this fixture by merge step: 7,622 at
+# the train's phase-A head, 7,688 with receiver evidence merged (its present-only via= readings; under the old ceiling),
+# 7,711 with lean-answers merged: +23 B, all on the --for probe, the " (absent cx/ccx/in = 0)" reading the lane pinned
+# in the ripwire.for/v1 row. The other verbs are unmoved by that step. Same rule: the next multiple of 100 B.
+echo "=== (L) the canonical ten-verb edit loop: compact legend bill ≤ 7,800 B (34,716 B in full on the fixture) ==="
 loopBytes=0; fullBytes=0
 for v in "--for=geometry distance" "--callers=distance" "--impact=distance" "--uses=distance" "--edit-check=total_area" \
          "--quality-delta" "--test-gate=geometry.cpp" "--affected=geometry.cpp" "--safe-delete=total_area" "--slice=total_area"; do
@@ -947,8 +1201,8 @@ for v in "--for=geometry distance" "--callers=distance" "--impact=distance" "--u
     b="$( leg bytes "$TMP/l.c" )"; f="$( leg bytes "$TMP/l.f" )"
     loopBytes=$(( loopBytes + b )); fullBytes=$(( fullBytes + f ))
 done
-[ "$loopBytes" -le 7700 ] && ok "(L) ten-verb loop: $loopBytes B of compact legend (full: $fullBytes B)" \
-                          || no "(L) ten-verb loop pays $loopBytes B of compact legend (> 7,700 B; full: $fullBytes B)"
+[ "$loopBytes" -le 7800 ] && ok "(L) ten-verb loop: $loopBytes B of compact legend (full: $fullBytes B)" \
+                          || no "(L) ten-verb loop pays $loopBytes B of compact legend (> 7,800 B; full: $fullBytes B)"
 
 echo
 echo "=== (M) MCP: legend:\"compact\" on edit_check answers in ≤ 900 B on a clean tree; every XML verb takes the argument, within its per-verb legend pin ==="

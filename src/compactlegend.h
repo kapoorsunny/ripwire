@@ -227,6 +227,8 @@ inline constexpr std::string_view kCompactProsePrefixes[] =
     "<!-- rank_by=",                   // --rank-by's k= semantics block
     "<!-- max_tokens=",                // --max-tokens' fit_bytes block
     "<!-- with-profile: ",             // --with-profile's heat_* block
+    "<!-- lint findings_next=",        // --lint's present-only knob-honesty-068 clause (verbs_lint.h); the lint-keyed
+                                       // findings_next completeness row restates it
     "<!-- lint nest_refused=",         // --lint's present-only #157 clause (verbs_lint.h); kCompactAttributeReadings'
                                        // lint-keyed nest_refused row restates it. NOT the bare "<!-- nest_refused=":
                                        // --skipped's own clause of that opener is kept in the default dialect.
@@ -241,6 +243,8 @@ inline constexpr std::string_view kCompactProsePrefixes[] =
     "<!-- extent_suspect=",            // the extent-honesty row reading (serialize.h kExtentSuspectRowLegend)
     "<!-- b truncated=",               // a cut --expand/pack-task body's reading (serialize.h kTruncatedBodyLegend)
     "<!-- b over_ceiling=",            // …and a past-the-budget one's (serialize.h kOverCeilingBodyLegend)
+    "<!-- via=\"name\"",               // FE-B: graphlegend.h's via="name" comments (viaNameLegendComment, kMapViaNameLegend); the
+                                       // element-qualified via rows (<s>/<c>/<e>, the <via> column) and x= restate them
     "<!-- src_cut: ",                  // --pack-top-n's cut reading (serialize.h kPackSourceCutLegend); the two src rows below
 };
 
@@ -337,7 +341,10 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "to",                "vr to= def=: the function used as a value and its definition; sites=N binding sites one to=/through= pair joins", false, "vr" },
     { "through",           "through=: the written callee this function may call it through", false, "vr" },
     { "to_value_refs",     "to_value_refs=N: to= is used as a value N times (matched by name); a run through such a slot is not a proven call and no hop here" },
-    { "value-ref-excluded", "value-ref-excluded=N: internal functions kept off because a table, field or argument holds them (matched by name, not a proven call); a floor" },
+    { "value-ref-excluded", "value-ref-excluded=N: internal functions kept off because a table, field or argument in another function or at file scope holds them (matched by name, not a proven call); a floor" },
+    // The value walk's depth cut (ingest_valuerefs.h kVrMaxDepth, graphlegend.h kValueRefsDepthLegend): absent when none.
+    { "value_refs_depth_capped", "value_refs_depth_capped=N: N files of this language family (every family on the dead-code list) nest past the value walk's 512-level cap; a value use below it is unseen, so value_refs= and every reading on it are floors" },
+    { "value_refs_depth_at", "value_refs_depth_at=: the first such cut, file:line; read the code there" },
     { "role",              "u role=value: the function is used as a VALUE there (stored or passed), matched by name; not a proven call", false, "u", MapHeaderRead::No, "value" },
     // #220 part 1: the FILE graph's gauge (graphlegend.h importsUnresolvedAttrXml), absent at zero, on the --deps/--arch/
     // --impact roots and the MCP impact twin. What it means for the numbers is the reading BESIDE it, never this row:
@@ -543,6 +550,15 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // root's attribute; a <d> signature row's tested= is the next row's. No earlier sweep saw it because the gate fixture holds
     // no test (compactlegendcheck (D31) builds the smallest tree that prints one).
     { "tested",            "<s tested=1>: a non-test row an indexed test transitively reaches (absent otherwise, never 0)", true, "s" },
+    // FE-B (test/receiverevidencecheck.sh): via="name" on a call row — graphlegend.h kViaNameLegend is the full reading. ELEMENT-
+    // and VALUE-qualified (<s>/<c>/<e> whose via= lists name), so impact's <f via="import"> importer rows never pull it in; the
+    // columnar form names it in fields= like the tested column.
+    { "via",               "via=name: the target was matched by name alone (receiver unproven); every by-name candidate in reach is listed; NOT a claim the edge is false", true, "s", MapHeaderRead::No, "name" },
+    { "via",               "<c via=\"name\">: that callee matched by name alone (receiver unproven); it does NOT mean the edge is false", true, "c", MapHeaderRead::No, "name" },
+    // FE-B: a map <c> row merging N byte-identical via=name rows (serialize.h writeMapCalleeRows) carries x=N
+    { "x",                 "<c x=N>: N same-named via=name rows merged; callees=FILE:SYM lists all", true, "c" },
+    { "via",               "<e via=name>: that edge matched by name alone (receiver unproven); NOT a claim the edge is false", true, "e", MapHeaderRead::No, "name" },
+    { "fields",            "<via> column: 1 = via=name, the row's edge matched by name alone (receiver unproven); NOT a claim the edge is false", true, "cols", MapHeaderRead::No, "via" },
     // DEPTH-LABELLED --impact (0.6.5): graph.h transitiveCallersDepth's hop per row. The <s> row prints d= run-length
     // (graph.h depthRunAttrXml: the window's first row and each depth change), the columnar form a dense <depth> column, and
     // the root by_depth= (graphlegend.h byDepthAttrXml) partitions reaches= by depth; all three are absent at reaches="0".
@@ -705,10 +721,15 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // path: src/verbs_navigate.h (the <path> root emit)
     { "from_p", "from_p=/to_p=: the definitions from= and to= were bound to", false, "path", MapHeaderRead::No, {}, "path" },   // also defines to_p=
     { "from_defs", "from_defs=/to_defs=: definitions of each name, all searched; above 1, qualify file:name", false, "path", MapHeaderRead::No, {}, "path" },   // also defines to_defs=
+    // PATH-GAP (src/pathgaps.h kPathGapsLegend), present only on a reachable=0 answer whose search met a gap. Each says what it does NOT
+    // mean in the same breath (checklist 3): not proof of no path, a row is never a hop, and which calls are not counted.
+    { "searched", "searched=N: reachable=0, but the search from from= (N symbols over resolved call edges) is INCOMPLETE: not proof of no path", false, "path", MapHeaderRead::No, {}, "path" },
+    { "gaps", "gaps=kind:N,...: calls there with no edge (declined: nothing chose a candidate; unresolved), a function handed off as a value, a call through a slot, a via=name call whose name is also defined where it has no edge (name); ambiguous and undefined-name calls not counted", true, {}, MapHeaderRead::No, {}, "path" },
+    { "gap_syms", "gap_syms=N: searched symbols carrying gaps; <gap t= n= p= gaps=> rows, nearest from= first, are where the search could not see, never a hop; gap_syms_capped=1 more than shown", false, "path", MapHeaderRead::No, {}, "path" },
     // quality-delta: src/verbs_quality.h (root emit) + src/quality.h identityDisclosure
     { "stale", "stale=N: ack ledger rows whose target no longer applies (sa rows); never gating", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
-    { "preexisting-worse", "preexisting-worse=N: regressions on symbols that existed at baseline; only these gate (when major)", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
-    { "new-symbol", "new-symbol=N: regressions on NEW code; never gate, but the debt is yours: read them", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
+    { "preexisting-worse", "preexisting-worse=N: regressions on symbols that existed at baseline; they gate when major", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
+    { "new-symbol", "new-symbol=N: findings on NEW code; new-symbol rows never gate, except defect-shape format-arity", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "register-macro-excluded", "register-macro-excluded=N: symbols kept out of dead-code as self-registering test/bench macros; a floor", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "declined-call-excluded", "declined-call-excluded=N: symbols kept out of dead-code only because a declined call may mean them; a floor", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "api-new-surface", "api-new-surface=N: new PUBLIC symbols; a count, never gates, not in regressions=", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
@@ -833,6 +854,17 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "unindexed_hits", "unindexed_hits=N: hits in off-index files, NOT in hits=/total=; listed in the trailing unindexed element", false, "grep", MapHeaderRead::No, {}, "grep" },
     { "callers", "callers=N: 1-hop distinct callers of this name, all same-named defs (a FLOOR)", true, "enc", MapHeaderRead::No, {}, "grep" },
     { "cx", "cx=N: cyclomatic complexity, max over same-named defs; absent when 0", true, "enc", MapHeaderRead::No, {}, "grep" },
+    // count-floor (src/countfloor.h): the row's own floor marker, emitted only beside evidence of a miss for THAT row.
+    { "callers_floor", "callers_floor=1: callers= may be short for this row: a declined or unbound call spelled like it, a value use, or a kind used by reading/naming it (var, class, struct, interface); not proof more callers exist; absent = no such evidence", true, "enc", MapHeaderRead::No, {}, "grep" },
+    { "floor_next", "floor_next=: the call that lists what that count could not see (the uses verb; the literal scan where reads are not indexed)", true, "enc", MapHeaderRead::No, {}, "grep" },
+    // count-floor + CALLSITE-LINE on safe-delete (src/verbs_navigate.h runSafeDelete): root markers beside the counts they qualify.
+    { "callers_floor", "callers_floor=1: callers= and impact_reaches= may be short (a declined, unbound or value use, or a kind read not called); not proof of more", false, {}, MapHeaderRead::No, {}, "safe-delete" },
+    { "uses_floor", "uses_floor=1: this kind's reads and type mentions are not indexed in this run; uses= does not count them", false, {}, MapHeaderRead::No, {}, "safe-delete" },
+    { "risk", "risk=unmodelled: nothing found, but the counts cannot see this kind's uses; next= lists them", false, "safe-delete", MapHeaderRead::No, "unmodelled", "safe-delete" },
+    { "sites_l", "c sites_l=: its call-site lines (p= is the caller's def line); not proof each binds here", true, "c", MapHeaderRead::No, {}, "safe-delete" },
+    // count-floor on the targeted lego verb (serialize.h packLego, countfloor.h implementorFloors): present-only.
+    { "implementors_floor", "implementors_floor=1: an extends clause spelled like this interface bound nowhere; implementors= may be short (not proof of another)", true, "iface", MapHeaderRead::No, {}, "lego" },
+    { "floor_next", "floor_next=: lists every extends site of the name, bound or not", true, "iface", MapHeaderRead::No, {}, "lego" },
     // layout: src/layout.h writeLayout / writeLayoutDef
     { "sym", "sym=: the aggregate name asked for", false, "layout", MapHeaderRead::No, {}, "layout" },
     { "found", "found=1: a C-family struct/class/union body was located for sym=", false, "layout", MapHeaderRead::No, {}, "layout" },
@@ -929,6 +961,9 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // 2026-10-01 freshness fix (crossref.h scanWorktree): present only on a checkout that differs from HEAD.
     { "worktree", "worktree=read|partial|unlisted: the checkout differs from HEAD (at= +dirty); each changed path is read from disk as ref=\"worktree\" rows replacing HEAD's, and on-head=/hits=/head_labels= count them; on-head= then reads the checkout, not HEAD's commit; partial = some changed path unreadable or a directory (nested repo, submodule), its HEAD rows may be stale; unlisted = git could not list the changes; either withholds complete=", false, "whereis", MapHeaderRead::No, {}, "whereis" },
     { "hits", "more hits=N: rows after this page; page on with offset=next_offset", true, "more", MapHeaderRead::No, {}, "whereis" },
+    // lean-answers lane (crossref.h WhereisListing / the tip-date hoist): each rides only the answer that carries it.
+    { "listing", "listing=defs|refs: only those kind= rows listed; under defs <refs count=N next=> counts the kind=ref rows and next= lists them; the window counts listed rows; default: defs if it lists more defs than all, else if shorter; a def the parser does not model (define_method, setattr, assignment) is a counted ref", false, "whereis", MapHeaderRead::No, {}, "whereis" },
+    { "head_date", "head_date=: a hit without tip= date= has tip= at=, date= this", false, "whereis", MapHeaderRead::No, {}, "whereis" },
     // the GREY ZONE of the same sweep: attributes the compact prose named in passing ("in/out, cx/ccx", "<g> groups") but never
     // DEFINED as name= — legendcoveragecheck's default rows hold the definitional predicate, so each gets its reading here.
     // affected: src/verbs_change.h runAffected
@@ -985,7 +1020,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // doc-drift: src/docdrift.h
     { "filter", "filter=: the path filter this run was narrowed to; docs outside it were not checked", false, "doc-drift", MapHeaderRead::No, {}, "doc-drift" },
     // whereis: src/crossref.h (the exhaustiveness claim)
-    { "complete", "complete=1: the scan read every ref AND this page lists every hit (absent: one of the two is a floor)", false, "whereis", MapHeaderRead::No, {}, "whereis" },
+    { "complete", "complete=1: the scan read every ref AND this page lists every hit (of its listing=) (absent: one of the two is a floor)", false, "whereis", MapHeaderRead::No, {}, "whereis" },
     // plan-lint: src/planlint.h
     { "file", "file=/dialect=: the plan read and whether the PLAN dialect was detected (dialect=0: nothing to lint)", false, "plan-lint", MapHeaderRead::No, {}, "plan-lint" },   // also defines dialect=
     { "cards", "cards=/ledger=: card rows found / whether the doc carries a ledger (ledger_line= names its line)", false, "plan-lint", MapHeaderRead::No, {}, "plan-lint" },   // also defines ledger=
@@ -1115,9 +1150,10 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // comment-coherence: c_coeff= is spelled only in the purpose, which does not say HIGH c_coeff is BAD (restates the name); outside this gap list.
     // quality-delta rows (src/verbs_quality.h): the row facets the purpose line does not spell, present-only.
     { "sev", "r sev=minor: a small numeric delta, counted in minor=, never gating (absent: major)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
-    { "origin", "r origin=new-symbol: the finding is on NEW code, never gating (absent: preexisting-worse)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
+    { "origin", "r origin=new-symbol: a finding on NEW code (absent: preexisting-worse)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "churn", "r churn=self|ambient: the edit modifies lines committed inside the churn window (self) or only adds/touches older ones (ambient); informational", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "idiom", "r idiom=: the recognized clone-body shape of a duplication row", true, "r", MapHeaderRead::No, {}, "quality-delta" },
+    { "defect", "r defect=: a defect-shape row's shape: format-arity (gates, any origin) or utf8-cut / dedup-first / vacuous-assert (always sev=minor)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     // --expand's bundle (src/main.cpp runDefaultMap): the ride-along note and the map it carries inside the <ctx>.
     { "note", "note=: the ranked map rides along with the payload; top-k=0 serves the payload alone", false, "ctx", MapHeaderRead::No, {}, "expand" },
     { "pr_iters", "r root= pr_iters=: the ride-along map; root= its p= base, pr_iters= PageRank iterations", true, "r", MapHeaderRead::No, {}, "expand" },   // also defines root= on <r>
@@ -1139,6 +1175,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "nest_refused", "nest_refused=K: K corpus files a pre-parse nesting guard refused; never walked, not in eligible_files= (the skipped verb names them)", false, "match", MapHeaderRead::No, {}, "match" },
     { "nest_refused", "nest_refused=K: K corpus files a pre-parse nesting guard refused; never walked, in neither eligible_files= nor skipped_files=", false, "pattern", MapHeaderRead::No, {}, "pattern" },
     { "nest_refused", "nest_refused=K: K corpus files a pre-parse nesting guard refused, corpus-wide (not narrowed to a language any rule here declares); no rule walked them (the skipped verb names them)", false, "lint", MapHeaderRead::No, {}, "lint" },
+    // knob-honesty-068: the present-only findings_next= on a floored <lint> root (its full clause is prose this dialect strips)
+    { "findings_next", "findings_next=: the call counting the floored rules' rest (count_capped=1 rules only, 10x per-rule budget)", false, "lint", MapHeaderRead::No, {}, "lint" },
     // verify: src/verbs_navigate.h (the verify root)
     { "claim", "claim=/shape=: the claim as given and its shape; from_defs=/to_defs=: defs each name resolved to", false, "verify", MapHeaderRead::No, {}, "verify" },   // also defines shape= from_defs= to_defs=
     { "hops", "hops=N: call edges on the witness path (a confirmed reach claim only)", false, "verify", MapHeaderRead::No, {}, "verify" },
@@ -2319,6 +2357,14 @@ inline CompactOutcome applyCompactDialect( std::string& doc, std::string_view hi
 {
     std::string doc( candidate );
     return applyCompactDialect( doc, hint ) == CompactOutcome::Rewritten ? doc.size() : 0;
+}
+
+// …or, where the dialect has nothing to rewrite (0 above), the candidate's own size: the bytes the compact posture
+// delivers either way. --from-trace's section ladder and --whereis's default listing (crossref.h) price with it.
+[[nodiscard]] inline std::size_t compactDeliveredBytesOrWritten( std::string_view candidate, std::string_view hint )
+{
+    const std::size_t delivered = compactDeliveredBytes( candidate, hint );
+    return delivered > 0 ? delivered : candidate.size();
 }
 
 } // namespace rw

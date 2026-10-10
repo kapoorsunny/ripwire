@@ -252,6 +252,9 @@ GATE_BUDGET_SEC = {
     "mcpframehonestycheck.sh":    900,   # 2026-09-07 (first sharded CI run 34145918269): rc=124 at 300.1 s on three of
                                          # four Linux legs' shard 2 -- "exactly the cap" again. ~150 s local; a shard
                                          # job hands it fewer neighbours to hide behind than the whole suite did.
+    "mcpreloadasancheck.sh":      1800,  # one long-lived sanitizer MCP session, 20 cycles, every answer checked against a one-shot CLI run
+                                         # (a few hundred of them); its own wall-clock cap is 1500 s (RIPWIRE_GATE_SESSION_CAP_SEC), this is
+                                         # the hang tripwire above it. Idle local wall time is in the lane report, not here.
     "knownitemcheck.sh":          900,   # 2026-09-05: --eval-retrieval stopped sampling 150 symbols in PATH order and
                                          # now grades its whole population exhaustively (the sampler measured the corpus,
                                          # not the ranker -- docs/EVALS.md section 7). The gate runs it twice on src/ for
